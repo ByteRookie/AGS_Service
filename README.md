@@ -7,15 +7,13 @@ AGS Service is a custom Home Assistant integration designed to manage and group 
 The integration creates four sensors and a switch for each room:
 
 - Sensors:
-  - `<name> Configured Rooms`: This sensor lists all the rooms configured in the AGS Service.
-  - `<name> Active Rooms`: This sensor lists the active rooms based on the state of the room switch and home audio status.
-  - `<name> Active Speakers`: This sensor lists the speaker devices in the active rooms.
-  - `<name> Inactive Speakers`: This sensor lists the speaker devices not in active rooms.
+  - `AGS Service Configured Rooms`: This sensor lists all the rooms configured in the AGS Service.
+  - `AGS Service Active Rooms`: This sensor lists the active rooms based on the state of the room switch and home audio status.
+  - `AGS Service Active Speakers`: This sensor lists the speaker devices in the active rooms.
+  - `AGS Service Inactive Speakers`: This sensor lists the speaker devices not in active rooms.
 
 - Switches:
-  - `Room Name <name>`: This switch allows you to manually control whether a room is active or not.
-
-In these names, `<name>` is replaced by the value of the `name` configuration option, if it's provided. If it's not provided, it defaults to "AGS Service".
+  - `(Room Name) Media`: This switch allows you to manually control whether a room is active or not. A switch is automatically created for each room configured in the AGS Service.
 
 ## File Structure
 
@@ -42,29 +40,20 @@ The integration is configured via `configuration.yaml`. Here's an example config
 
 ```yaml
 ags_service:
-  name: "My Custom Name"  
   rooms:
     - room: "Room 1"
       devices:
-        - device_id: "media_player.room1_tv"
+        - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-        - device_id: "media_player.room1_speaker"
+        - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
-          override_content: "x-sonos-vli:RINCON_12345678901234500:3,bluetooth"
     - room: "Room 2"
       devices:
-        - device_id: "media_player.room2_tv"
+        - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
-        - device_id: "media_player.room2_speaker"
+        - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
-```
-
-Each configuration entry has an optional `name` which is used in the names of the sensors and switches. Each `room` has a name and a list of `devices`. A `device` is identified by its `device_id`, `device_type` (either 'tv' or 'speaker'), and `priority` (an integer to specify the priority of the device). Optionally, a device can have an `override_content` which is a string.
-
-## Note
-
-Please replace `"media_player.room1_tv"`, `"media_player.room1_speaker"`, `"media_player.room2_tv"`, and `"media_player.room2_speaker"` with the actual entity IDs of your devices in Home Assistant.
