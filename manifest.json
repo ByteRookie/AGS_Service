@@ -1,0 +1,9 @@
+{
+  "domain": "ags_service",
+  "name": "Auto Grouping Speaker Service (AGS)",
+  "documentation": "https://www.example.com",
+  "dependencies": [],
+  "codeowners": [],
+  "requirements": [],
+  "version": "1.0.0"
+}
