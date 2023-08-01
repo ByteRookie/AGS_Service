@@ -54,7 +54,13 @@ To install the AGS Service integration, follow these steps:
 3. Add the configuration details to your `configuration.yaml` file (see the Configuration section below for more information).
 4. Restart Home Assistant.
 
+
+
 ## Configuration
+
+In the example configuration below, Source_selector is the entity ID of the input selector that is used to control the source of the AGS Service. The Sources list contains two sources, Spotify and Radio. The Source of each source corresponds to a state of the input selector and the Source_Value is the corresponding state for the AGS Source sensor. The 'Source_Value' is the media source that is sent to the speaker to play.
+
+Each room is configured with a list of devices. The device_id is the entity ID of the device in Home Assistant, the device_type is either 'tv' or 'speaker', and the priority is a numerical value that defines the order of the devices. The lower the number, the higher the priority. The priority is used to determine the preferred primary speaker.
 
 The integration is configured via `configuration.yaml`. Here's an example configuration:
 
@@ -84,6 +90,4 @@ ags_service:
           device_type: "speaker"
           priority: 4
 
-In the example configuration above, Source_selector is the entity ID of the input selector that is used to control the source of the AGS Service. The Sources list contains two sources, Spotify and Radio. The Source of each source corresponds to a state of the input selector and the Source_Value is the corresponding state for the AGS Source sensor. The 'Source_Value' is the media source that is sent to the speaker to play.
 
-Each room is configured with a list of devices. The device_id is the entity ID of the device in Home Assistant, the device_type is either 'tv' or 'speaker', and the priority is a numerical value that defines the order of the devices. The lower the number, the higher the priority. The priority is used to determine the preferred primary speaker.
