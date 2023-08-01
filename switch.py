@@ -15,9 +15,11 @@ def setup_platform(
 ) -> None:
     """Set up the switch platform."""
     # Retrieve the room information from the shared data
-    rooms = hass.data['ags_service']
+    ags_config = hass.data['ags_service']
+    rooms = ags_config['rooms']
+
     # Add the switch entities
-    add_entities([RoomSwitch(room) for room in rooms])
+    add_entities([RoomSwitch(room) for room in rooms] + [MediaSystemSwitch()])
 
 class RoomSwitch(SwitchEntity):
     """Representation of a Switch for each Room."""
@@ -28,6 +30,25 @@ class RoomSwitch(SwitchEntity):
         self._attr_name = f"{room['room']} Media"
         self._attr_is_on = False
         self._attr_unique_id = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+
+    @property
+    def is_on(self):
+        """Return true if the switch is on."""
+        return self._attr_is_on
+
+    def turn_on(self, **kwargs):
+        """Turn the switch on."""
+        self._attr_is_on = True
+
+    def turn_off(self, **kwargs):
+        """Turn the switch off."""
+        self._attr_is_on = False
+
+class MediaSystemSwitch(SwitchEntity):
+    """Representation of a Switch for the Media System."""
+
+    _attr_name = "Media System"
+    _attr_unique_id = "switch.media_system"
 
     @property
     def is_on(self):
