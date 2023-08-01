@@ -2,6 +2,8 @@
 
 AGS Service is a custom Home Assistant integration designed to manage and group audio devices in different rooms. It allows you to configure speakers and rooms, and it automatically updates the groups based on the state of the speakers and the rooms. This integration has been designed and tested with Sonos speakers and LG TVs but may work with other devices supported by Home Assistant.
 
+Project is still missing Automation file to responde to sensors. Once uploaded you will be able to use AGS to automaticly have your music or any media follow you with your automation. Using any presence detection solution you have tie them to the room switches that are automaticly created by this tool. 
+
 ## Features
 
 The integration creates multiple sensors and switches for each room:
