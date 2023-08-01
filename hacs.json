@@ -1,0 +1,9 @@
+{
+    "name": "Auto Grouping Speaker Service (AGS)",
+    "domains": ["switch", "sensor"],
+    "documentation": "https://github.com/ByteRookie/AGS_Service",
+    "issue_tracker": "https://github.com/ByteRookie/AGS_Service/issues",
+    "categories": ["Automation"],
+    "iot_class": "Local Push"
+}
+
