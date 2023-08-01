@@ -5,6 +5,6 @@
     "issue_tracker": "https://github.com/ByteRookie/AGS_Service/issues",
     "categories": ["Automation"],
     "iot_class": "Local Push",
-    "render_readme": "true" 
+    "render_readme": true
 }
 
