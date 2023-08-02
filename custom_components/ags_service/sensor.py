@@ -139,7 +139,7 @@ class ActiveSpeakersSensor(SensorEntity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        ags_status_entity = self.hass.states.get('sensor.ags_status')
+        ags_status_entity = self.hass.states.get('switch.media_system')
         if ags_status_entity is not None and ags_status_entity.state == 'off':
             active_speakers = []
         else:
@@ -166,7 +166,7 @@ class InactiveSpeakersSensor(SensorEntity):
     def state(self):
         """Return the state of the sensor."""
         # The state is a list of speaker devices not in active rooms
-        ags_status_entity = self.hass.states.get('sensor.ags_status')
+        ags_status_entity = self.hass.states.get('switch.media_system')
         if ags_status_entity is not None and ags_status_entity.state == 'off':
             all_speakers = [device['device_id'] for room in self.rooms for device in room['devices'] if device['device_type'] == 'speaker']
             self._state = all_speakers
