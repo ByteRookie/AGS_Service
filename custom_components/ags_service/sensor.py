@@ -42,8 +42,19 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     "switch.media_system",
 
     ]
+
+
     entities_to_track = ['zone.home']
     entities_to_track.extend(sensor_entity_ids)
+    
+    # Get Source_selector from ags_config
+    source_selector = ags_config['Source_selector']
+
+    # Now, append this source_selector to the entities_to_track list
+    entities_to_track.append(source_selector)
+
+    # Your code continues...
+
     for room in rooms:
         entities_to_track.append(f"switch.{room['room'].lower().replace(' ', '_')}_media")
         for device in room['devices']:
@@ -263,6 +274,7 @@ class PrimarySpeakerSensor(SensorEntity):
         # If none of the conditions are met, the primary speaker is 'none'
         return "none"
 
+
 class PreferredPrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
 
@@ -295,10 +307,10 @@ class PreferredPrimarySpeakerSensor(SensorEntity):
 class AGSSourceSensor(SensorEntity):
     """Representation of a Sensor."""
 
-    def __init__(self, hass, config):
+    def __init__(self, ags_config, hass):
         """Initialize the sensor."""
         self._state = None
-        self.config = config
+        self.config = ags_config
         self.hass = hass
         self._attr_name = "AGS Source"
 

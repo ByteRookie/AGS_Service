@@ -24,9 +24,6 @@ action:
   - choose:
       - conditions:
           - condition: state
-            entity_id: sensor.ags_primary_speaker
-            state: none
-          - condition: state
             entity_id: sensor.ags_status
             state: ON TV
         sequence:
