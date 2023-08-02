@@ -258,7 +258,7 @@ class PrimarySpeakerSensor(SensorEntity):
                                 if speaker_state is not None and speaker_state.attributes.get('source') == 'TV' and speaker_state.attributes.get('group_members')[0] == speaker_in_same_room['device_id']:
                                     return speaker_in_same_room['device_id']
                             return device['device_id']
-                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state != 'off' and device_state.attributes.get('group_members')[0] == device['device_id']:
+                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
                             return device['device_id']
         # If none of the conditions are met, the primary speaker is 'none'
         return "none"
