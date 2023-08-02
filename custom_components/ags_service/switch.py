@@ -1,4 +1,3 @@
-"""Platform for switch integration."""
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
@@ -19,7 +18,7 @@ def setup_platform(
     rooms = ags_config['rooms']
 
     # Add the switch entities
-    add_entities([RoomSwitch(room) for room in rooms] + [MediaSystemSwitch()])
+    add_entities([RoomSwitch(hass, room) for room in rooms] + [MediaSystemSwitch(hass)])
 
 class RoomSwitch(SwitchEntity):
     """Representation of a Switch for each Room."""
@@ -63,6 +62,7 @@ class MediaSystemSwitch(SwitchEntity):
 
     def __init__(self, hass):
         """Initialize the switch."""
+        self.hass = hass
         # Check if the state is already stored in hass.data
         if 'switch_media_system_state' in hass.data:
             self._attr_is_on = hass.data['switch_media_system_state']

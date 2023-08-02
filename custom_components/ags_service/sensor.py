@@ -17,7 +17,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     ags_config = hass.data['ags_service']
     rooms = ags_config['rooms']
     sensors = [
-        ConfiguredRoomsSensor(rooms), 
+        ConfiguredRoomsSensor(rooms, hass), 
         ActiveRoomsSensor(rooms, hass), 
         ActiveSpeakersSensor(rooms, hass),
         InactiveSpeakersSensor(rooms, hass),
@@ -53,7 +53,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Now, append this source_selector to the entities_to_track list
     entities_to_track.append(source_selector)
 
-    # Your code continues...
+  
 
     for room in rooms:
         entities_to_track.append(f"switch.{room['room'].lower().replace(' ', '_')}_media")
@@ -192,8 +192,8 @@ class InactiveSpeakersSensor(SensorEntity):
             all_speakers = [device['device_id'] for room in self.rooms for device in room['devices'] if device['device_type'] == 'speaker']
             self._state = all_speakers
         else:
-            active_rooms_entity = self.hass.states.get('sensor.ags_active_rooms')
-            active_rooms = active_rooms_entity.state if active_rooms_entity is not None else None
+            active_rooms_entity = self.hass.data.get('active_rooms')
+            active_rooms = active_rooms_entity if active_rooms_entity is not None else None
             inactive_speakers = [] if active_rooms is None else [device['device_id'] for room in self.rooms for device in room['devices'] if room['room'] not in active_rooms and device['device_type'] == 'speaker' and self.hass.states.get(device['device_id']) and self.hass.states.get(device['device_id']).state != 'on']
             self._state = inactive_speakers
 
@@ -230,8 +230,11 @@ class AGSStatusSensor(SensorEntity):
                         if device['device_type'] == 'tv' and self.hass.states.get(device['device_id']) is not None and self.hass.states.get(device['device_id']).state != 'off':
                             ags_status = "ON TV"
                             break
+                    else:
+                        continue  # This will skip the 'else' clause if an active TV is found
+                    break  # This will break the outer loop if an active TV is found
                 else:
-                    ags_status = "ON"
+                    ags_status = "ON"  # This will only execute if the outer loop completes without finding an active TV
             else:
                 override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
                 for device in override_devices:
@@ -263,14 +266,14 @@ class PrimarySpeakerSensor(SensorEntity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        ags_status = self.hass.states.get('sensor.ags_status')
-        active_rooms_entity = self.hass.states.get('sensor.ags_active_rooms')
-        active_rooms = active_rooms_entity.state if active_rooms_entity is not None else None
+        ags_status = self.hass.data.get('ags_status')
+        active_rooms_entity = self.hass.data.get('active_rooms')
+        active_rooms = active_rooms_entity if active_rooms_entity is not None else None
         if ags_status is None:
             primary_speaker = None
-        elif ags_status.state == 'off':
+        elif ags_status == 'off':
             primary_speaker = ""
-        elif ags_status.state == 'Override':
+        elif ags_status == 'Override':
             override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
             for device in override_devices:
                 device_state = self.hass.states.get(device['device_id'])
@@ -343,6 +346,34 @@ class PreferredPrimarySpeakerSensor(SensorEntity):
         self.hass.data['preferred_primary_speaker'] = preferred_primary_speaker
 
         return preferred_primary_speaker
+
+class AGSSourceSensor(SensorEntity):
+    """Representation of a Sensor."""
+
+    def __init__(self, ags_config, hass):
+        """Initialize the sensor."""
+        self.config = ags_config
+        self.hass = hass
+        self._attr_name = "AGS Source"
+
+        # Initialize the state in hass.data
+        self.hass.data['ags_source'] = ""
+
+    @property
+    def state(self):
+        """Return the state of the sensor."""
+        ags_status_state = self.hass.data.get('ags_status')
+        if ags_status_state is not None:
+            if ags_status_state == 'ON TV':
+                self.hass.data['ags_source'] = "TV"
+            elif ags_status_state == 'ON':
+                source_selector_state = self.hass.states.get(self.config['Source_selector'])
+                if source_selector_state is not None:
+                    for source in self.config['Sources']:
+                        if source['Source'] == source_selector_state.state:
+                            self.hass.data['ags_source'] = source['Source_Value']
+                            break
+        return self.hass.data['ags_source']
 
 class AGSInactiveTVSpeakersSensor(SensorEntity):
     """Representation of a Sensor."""
