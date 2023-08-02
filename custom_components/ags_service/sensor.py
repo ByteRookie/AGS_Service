@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(seconds=10)
+SCAN_INTERVAL = timedelta(seconds=15)
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
@@ -39,15 +39,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     # List of entity ids to track
     sensor_entity_ids = [
-    "sensor.configured_rooms",
-    "sensor.active_rooms",
-    "sensor.active_speakers",
-    "sensor.inactive_speakers",
-    "sensor.ags_status",
-    "sensor.primary_speaker",
-    "sensor.preferred_primary_speaker",
-    "sensor.ags_source",
-    "sensor.ags_inactive_tv_speakers",
+    "switch.media_system",
+
     ]
     entities_to_track = ['zone.home']
     entities_to_track.extend(sensor_entity_ids)
