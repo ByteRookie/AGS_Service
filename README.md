@@ -82,7 +82,7 @@ sources: The sources of audio that can be selected. The keys in this object shou
 
 A key aspect of the AGS Service is its automation capabilities. The AGS Service is primarily an orchestrator, managing the state of the speakers and rooms. However, to influence the physical state of your audio devices based on the sensor values provided by the AGS Service, you must set up the appropriate automations. Without these, the AGS Service would merely provide sensor readings.
 
-An automation example is provided in the [AGS Automation Example](URL here). simply copy and past it into your new automation and it should work as is. 
+An automation example is provided in the AGS Automation Example.yaml (https://github.com/ByteRookie/AGS_Service/blob/main/AGS%20Automation%20Exmaple.yaml). simply copy and past it into your new automation and it should work as is. 
 
 ##Sensor Logic
 
