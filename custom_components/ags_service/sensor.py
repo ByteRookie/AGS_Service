@@ -239,7 +239,7 @@ class AGSStatusSensor(SensorEntity):
                 override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
                 for device in override_devices:
                     device_state = self.hass.states.get(device['device_id'])
-                    if device_state is not None and device_state.attributes.get('media_content_id') == device['override_content']:
+                    if device_state is not None and device['override_content'] in device_state.attributes.get('media_content_id', ''):
                         ags_status = "Override"
                         break
                 else:
@@ -269,47 +269,38 @@ class PrimarySpeakerSensor(SensorEntity):
         ags_status = self.hass.data.get('ags_status')
         active_rooms_entity = self.hass.data.get('active_rooms')
         active_rooms = active_rooms_entity if active_rooms_entity is not None else None
-        if ags_status is None:
-            primary_speaker = None
+        primary_speaker = "none"
+
+        if ags_status == 'Override':
+            override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
+            primary_speaker = next((device['device_id'] for device in override_devices if device['override_content'] in self.hass.states.get(device['device_id']).attributes.get('media_content_id', '')), "none")
+
         elif ags_status == 'off':
             primary_speaker = ""
-        elif ags_status == 'Override':
-            override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
-            for device in override_devices:
-                device_state = self.hass.states.get(device['device_id'])
-                if device_state is not None and device_state.attributes.get('media_content_id') == device['override_content']:
-                    primary_speaker = device['device_id']
-                    break
-            else:
-                primary_speaker = "none"
-        else:
+
+        elif ags_status is not None:
             for room in self.rooms:
                 if active_rooms is not None and room['room'] in active_rooms:
                     sorted_devices = sorted(room["devices"], key=lambda x: x['priority'])
                     for device in sorted_devices:
                         device_state = self.hass.states.get(device['device_id'])
                         if device['device_type'] == 'tv' and device_state is not None and device_state.state != 'off':
-                            speaker_in_same_room = next((d for d in sorted_devices if d['device_type'] == 'speaker'), None)
-                            if speaker_in_same_room is not None:
-                                speaker_state = self.hass.states.get(speaker_in_same_room['device_id'])
-                                if speaker_state is not None and speaker_state.attributes.get('source') == 'TV' and speaker_state.attributes.get('group_members')[0] == speaker_in_same_room['device_id']:
-                                    primary_speaker = speaker_in_same_room['device_id']
-                                    break
+                            # Logic for TVs
                             primary_speaker = device['device_id']
                             break
-                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
+                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id'] and device_state.attributes.get('source') != 'TV':
+                            # Logic for speakers excluding those with source 'TV'
                             primary_speaker = device['device_id']
                             break
                     else:
                         continue
                     break
-            else:
-                primary_speaker = "none"
 
         # Write the primary speaker's state to hass.data
         self.hass.data['primary_speaker'] = primary_speaker
 
         return primary_speaker
+
 
 
 
