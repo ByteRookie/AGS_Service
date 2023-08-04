@@ -64,11 +64,13 @@ ags_service:
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
-  source_selector: "input_select.ags_source"
-  sources:
-    TV: "TV"
-    Music: "Music"
-    Radio: "Radio"
+  Source_selector: "input_select.station"
+  Sources:
+    - Source: "Top Hit"
+      Source_Value: "2/11"
+    - Source: "Chill"
+      Source_Value: "2/12"
+    - Source: "Alternative"
   
 
 ```
