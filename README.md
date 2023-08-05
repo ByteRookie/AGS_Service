@@ -45,6 +45,10 @@ To install the AGS Service integration, follow these steps:
 
 The integration is configured via `configuration.yaml`. Here's an example configuration:
 
+New optional Value of disable_zone and override_content.
+disable_zone If set to True it will disable logic looking at zone.home 
+override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
+
 ```yaml
 ags_service:
   rooms:
