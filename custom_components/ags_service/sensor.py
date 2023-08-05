@@ -21,7 +21,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         ActiveRoomsSensor(rooms, hass), 
         ActiveSpeakersSensor(rooms, hass),
         InactiveSpeakersSensor(rooms, hass),
-        AGSStatusSensor(hass, rooms),
+        AGSStatusSensor(ags_config, hass),
         PrimarySpeakerSensor(rooms, hass),
         PreferredPrimarySpeakerSensor(rooms, hass),
         AGSSourceSensor(ags_config, hass),
@@ -208,9 +208,12 @@ class InactiveSpeakersSensor(SensorEntity):
 
 
 class AGSStatusSensor(SensorEntity):
-    def __init__(self, hass, rooms):
-        self.rooms = rooms
+    def __init__(self, ags_config, hass):
+        """Initialize the sensor."""
+        self.ags_config = ags_config
+        self.rooms = self.ags_config['rooms']
         self.hass = hass
+
 
     @property
     def unique_id(self):
@@ -221,10 +224,11 @@ class AGSStatusSensor(SensorEntity):
         return "AGS Status"
 
     @property
+
     def state(self):
-        # Check if the state of 'zone.home' is '0'
-        if self.hass.states.get('zone.home').state == '0':
-            ags_status = "OFF"
+        # Check if the disable_zone is False and the state of 'zone.home' is '0'
+        if not self.ags_config.get('disable_zone', False) and self.hass.states.get('zone.home').state == '0':
+            ags_status = "OFF"   
         else:
             media_system_state = self.hass.data.get('switch_media_system_state')
             if media_system_state is None:
@@ -254,6 +258,7 @@ class AGSStatusSensor(SensorEntity):
         self.hass.data['ags_status'] = ags_status
 
         return ags_status
+
 
 
 
@@ -287,16 +292,19 @@ class PrimarySpeakerSensor(SensorEntity):
             for room in self.rooms:
                 if active_rooms is not None and room['room'] in active_rooms:
                     sorted_devices = sorted(room["devices"], key=lambda x: x['priority'])
+                    tv_on = False
                     for device in sorted_devices:
                         device_state = self.hass.states.get(device['device_id'])
                         if device['device_type'] == 'tv' and device_state is not None and device_state.state != 'off':
-                            # Logic for TVs
-                            primary_speaker = device['device_id']
+                            tv_on = True
                             break
-                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id'] and device_state.attributes.get('source') != 'TV':
-                            # Logic for speakers excluding those with source 'TV'
-                            primary_speaker = device['device_id']
-                            break
+
+                    for device in sorted_devices:
+                        device_state = self.hass.states.get(device['device_id'])
+                        if device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
+                            if tv_on or (not tv_on and device_state.attributes.get('source') != 'TV'):
+                                primary_speaker = device['device_id']
+                                break
                     else:
                         continue
                     break
@@ -305,9 +313,6 @@ class PrimarySpeakerSensor(SensorEntity):
         self.hass.data['primary_speaker'] = primary_speaker
 
         return primary_speaker
-
-
-
 
 
 class PreferredPrimarySpeakerSensor(SensorEntity):
