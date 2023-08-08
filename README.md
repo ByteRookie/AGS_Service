@@ -61,8 +61,12 @@ override_content can be used to override media status if a device content ID con
 
 primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker. 
 
+this has all features: 
+
 ```yaml
 ags_service:
+  primary_delay: 5
+  disable_zone: true
   rooms:
     - room: "Room 1"
       devices:
@@ -77,6 +81,7 @@ ags_service:
         - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
+          override_content:"bluetooth"
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
