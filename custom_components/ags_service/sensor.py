@@ -2,13 +2,14 @@
 from __future__ import annotations
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(seconds=15)
+SCAN_INTERVAL = timedelta(seconds=10)
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
+import asyncio
 # Setup platform function
 from homeassistant.helpers.event import async_track_state_change
 
@@ -21,8 +22,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         ActiveRoomsSensor(rooms, hass), 
         ActiveSpeakersSensor(rooms, hass),
         InactiveSpeakersSensor(rooms, hass),
-        AGSStatusSensor(hass, rooms),
-        PrimarySpeakerSensor(rooms, hass),
+        AGSStatusSensor(ags_config, hass),
+        PrimarySpeakerSensor(ags_config, hass),
         PreferredPrimarySpeakerSensor(rooms, hass),
         AGSSourceSensor(ags_config, hass),
         AGSInactiveTVSpeakersSensor(rooms, hass)
@@ -40,6 +41,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # List of entity ids to track
     sensor_entity_ids = [
     "switch.media_system",
+    "sensor.ags_status"
 
     ]
 
@@ -156,7 +158,10 @@ class ActiveSpeakersSensor(SensorEntity):
     def state(self):
         """Return the state of the sensor."""
         ags_status = self.hass.data.get('switch_media_system_state', 'off')
-        if ags_status == 'off':
+        ags_system_status = self.hass.data.get('ags_status', 'OFF')
+
+        # Check if AGS system status is 'OFF', return an empty list
+        if ags_system_status == 'OFF' or ags_status == 'off':
             active_speakers = []
         else:
             active_rooms = self.hass.data.get('active_rooms', [])
@@ -184,11 +189,11 @@ class InactiveSpeakersSensor(SensorEntity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        # Retrieve the media system state from hass.data
-        media_system_state = self.hass.data.get('switch_media_system_state', 'off')
+        # Retrieve the AGS status from hass.data
+        ags_status = self.hass.data.get('ags_status', 'OFF')
 
         # The state is a list of speaker devices not in active rooms
-        if media_system_state == 'off':
+        if ags_status == 'OFF':
             all_speakers = [device['device_id'] for room in self.rooms for device in room['devices'] if device['device_type'] == 'speaker']
             self._state = all_speakers
         else:
@@ -202,10 +207,14 @@ class InactiveSpeakersSensor(SensorEntity):
 
         return self._state
 
+
 class AGSStatusSensor(SensorEntity):
-    def __init__(self, hass, rooms):
-        self.rooms = rooms
+    def __init__(self, ags_config, hass):
+        """Initialize the sensor."""
+        self.ags_config = ags_config
+        self.rooms = self.ags_config['rooms']
         self.hass = hass
+
 
     @property
     def unique_id(self):
@@ -216,10 +225,11 @@ class AGSStatusSensor(SensorEntity):
         return "AGS Status"
 
     @property
+
     def state(self):
-        # Check if the state of 'zone.home' is '0'
-        if self.hass.states.get('zone.home').state == '0':
-            ags_status = "OFF"
+        # Check if the disable_zone is False and the state of 'zone.home' is '0'
+        if not self.ags_config.get('disable_zone', False) and self.hass.states.get('zone.home').state == '0':
+            ags_status = "OFF"   
         else:
             media_system_state = self.hass.data.get('switch_media_system_state')
             if media_system_state is None:
@@ -239,7 +249,7 @@ class AGSStatusSensor(SensorEntity):
                 override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
                 for device in override_devices:
                     device_state = self.hass.states.get(device['device_id'])
-                    if device_state is not None and device_state.attributes.get('media_content_id') == device['override_content']:
+                    if device_state is not None and device['override_content'] in device_state.attributes.get('media_content_id', ''):
                         ags_status = "Override"
                         break
                 else:
@@ -252,66 +262,94 @@ class AGSStatusSensor(SensorEntity):
 
 
 
+
+
 class PrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
 
-    def __init__(self, rooms, hass):
+    def __init__(self, ags_config, hass):
         """Initialize the sensor."""
+        self.ags_config = ags_config
         self._state = None
-        self.rooms = rooms
+        self.rooms = self.ags_config['rooms']
         self.hass = hass
         self._attr_name = "AGS Primary Speaker"
         self._attr_unique_id = "ags_primary_speaker"
+        self._debounce_task = None  # Store the debounce task
+        self.primary_delay = self.ags_config.get('primary_delay', 5)
 
     @property
     def state(self):
         """Return the state of the sensor."""
+        primary_speaker = self._primary_speaker_logic()
+
+        if primary_speaker == "none" and self._debounce_task is None:
+            self._debounce_task = asyncio.create_task(self._debounce_check())
+
+        elif primary_speaker != "none":
+            if self._debounce_task:
+                self._debounce_task.cancel()
+                self._debounce_task = None
+            self._state = primary_speaker
+
+        # Write the primary speaker's state to hass.data
+        self.hass.data['primary_speaker'] = self._state
+
+        return self._state
+
+    async def _debounce_check(self):
+        await asyncio.sleep(self.primary_delay)  # wait for primary_delay or 5 sec
+        if self._primary_speaker_logic() == "none":
+            self._state = "none"
+            self.hass.data['primary_speaker'] = "none"
+            self.async_schedule_update_ha_state()
+        self._debounce_task = None
+
+    def _primary_speaker_logic(self):
+        """This method contains the logic to determine the primary speaker."""
         ags_status = self.hass.data.get('ags_status')
         active_rooms_entity = self.hass.data.get('active_rooms')
         active_rooms = active_rooms_entity if active_rooms_entity is not None else None
-        if ags_status is None:
-            primary_speaker = None
-        elif ags_status == 'off':
-            primary_speaker = ""
-        elif ags_status == 'Override':
+        primary_speaker = "none"
+
+        if ags_status == 'Override':
             override_devices = sorted([device for room in self.rooms for device in room['devices'] if 'override_content' in device], key=lambda x: x['priority'])
-            for device in override_devices:
-                device_state = self.hass.states.get(device['device_id'])
-                if device_state is not None and device_state.attributes.get('media_content_id') == device['override_content']:
-                    primary_speaker = device['device_id']
-                    break
-            else:
-                primary_speaker = "none"
-        else:
+            primary_speaker = next((device['device_id'] for device in override_devices if device['override_content'] in self.hass.states.get(device['device_id']).attributes.get('media_content_id', '')), "none")
+
+        elif ags_status == 'OFF':
+            primary_speaker = ""
+
+        elif ags_status is not None:
             for room in self.rooms:
+                sorted_devices = []  # Ensure sorted_devices is always defined
                 if active_rooms is not None and room['room'] in active_rooms:
                     sorted_devices = sorted(room["devices"], key=lambda x: x['priority'])
+                    tv_on = False
                     for device in sorted_devices:
                         device_state = self.hass.states.get(device['device_id'])
                         if device['device_type'] == 'tv' and device_state is not None and device_state.state != 'off':
-                            speaker_in_same_room = next((d for d in sorted_devices if d['device_type'] == 'speaker'), None)
-                            if speaker_in_same_room is not None:
-                                speaker_state = self.hass.states.get(speaker_in_same_room['device_id'])
-                                if speaker_state is not None and speaker_state.attributes.get('source') == 'TV' and speaker_state.attributes.get('group_members')[0] == speaker_in_same_room['device_id']:
-                                    primary_speaker = speaker_in_same_room['device_id']
+                            tv_on = True
+                            break
+
+                    if sorted_devices:  # Check that sorted_devices is not empty
+                        for device in sorted_devices:
+                            device_state = self.hass.states.get(device['device_id'])
+                            if device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members') and device_state.attributes.get('group_members')[0] == device['device_id']:
+                                source = device_state.attributes.get('source')
+                                if tv_on or (not tv_on and (source is None or source != 'TV')):
+                                    primary_speaker = device['device_id']
                                     break
-                            primary_speaker = device['device_id']
-                            break
-                        elif device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
-                            primary_speaker = device['device_id']
-                            break
-                    else:
-                        continue
-                    break
-            else:
-                primary_speaker = "none"
 
         # Write the primary speaker's state to hass.data
         self.hass.data['primary_speaker'] = primary_speaker
 
         return primary_speaker
 
-
+    async def async_will_remove_from_hass(self):
+        """Run when entity will be removed from hass."""
+        if self._debounce_task:
+            self._debounce_task.cancel()
+            self._debounce_task = None
 
 
 class PreferredPrimarySpeakerSensor(SensorEntity):

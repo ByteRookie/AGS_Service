@@ -16,6 +16,8 @@ CONF_DEVICE_ID = 'device_id'
 CONF_DEVICE_TYPE = 'device_type'
 CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
+CONF_DISABLE_ZONE = 'disable_zone'
+CONF_PRIMARY_DELAY = 'primary_delay'  
 
 # Define the configuration schema for a device
 DEVICE_SCHEMA = vol.Schema({
@@ -54,22 +56,27 @@ DEVICE_SCHEMA = vol.Schema({
             )
         ],
     ),
+    vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
+    vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
 })
 
 async def async_setup(hass, config):
     """Set up the custom component."""
+    
+    ags_config = config[DOMAIN]
 
-
-    hass.data['ags_service'] = {
-        'rooms': config['ags_service']['rooms'],
-        'Source_selector': config['ags_service']['Source_selector'],
-        'Sources': config['ags_service']['Sources']
+    hass.data[DOMAIN] = {
+        'rooms': ags_config['rooms'],
+        'Source_selector': ags_config['Source_selector'],
+        'Sources': ags_config['Sources'],
+        'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
+        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5)  
     }
     ...
-
 
     # Load the sensor and switch platforms and pass the configuration to them
     await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
     await async_load_platform(hass, 'switch', DOMAIN, {}, config)
+    await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 
     return True
