@@ -81,7 +81,7 @@ ags_service:
         - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
-          override_content:"bluetooth"
+          override_content: "bluetooth"
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
