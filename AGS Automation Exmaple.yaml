@@ -1,20 +1,13 @@
-alias: AGS Service Automation
-description: ""
+alias: AGS Automation
+description: Automation that is required in order to make AGS Service function
 trigger:
   - platform: state
     entity_id:
       - sensor.ags_active_speakers
   - platform: state
     entity_id:
-      - sensor.ags_inactive_speakers
+      - sensor.ags_primary_speaker
     to: none
-    for:
-      hours: 0
-      minutes: 0
-      seconds: 5
-  - platform: state
-    entity_id:
-      - sensor.ags_status
   - platform: state
     entity_id:
       - sensor.ags_source
@@ -23,6 +16,10 @@ condition: []
 action:
   - choose:
       - conditions:
+          - condition: state
+            entity_id: sensor.ags_primary_speaker
+            state: none
+            enabled: true
           - condition: state
             entity_id: sensor.ags_status
             state: ON TV
@@ -34,6 +31,7 @@ action:
               entity_id: "{{ states('sensor.ags_preferred_primary')}}"
           - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
             continue_on_timeout: true
+            enabled: false
       - conditions:
           - condition: state
             entity_id: sensor.ags_primary_speaker
@@ -47,9 +45,11 @@ action:
               media_content_type: favorite_item_id
           - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
             continue_on_timeout: true
+            enabled: false
       - conditions:
           - condition: trigger
             id: Station change
+            enabled: true
         sequence:
           - service: media_player.play_media
             target:
@@ -59,6 +59,7 @@ action:
               media_content_type: favorite_item_id
           - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
             continue_on_timeout: true
+            enabled: false
     default: []
     alias: Select Source Matrix
   - if:
@@ -115,5 +116,4 @@ action:
         target:
           entity_id: "{{ states('sensor.ags_inactive_tv_speakers') }}"
     alias: Reset TV Speakers to TV after
-mode: queued
-max: 10
+mode: restart

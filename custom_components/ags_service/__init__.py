@@ -17,6 +17,7 @@ CONF_DEVICE_TYPE = 'device_type'
 CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
 CONF_DISABLE_ZONE = 'disable_zone'
+CONF_PRIMARY_DELAY = 'primary_delay'  
 
 # Define the configuration schema for a device
 DEVICE_SCHEMA = vol.Schema({
@@ -56,6 +57,7 @@ DEVICE_SCHEMA = vol.Schema({
         ],
     ),
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
+    vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
 })
 
 async def async_setup(hass, config):
@@ -67,7 +69,8 @@ async def async_setup(hass, config):
         'rooms': ags_config['rooms'],
         'Source_selector': ags_config['Source_selector'],
         'Sources': ags_config['Sources'],
-        'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False)
+        'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
+        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5)  
     }
     ...
 

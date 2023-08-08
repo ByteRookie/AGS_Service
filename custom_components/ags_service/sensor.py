@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
+import asyncio
 # Setup platform function
 from homeassistant.helpers.event import async_track_state_change
 
@@ -22,7 +23,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         ActiveSpeakersSensor(rooms, hass),
         InactiveSpeakersSensor(rooms, hass),
         AGSStatusSensor(ags_config, hass),
-        PrimarySpeakerSensor(rooms, hass),
+        PrimarySpeakerSensor(ags_config, hass),
         PreferredPrimarySpeakerSensor(rooms, hass),
         AGSSourceSensor(ags_config, hass),
         AGSInactiveTVSpeakersSensor(rooms, hass)
@@ -262,20 +263,50 @@ class AGSStatusSensor(SensorEntity):
 
 
 
+
 class PrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
 
-    def __init__(self, rooms, hass):
+    def __init__(self, ags_config, hass):
         """Initialize the sensor."""
+        self.ags_config = ags_config
         self._state = None
-        self.rooms = rooms
+        self.rooms = self.ags_config['rooms']
         self.hass = hass
         self._attr_name = "AGS Primary Speaker"
         self._attr_unique_id = "ags_primary_speaker"
+        self._debounce_task = None  # Store the debounce task
+        self.primary_delay = self.ags_config.get('primary_delay', 5)
 
     @property
     def state(self):
         """Return the state of the sensor."""
+        primary_speaker = self._primary_speaker_logic()
+
+        if primary_speaker == "none" and self._debounce_task is None:
+            self._debounce_task = asyncio.create_task(self._debounce_check())
+
+        elif primary_speaker != "none":
+            if self._debounce_task:
+                self._debounce_task.cancel()
+                self._debounce_task = None
+            self._state = primary_speaker
+
+        # Write the primary speaker's state to hass.data
+        self.hass.data['primary_speaker'] = self._state
+
+        return self._state
+
+    async def _debounce_check(self):
+        await asyncio.sleep(self.primary_delay)  # wait for primary_delay or 5 sec
+        if self._primary_speaker_logic() == "none":
+            self._state = "none"
+            self.hass.data['primary_speaker'] = "none"
+            self.async_schedule_update_ha_state()
+        self._debounce_task = None
+
+    def _primary_speaker_logic(self):
+        """This method contains the logic to determine the primary speaker."""
         ags_status = self.hass.data.get('ags_status')
         active_rooms_entity = self.hass.data.get('active_rooms')
         active_rooms = active_rooms_entity if active_rooms_entity is not None else None
@@ -290,6 +321,7 @@ class PrimarySpeakerSensor(SensorEntity):
 
         elif ags_status is not None:
             for room in self.rooms:
+                sorted_devices = []  # Ensure sorted_devices is always defined
                 if active_rooms is not None and room['room'] in active_rooms:
                     sorted_devices = sorted(room["devices"], key=lambda x: x['priority'])
                     tv_on = False
@@ -299,20 +331,25 @@ class PrimarySpeakerSensor(SensorEntity):
                             tv_on = True
                             break
 
-                    for device in sorted_devices:
-                        device_state = self.hass.states.get(device['device_id'])
-                        if device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
-                            if tv_on or (not tv_on and device_state.attributes.get('source') != 'TV'):
-                                primary_speaker = device['device_id']
-                                break
-                    else:
-                        continue
-                    break
+                    if sorted_devices:  # Check that sorted_devices is not empty
+                        for device in sorted_devices:
+                            device_state = self.hass.states.get(device['device_id'])
+                            if device['device_type'] == 'speaker' and device_state is not None and device_state.state not in ['off', 'idle', 'paused'] and device_state.attributes.get('group_members')[0] == device['device_id']:
+                                source = device_state.attributes.get('source')
+                                if tv_on or (not tv_on and (source is None or source != 'TV')):
+                                    primary_speaker = device['device_id']
+                                    break
 
         # Write the primary speaker's state to hass.data
         self.hass.data['primary_speaker'] = primary_speaker
 
         return primary_speaker
+
+    async def async_will_remove_from_hass(self):
+        """Run when entity will be removed from hass."""
+        if self._debounce_task:
+            self._debounce_task.cancel()
+            self._debounce_task = None
 
 
 class PreferredPrimarySpeakerSensor(SensorEntity):

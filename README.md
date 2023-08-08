@@ -1,8 +1,18 @@
+
+
+
 # AGS Service (Auto Grouping Speaker Service)
 
 AGS Service is a custom Home Assistant integration that functions as an intelligent management and automation system for audio devices grouped in different rooms. With the ability to interface with various audio devices, it dynamically forms and re-forms groups based on the state of the rooms and speakers. Although it has been designed and tested primarily with Sonos speakers and LG TVs, it maintains the flexibility to work with other devices supported by Home Assistant.
 
 The core of AGS Service is to enable seamless control over which speakers are active based on the occupancy of the rooms, thereby enhancing the audio experience in a smart home environment. It achieves this by maintaining real-time tracking of each room's status and the state of the speakers within, adjusting the active speaker groups as necessary. This makes the AGS Service particularly useful in scenarios where audio playback needs to follow the user's location or specific room activities.
+
+
+# V1.1.0 Change Log
+
+- Updated Primary speaker logic to include a default of 5 second delay before going to none. This can be adjuted from the default with the new Primary_delay value that can be added to confg.
+- Updated Switches so state now stays after a reboot 
+- New Automation File that improves preformace for AGS actions.
 
 ## Features
 
@@ -48,6 +58,8 @@ The integration is configured via `configuration.yaml`. Here's an example config
 New optional Value of disable_zone and override_content.
 disable_zone If set to True it will disable logic looking at zone.home 
 override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
+
+primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker. 
 
 ```yaml
 ags_service:

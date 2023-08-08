@@ -4,6 +4,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.restore_state import RestoreEntity
 
 # Setup platform function
 def setup_platform(
@@ -20,7 +21,7 @@ def setup_platform(
     # Add the switch entities
     add_entities([RoomSwitch(hass, room) for room in rooms] + [MediaSystemSwitch(hass)])
 
-class RoomSwitch(SwitchEntity):
+class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
 
     def __init__(self, hass, room):
@@ -47,14 +48,23 @@ class RoomSwitch(SwitchEntity):
         """Turn the switch on."""
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
+        self.async_schedule_update_ha_state()
 
     def turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
+        self.async_schedule_update_ha_state()
 
-
-class MediaSystemSwitch(SwitchEntity):
+    async def async_added_to_hass(self):
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            self._attr_is_on = last_state.state == "on"
+            self.hass.data[self._attr_unique_id] = self._attr_is_on
+            
+class MediaSystemSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for the Media System."""
 
     _attr_name = "Media System"
@@ -79,8 +89,18 @@ class MediaSystemSwitch(SwitchEntity):
         """Turn the switch on."""
         self._attr_is_on = True
         self.hass.data['switch_media_system_state'] = True
+        self.async_schedule_update_ha_state()
 
     def turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data['switch_media_system_state'] = False
+        self.async_schedule_update_ha_state()
+
+    async def async_added_to_hass(self):
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            self._attr_is_on = last_state.state == "on"
+            self.hass.data['switch_media_system_state'] = self._attr_is_on
