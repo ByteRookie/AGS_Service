@@ -1,3 +1,4 @@
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
@@ -29,7 +30,14 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         async_track_state_change(hass, primary_speaker_entity_id, ags_media_player.async_primary_speaker_device_changed)
 
 
-class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity):
+class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            self.hass.data["ags_media_player_source"] = last_state.attributes.get("source")
+
     def __init__(self, hass):
         self.hass = hass
         self.update_primary_speaker_entity_id()
