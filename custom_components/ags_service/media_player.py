@@ -1,5 +1,4 @@
 from homeassistant.helpers.restore_state import RestoreEntity
-
 from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
     SUPPORT_TURN_ON as _SUPPORT_TURN_ON, 
@@ -11,10 +10,11 @@ from homeassistant.components.media_player.const import (
     SUPPORT_PREVIOUS_TRACK,
     SUPPORT_SELECT_SOURCE,
     MEDIA_TYPE_MUSIC,
-    SUPPORT_BROWSE_MEDIA,
     SUPPORT_VOLUME_SET,
+    SUPPORT_SEEK,
+    SUPPORT_SHUFFLE_SET,
+    SUPPORT_REPEAT_SET,
 )
-
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change
 
@@ -24,13 +24,16 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities([ags_media_player])
     
     # Set up a listener to monitor changes to sensor.ags_primary_speaker
-    async_track_state_change(hass, "sensor.ags_primary_speaker",'sensor.ags_status', ags_media_player.async_primary_speaker_changed)
+    async_track_state_change(hass, "switch.media_system", ags_media_player.async_primary_speaker_changed)
+
 
     # Set up a listener to monitor changes to the primary speaker (from hass.data)
-    primary_speaker_entity_id = hass.data.get('primary_speaker')
-    if primary_speaker_entity_id:
-        async_track_state_change(hass, primary_speaker_entity_id, ags_media_player.async_primary_speaker_device_changed)
+    keys_to_check = ['primary_speaker', 'ags_status', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
 
+    for key in keys_to_check:
+        entity_id = hass.data.get(key)
+        if entity_id:
+            async_track_state_change(hass, entity_id, ags_media_player.async_primary_speaker_changed)
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     async def async_added_to_hass(self):
@@ -48,40 +51,39 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.primary_speaker_entity_id = None
         self.primary_speaker_state = None   # Initialize the attribute
         self.ags_status = None
+        self.primary_speaker_room = None
 
     def update(self):
         """Fetch latest state."""
 
-        ags_status = self.hass.states.get('sensor.ags_status').state
+
+        self.ags_status = self.hass.data.get('ags_status', 'OFF')
+
 
         found_room = False
         for room in self.hass.data['ags_service']['rooms']:
             for device in room["devices"]:
                 if device["device_id"] == self.hass.data.get('primary_speaker'):
-                    primary_speaker_room = room["room"]
+                    self.primary_speaker_room = room["room"]
                     found_room = True
                     break
             if found_room:
                 break
 
 
-        if ags_status == "ON TV" and primary_speaker_room:
-            streaming_device_in_room = None
-            tv_device_in_room = None
-
-            for device in room["devices"]:
-                if device["device_type"] == "streaming_device":
-                    streaming_device_in_room = device["device_id"]
-                    break
-                elif device["device_type"] == "tv":
-                    tv_device_in_room = device["device_id"]
-
-            if streaming_device_in_room:
-                self.primary_speaker_entity_id = streaming_device_in_room
-            elif tv_device_in_room:
-                self.primary_speaker_entity_id = tv_device_in_room
-            else:
-                self.primary_speaker_entity_id = self.hass.data.get('primary_speaker', None)
+        if self.ags_status == "ON TV" and self.primary_speaker_room:
+            selected_device_id = None
+            
+            # Filter out speaker devices and sort remaining devices by priority
+            sorted_devices = sorted(
+                [device for device in room["devices"] if device["device_type"] != "speaker"],
+                key=lambda x: x['priority']
+            )
+            
+            # If there's a device in the sorted list, use its ID. Otherwise, default to primary speaker.
+            selected_device_id = sorted_devices[0]["device_id"] if sorted_devices else self.hass.data.get('primary_speaker', None)
+            
+            self.primary_speaker_entity_id = selected_device_id
         else:
             self.primary_speaker_entity_id = self.hass.data.get('primary_speaker', None)
 
@@ -89,10 +91,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
 
 
+
     async def async_primary_speaker_changed(self, entity_id, old_state, new_state):
         # Update primary speaker entity ID when sensor.ags_primary_speaker changes
-        self.update_primary_speaker_entity_id()
+        self.update()
         self.async_schedule_update_ha_state(True)
+
+    ### put extra here 
+
+
 
     @property
     def unique_id(self):
@@ -100,7 +107,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def name(self):
-        return self.primary_speaker_state.attributes.get('friendly_name') if self.primary_speaker_state else "AGS Media Player"
+        """Return the name of the sensor."""
+        room_count = len(self.hass.data.get('active_rooms', []))
+        
+        if self.primary_speaker_room is None:
+            rooms_text = "System Starting"
+        else:
+            rooms_text = self.primary_speaker_room
+
+        if self.ags_status == "OFF":
+            return "Media System is off"
+        elif room_count == 1 :
+            return rooms_text + " is Active"
+        elif room_count > 1:
+            return rooms_text + " + " + str(room_count-1) + " Active"
+        else: 
+            return "All Rooms are off"
 
     @property
     def state(self):
@@ -200,7 +222,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         return self.primary_speaker_state.attributes.get('media_position_updated_at') if self.primary_speaker_state else None
     @property
     def supported_features(self):
-        return (SUPPORT_BROWSE_MEDIA | SUPPORT_PLAY | SUPPORT_PAUSE | SUPPORT_STOP |
+        return ( SUPPORT_SEEK |SUPPORT_PLAY | SUPPORT_PAUSE | SUPPORT_STOP | SUPPORT_SHUFFLE_SET | SUPPORT_REPEAT_SET |
                 SUPPORT_NEXT_TRACK | SUPPORT_PREVIOUS_TRACK | SUPPORT_SELECT_SOURCE | SUPPORT_VOLUME_SET | _SUPPORT_TURN_ON | _SUPPORT_TURN_OFF)
 
     # Implement methods to control the AGS Primary Speaker
@@ -225,21 +247,37 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def media_previous_track(self):
         self.hass.services.call('media_player', 'media_previous_track', {'entity_id': self.primary_speaker_entity_id})
-    
+  
+    def media_seek(self, position):
+        """Seek to a specific point in the media on the primary speaker."""
+        self._hass.services.call(
+            'media_player', 'media_seek',
+            {
+                'entity_id': self.primary_speaker_entity_id,
+                'seek_position': position
+            }
+        )    
     @property
     def source_list(self):
         """List of available sources."""
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-        # Check if any device has a type of TV and add "TV" to the source list
-        if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
-            sources.append("TV")
+        if self.ags_status == "ON TV":
+            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
+
+        else:
+            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+            # Check if any device has a type of TV and add "TV" to the source list
+            if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+                sources.append("TV")
+
         return sources
 
     @property
     def source(self):
         """Return the current input source."""
-        return self.hass.data.get("ags_media_player_source")
-
+        if self.ags_status == "ON TV":
+            return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None 
+        else:
+            return self.hass.data.get("ags_media_player_source")
 
     def get_source_value_by_name(self, source_name):
         for source_dict in self.hass.data['ags_service']['Sources']:
@@ -249,11 +287,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def select_source(self, source):
         """Select input source."""
-        if source == "TV":
+        if source == "TV" or self.ags_status == "ON TV":
             # If the source is TV, call the media_player.select_source service
             self.hass.services.call("media_player", "select_source", {
-                "source": "TV",
-                "entity_id": self.hass.data['primary_speaker']
+                "source": source,
+                "entity_id": self.primary_speaker_entity_id
             })
         else:
             # Update the source in hass.data
@@ -271,40 +309,42 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 'media_content_id': source_value,
                 'media_content_type': 'favorite_item_id'
             })
-    async def async_browse_media(self, media_content_type=None, media_content_id=None):
-        """Implement the media browsing helper."""
-        if media_content_type in [None, "library"]:
-            # Return the root media directory
-            return await self._browse_root()
 
-        # Handle other media_content_type cases if necessary
-
-    async def _browse_root(self):
-        """Return the root media directory."""
-        self.primary_speaker_state = self.hass.states.get(self.hass.data['primary_speaker'])
+    @property
+    def shuffle(self):
+        """Return the shuffle state of the primary speaker."""
         
-        if not self.primary_speaker_state:
-            raise ValueError(f"Entity {self.hass.data['primary_speaker']} not found")
+        if self.primary_speaker_state:
+            return self.primary_speaker_state.attributes.get('shuffle', False)
+        return False
 
-        media_content_type = self.primary_speaker_state.attributes.get('media_content_type')
-        media_content_id = self.primary_speaker_state.attributes.get('media_content_id')
-        media_title = self.primary_speaker_state.attributes.get('media_title')
+    @property
+    def repeat(self):
+        """Return the repeat state of the primary speaker."""
+        if self.primary_speaker_state:
+            return self.primary_speaker_state.attributes.get('repeat', 'off')
+        return 'off'
 
-        # Return root directory
-        return {
-            "title": "Root",
-            "media_content_type": "library",
-            "media_content_id": "root",
-            "can_play": True,
-            "can_expand": True,
-            "children": [
-                {
-                    "title": media_title,
-                    "media_content_type": media_content_type,
-                    "media_content_id": media_content_id,
-                    "can_play": True,
-                    "can_expand": False,
-                }
-            ],
-        }
+    def set_shuffle(self, shuffle):
+        """Enable/Disable shuffle mode."""
+        self.hass.services.call('media_player', 'shuffle_set', {
+            'entity_id': self.primary_speaker_entity_id,
+            'shuffle': not self.shuffle
+        })
+
+    def set_repeat(self, repeat):
+        """Set repeat mode."""
+        if self.repeat == "off":
+            repeat_value = "one"
+        elif self.repeat=="one":
+            repeat_value = "all"
+        else:
+            repeat_value = "off"
+
+        self.hass.services.call('media_player', 'repeat_set', {
+            'entity_id': self.primary_speaker_entity_id,
+            'repeat':  repeat_value
+        })
+
+
 

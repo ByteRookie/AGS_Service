@@ -29,6 +29,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         AGSInactiveTVSpeakersSensor(rooms, hass)
     ]
 
+
     # Define a function to be called when a tracked entity changes its state
     def state_changed_listener(entity_id, old_state, new_state):
         # Make sure the new state is not None
