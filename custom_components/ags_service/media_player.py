@@ -50,13 +50,32 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._state = STATE_IDLE
         self.primary_speaker_entity_id = None
         self.primary_speaker_state = None   # Initialize the attribute
+        self.configured_rooms = None
+        self.active_rooms = None
+        self.active_speakers = None
+        self.inactive_speakers = None
         self.ags_status = None
+        self.primary_speaker = None
+        self.preferred_primary_speaker = None
+        self.ags_source = None
+        self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
+
+
+
 
     def update(self):
         """Fetch latest state."""
-
-
+        ### Move logic here for sensor to remove sensor.py ##
+        self.configured_rooms = self.hass.data.get('configured_rooms', None)
+        self.active_rooms = self.hass.data.get('active_rooms', None)
+        self.active_speakers = self.hass.data.get('active_speakers', None)
+        self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
+        self.ags_status = self.hass.data.get('ags_status', None)
+        self.primary_speaker = self.hass.data.get('primary_speaker', None)
+        self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
+        self.ags_source = self.hass.data.get('ags_source', None)
+        self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
 
@@ -97,9 +116,27 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.update()
         self.async_schedule_update_ha_state(True)
 
-    ### put extra here 
+    
+    @property
+    def extra_state_attributes(self):
+        """Return entity specific state attributes."""
+        attributes = {
+            "configured_rooms": self.configured_rooms or "Not available",
+            "active_rooms": self.active_rooms or "Not available",
+            "active_speakers": self.active_speakers or "Not available",
+            "inactive_speakers": self.inactive_speakers or "Not available",
+            "ags_status": self.ags_status or "Not available",
+            "primary_speaker": self.primary_speaker or "Not available",
+            "preferred_primary_speaker": self.preferred_primary_speaker or "Not available",
+            "ags_source": self.ags_source or "Not available",
+            "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
+        }
+        return attributes
 
-
+## Remove if homekit test do not work ##
+    @property
+    def device_class(self):
+        return "tv"
 
     @property
     def unique_id(self):
@@ -136,12 +173,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             
             # If self.primary_speaker_state is None, then the entity ID might be incorrect
             if self.primary_speaker_state is None:
-                return "Error no state"
+                return STATE_IDLE
             
             # Return the state of the primary speaker
             return self.primary_speaker_state.state
         else:
-            return "Error no state 2"
+            return STATE_IDLE
 
     @property
     def media_title(self):
