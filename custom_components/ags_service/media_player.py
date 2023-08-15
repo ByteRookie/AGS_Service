@@ -17,6 +17,8 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change
+from .ags_sensors import update_ags_sensors
+
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     ags_config = hass.data['ags_service']
@@ -28,19 +30,25 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Set up a listener to monitor changes to sensor.ags_primary_speaker
     async_track_state_change(hass, "switch.media_system", ags_media_player.async_primary_speaker_changed)
 
-
     # Set up a listener to monitor changes to the primary speaker (from hass.data)
-    keys_to_check = ['primary_speaker', 'ags_status', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
+    keys_to_check = ['primary_speaker', 'ags_status', 'switch_media_system_state', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
 
     for key in keys_to_check:
         entity_id = hass.data.get(key)
         if entity_id:
             async_track_state_change(hass, entity_id, ags_media_player.async_primary_speaker_changed)
 
-    
+    # Add switches for rooms and zone.home
+    entities_to_track = ['zone.home']
+    for room in rooms:
+        room_switch = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        entities_to_track.append(room_switch)
+
+    for entity in entities_to_track:
+        async_track_state_change(hass, entity, ags_media_player.async_primary_speaker_changed)
+
     #entities = [ags_media_player]
     CREATE_MEDIA_SYSTEM_PLAYER = True 
-    
 
     # Create and add the secondary "Media System" media player only if SHOW_MEDIA_SYSTEM is True
     if CREATE_MEDIA_SYSTEM_PLAYER:
@@ -49,6 +57,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         entities = [media_system_player]
 
     async_add_entities(entities, True)
+
     
     async def async_primary_speaker_changed(entity_id, old_state, new_state):
         """Handle the primary speaker's state changes."""
@@ -82,7 +91,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
-    
+        update_ags_sensors(self.ags_config, self._hass)
 
 
 
@@ -90,6 +99,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def update(self):
         """Fetch latest state."""
         ### Move logic here for sensor to remove sensor.py ##
+        update_ags_sensors(self.ags_config, self._hass)
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
         self.active_speakers = self.hass.data.get('active_speakers', None)
@@ -297,10 +307,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.hass.services.call('media_player', 'media_next_track', {'entity_id': self.primary_speaker_entity_id})
 
     def turn_on(self):
-        self.hass.services.call('switch', 'turn_on', {'entity_id': 'switch.media_system'})
+        self.hass.data['switch_media_system_state'] = True
 
     def turn_off(self):
-        self.hass.services.call('switch', 'turn_off', {'entity_id': 'switch.media_system'})
+        self.hass.data['switch_media_system_state'] = False
 
     def media_previous_track(self):
         self.hass.services.call('media_player', 'media_previous_track', {'entity_id': self.primary_speaker_entity_id})

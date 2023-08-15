@@ -108,3 +108,5 @@ def reset_tv_speakers(hass):
             'source': 'TV',
             'entity_id': hass.states.get('sensor.ags_inactive_tv_speakers'),
         })
+
+
