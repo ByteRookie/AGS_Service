@@ -17,12 +17,13 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change
-from .ags_sensors import update_ags_sensors
+from .ags_service import update_ags_sensors, ags_select_source 
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     ags_config = hass.data['ags_service']
     rooms = ags_config['rooms']
+    
 
     ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
     async_add_entities([ags_media_player])
@@ -91,7 +92,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
-        update_ags_sensors(self.ags_config, self._hass)
+
 
 
 
@@ -99,18 +100,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def update(self):
         """Fetch latest state."""
         ### Move logic here for sensor to remove sensor.py ##
+
         update_ags_sensors(self.ags_config, self._hass)
+       
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
         self.active_speakers = self.hass.data.get('active_speakers', None)
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
-        self.ags_status = self.hass.data.get('ags_status', None)
-        self.primary_speaker = self.hass.data.get('primary_speaker', None)
+        self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
-        self.ags_source = self.hass.data.get('ags_source', None)
+        self.ags_source = self.hass.data.get('ags_source', "Unknown")
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
-
 
         found_room = False
         for room in self.ags_config['rooms']:
@@ -153,6 +154,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
+
+
         attributes = {
             "configured_rooms": self.configured_rooms or "Not available",
             "active_rooms": self.active_rooms or "Not available",
@@ -178,18 +181,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         room_count = len(self.hass.data.get('active_rooms', []))
         
         if self.primary_speaker_room is None:
-            rooms_text = "System Starting"
+            return "System Starting"
         else:
             rooms_text = self.primary_speaker_room
 
         if self.ags_status == "OFF":
-            return "Media System is off"
+            return "AGS Media System"
         elif room_count == 1 :
             return rooms_text + " is Active"
         elif room_count > 1:
             return rooms_text + " + " + str(room_count-1) + " Active"
         else: 
-            return "All Rooms are off"
+            return "All Rooms are Off"
 
     @property
     def state(self):
@@ -355,27 +358,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def select_source(self, source):
         """Select input source."""
         if source == "TV" or self.ags_status == "ON TV":
-            # If the source is TV, call the media_player.select_source service
-            self.hass.services.call("media_player", "select_source", {
-                "source": source,
-                "entity_id": self.primary_speaker_entity_id
-            })
+            self.hass.data["ags_media_player_source"] = "TV"
+            ags_select_source(self.ags_config, self.hass)
+
         else:
             # Update the source in hass.data
             self.hass.data["ags_media_player_source"] = source
-            
-            # Fetch the corresponding source_value from the source list
-            for src in self.hass.data['ags_service']['Sources']:
-                if src["Source"] == source:
-                    source_value = src["Source_Value"]
-                    break
-
-            # Call the play_media service with the updated media_content_id
-            self.hass.services.call('media_player', 'play_media', {
-                'entity_id': self.hass.data['primary_speaker'],
-                'media_content_id': source_value,
-                'media_content_type': 'favorite_item_id'
-            })
+            ags_select_source(self.ags_config, self.hass)
+           
 
     @property
     def shuffle(self):
