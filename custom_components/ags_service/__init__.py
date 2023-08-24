@@ -18,6 +18,16 @@ CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
 CONF_DISABLE_ZONE = 'disable_zone'
 CONF_PRIMARY_DELAY = 'primary_delay'  
+CONF_HOMEKIT_PLAYER = 'homekit_player'
+CONF_CREATE_SENSORS = 'create_sensors'
+CONF_DEFAULT_ON = 'default_on'
+CONF_STATIC_NAME = 'static_name'
+CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
+CONF_SOURCES = 'Sources'
+CONF_SOURCE = 'Source'
+CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
+CONF_SOURCE_VALUE = 'Source_Value'
+CONF_SOURCE_DEFAULT = 'source_default'
 
 # Define the configuration schema for a device
 DEVICE_SCHEMA = vol.Schema({
@@ -44,7 +54,6 @@ DEVICE_SCHEMA = vol.Schema({
             )
         ],
     ),
-    vol.Required("Source_selector"): cv.string,
     vol.Required("Sources"): vol.All(
         cv.ensure_list,
         [
@@ -52,12 +61,20 @@ DEVICE_SCHEMA = vol.Schema({
                 {
                     vol.Required("Source"): cv.string,
                     vol.Required("Source_Value"): cv.string,
+                    vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
+                    vol.Optional(CONF_SOURCE_DEFAULT, default=False): cv.boolean,
                 }
             )
         ],
     ),
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
     vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
+    vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
+    vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
+    vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
+    vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
+    vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
+
 })
 
 async def async_setup(hass, config):
@@ -67,15 +84,23 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Source_selector': ags_config['Source_selector'],
-        'Sources': ags_config['Sources'],
+        'Sources': ags_config['Sources'], ## Need to use media content type and default values ##
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5)  
+        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5), ## Not Done ###
+        'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
+        'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
+        'default_on': ags_config.get(CONF_DEFAULT_ON, False),
+        'static_name': ags_config.get(CONF_STATIC_NAME, None), 
+        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False) ## Not Done ##
+
     }
     ...
 
     # Load the sensor and switch platforms and pass the configuration to them
-    await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
+    create_sensors = ags_config.get('create_sensors', False)
+    if create_sensors:
+        await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
+    
     await async_load_platform(hass, 'switch', DOMAIN, {}, config)
     await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 

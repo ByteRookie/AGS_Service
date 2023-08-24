@@ -5,7 +5,6 @@ AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
 ags_select_source_running = False
 
-
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
@@ -78,7 +77,7 @@ def update_ags_status(ags_config, hass):
     ags_status = "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
-    if not ags_config.get('disable_zone', False) and hass.states.get('zone.home').state == '0':
+    if not ags_config.get('disable_zone', False)  and hass.states.get('zone.home').state == '0':
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status
@@ -99,9 +98,13 @@ def update_ags_status(ags_config, hass):
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        ags_status = "OFF"
+        if  ags_config['default_on']: 
+            ags_status = "ON"
+        else:
+            ags_status = "OFF"
+
         hass.data['ags_status'] = ags_status
-        hass.data['media_system_state'] = False
+        hass.data['media_system_state'] = ags_config['default_on']
         return ags_status
 
     if not media_system_state:

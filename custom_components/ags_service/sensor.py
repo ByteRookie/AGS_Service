@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(seconds=10)
+SCAN_INTERVAL = timedelta(seconds=1)
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
@@ -17,19 +17,18 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Create your sensors
     ags_config = hass.data['ags_service']
     rooms = ags_config['rooms']
-    make_sensors = True
-    if make_sensors:
-        sensors = [
-            ConfiguredRoomsSensor(hass), 
-            ActiveRoomsSensor(hass), 
-            ActiveSpeakersSensor(hass),
-            InactiveSpeakersSensor(hass),
-            AGSStatusSensor(hass),
-            PrimarySpeakerSensor(hass),
-            PreferredPrimarySpeakerSensor(hass),
-            AGSSourceSensor( hass),
-            AGSInactiveTVSpeakersSensor(hass)
-        ]
+
+    sensors = [
+        ConfiguredRoomsSensor(hass), 
+        ActiveRoomsSensor(hass), 
+        ActiveSpeakersSensor(hass),
+        InactiveSpeakersSensor(hass),
+        AGSStatusSensor(hass),
+        PrimarySpeakerSensor(hass),
+        PreferredPrimarySpeakerSensor(hass),
+        AGSSourceSensor( hass),
+        AGSInactiveTVSpeakersSensor(hass)
+    ]
 
 
     # Define a function to be called when a tracked entity changes its state
@@ -51,12 +50,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     entities_to_track = ['zone.home']
     entities_to_track.extend(sensor_entity_ids)
     
-    # Get Source_selector from ags_config
-    source_selector = ags_config['Source_selector']
-
-    # Now, append this source_selector to the entities_to_track list
-    entities_to_track.append(source_selector)
-
   
 
     for room in rooms:
@@ -68,6 +61,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_track_state_change(hass, entities_to_track, state_changed_listener)
 
     # Add the sensors to Home Assistant
+    
     async_add_entities(sensors, True)
 
 

@@ -48,16 +48,15 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for entity in entities_to_track:
         async_track_state_change(hass, entity, ags_media_player.async_primary_speaker_changed)
 
-    #entities = [ags_media_player]
-    CREATE_MEDIA_SYSTEM_PLAYER = True 
+
 
     # Create and add the secondary "Media System" media player only if SHOW_MEDIA_SYSTEM is True
-    if CREATE_MEDIA_SYSTEM_PLAYER:
+    if ags_config['homekit_player']:
         media_system_player = MediaSystemMediaPlayer(ags_media_player)
         #entities.append(media_system_player)
         entities = [media_system_player]
 
-    async_add_entities(entities, True)
+        async_add_entities(entities, True)
 
     
     async def async_primary_speaker_changed(entity_id, old_state, new_state):
@@ -177,22 +176,27 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def name(self):
-        """Return the name of the sensor."""
-        room_count = len(self.hass.data.get('active_rooms', []))
-        
-        if self.primary_speaker_room is None:
-            return "System Starting"
+        ags_config = self.hass.data['ags_service']
+        static_name = ags_config['static_name']
+        if static_name: 
+            return static_name 
         else:
-            rooms_text = self.primary_speaker_room
+            """Return the name of the sensor."""
+            room_count = len(self.hass.data.get('active_rooms', []))
+            
+            if self.primary_speaker_room is None and self.ags_status != "OFF":
+                return "All Rooms are Off"
+            else:
+                rooms_text = self.primary_speaker_room
 
-        if self.ags_status == "OFF":
-            return "AGS Media System"
-        elif room_count == 1 :
-            return rooms_text + " is Active"
-        elif room_count > 1:
-            return rooms_text + " + " + str(room_count-1) + " Active"
-        else: 
-            return "All Rooms are Off"
+            if self.ags_status == "OFF":
+                return "AGS Media System"
+            elif room_count == 1 :
+                return rooms_text + " is Active"
+            elif room_count > 1:
+                return rooms_text + " + " + str(room_count-1) + " Active"
+            else: 
+                return "All Rooms are Off"
 
     @property
     def state(self):
@@ -330,6 +334,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source_list(self):
         """List of available sources."""
+ 
         if self.ags_status == "ON TV":
             sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
 
@@ -418,7 +423,8 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     @property
     def name(self):
         """Return the name of the media system player."""
-        return "Media System"
+        ags_config = self.hass.data['ags_service']
+        return ags_config['homekit_player']
 
     @property
     def state(self):
