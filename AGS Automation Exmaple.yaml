@@ -3,80 +3,102 @@ description: ""
 trigger:
   - platform: state
     entity_id:
-      - media_player.ags_media_system
-    attribute: active_speakers
+      - sensor.ags_active_speakers
   - platform: state
     entity_id:
-      - media_player.ags_media_system
-    attribute: ags_status
+      - sensor.ags_inactive_speakers
+    to: none
+    for:
+      hours: 0
+      minutes: 0
+      seconds: 5
+  - platform: state
+    entity_id:
+      - sensor.ags_status
+  - platform: state
+    entity_id:
+      - sensor.ags_source
+    id: Station change
 condition: []
 action:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: sensor.ags_status
+            state: ON TV
+        sequence:
+          - service: media_player.select_source
+            data:
+              source: TV
+            target:
+              entity_id: "{{ states('sensor.ags_preferred_primary')}}"
+          - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
+            continue_on_timeout: true
+      - conditions:
+          - condition: state
+            entity_id: sensor.ags_primary_speaker
+            state: none
+        sequence:
+          - service: media_player.play_media
+            target:
+              entity_id: "{{ states('sensor.ags_preferred_primary')}}"
+            data:
+              media_content_id: FV:{{ states('sensor.ags_source')}}
+              media_content_type: favorite_item_id
+          - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
+            continue_on_timeout: true
+      - conditions:
+          - condition: trigger
+            id: Station change
+        sequence:
+          - service: media_player.play_media
+            target:
+              entity_id: "{{ states('sensor.ags_preferred_primary')}}"
+            data:
+              media_content_id: FV:{{ states('sensor.ags_source')}}
+              media_content_type: favorite_item_id
+          - wait_template: "{{ not(states('sensor.ags_primary_speaker') == \"none\") }}"
+            continue_on_timeout: true
+    default: []
+    alias: Select Source Matrix
   - if:
       - condition: not
         conditions:
           - condition: state
-            entity_id: media_player.ags_media_system
+            entity_id: sensor.ags_active_speakers
             state: "[]"
-            attribute: active_speakers
           - condition: state
-            entity_id: media_player.ags_media_system
+            entity_id: sensor.ags_status
             state: "off"
-            attribute: ags_status
           - condition: state
-            entity_id: media_player.ags_media_system
+            entity_id: sensor.ags_primary_speaker
             state: none
-            attribute: primary_speaker
-          - condition: state
-            entity_id: media_player.ags_media_system
-            state: Not available
-            attribute: active_speakers
-          - condition: state
-            entity_id: media_player.ags_media_system
-            state: Not available
-            attribute: ags_status
-          - condition: state
-            entity_id: media_player.ags_media_system
-            state: Not available
-            attribute: primary_speaker
     then:
       - service: media_player.join
         data:
-          entity_id: "{{ states.media_player.ags_media_system.attributes.primary_speaker}}"
-          group_members: >-
-            {{ states.media_player.ags_media_system.attributes.active_speakers
-            }}
+          entity_id: "{{ states('sensor.ags_primary_speaker')}}"
+          group_members: "{{ states('sensor.ags_active_speakers') }}"
     else: null
     alias: Join Action
   - if:
       - condition: not
         conditions:
           - condition: state
-            entity_id: media_player.ags_media_system
+            entity_id: sensor.ags_inactive_speakers
             state: "[]"
-            attribute: inactive_speakers
-          - condition: state
-            entity_id: media_player.ags_media_system
-            state: Not available
-            attribute: inactive_speakers
     then:
       - service: media_player.unjoin
         data: {}
         target:
-          entity_id: >-
-            {{
-            states.media_player.ags_media_system.attributes.inactive_speakers}}
+          entity_id: "{{ states('sensor.ags_inactive_speakers') }}"
       - service: media_player.media_pause
         data: {}
         target:
-          entity_id: >-
-            {{
-            states.media_player.ags_media_system.attributes.inactive_speakers}}
+          entity_id: "{{ states('sensor.ags_inactive_speakers') }}"
       - service: media_player.clear_playlist
         data: {}
         target:
-          entity_id: >-
-            {{
-            states.media_player.ags_media_system.attributes.inactive_speakers}}
+          entity_id: "{{ states('sensor.ags_inactive_speakers') }}"
     else: null
     alias: Remove Action
     enabled: true
@@ -84,20 +106,14 @@ action:
       - condition: not
         conditions:
           - condition: state
-            entity_id: media_player.ags_media_system
+            entity_id: sensor.ags_inactive_tv_speakers
             state: "[]"
-            attribute: ags_inactive_tv_speakers
-          - condition: state
-            entity_id: media_player.ags_media_system
-            state: Not available
-            attribute: ags_inactive_tv_speakers
     then:
       - service: media_player.select_source
         data:
           source: TV
         target:
-          entity_id: >-
-            {{
-            states.media_player.ags_media_system.attributes.ags_inactive_tv_speakers}}
+          entity_id: "{{ states('sensor.ags_inactive_tv_speakers') }}"
     alias: Reset TV Speakers to TV after
-mode: single
+mode: queued
+max: 10

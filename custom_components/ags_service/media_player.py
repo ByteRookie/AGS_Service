@@ -18,7 +18,8 @@ from homeassistant.components.media_player.const import (
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change
 from .ags_service import update_ags_sensors, ags_select_source 
-
+import logging
+_LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     ags_config = hass.data['ags_service']
@@ -108,7 +109,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
-        self.ags_source = self.hass.data.get('ags_source', "Unknown")
+        self.ags_source = self.hass.data.get('ags_source', None )
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
@@ -334,8 +335,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source_list(self):
         """List of available sources."""
- 
-        if self.ags_status == "ON TV":
+        ags_config = self.hass.data['ags_service']
+        disable_Tv_Source = ags_config['disable_Tv_Source']
+
+        if self.ags_status == "ON TV" and disable_Tv_Source == False:
             sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
 
         else:
