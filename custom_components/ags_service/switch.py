@@ -19,7 +19,7 @@ def setup_platform(
     rooms = ags_config['rooms']
 
     # Add the switch entities
-    add_entities([RoomSwitch(hass, room) for room in rooms] + [MediaSystemSwitch(hass)])
+    add_entities([RoomSwitch(hass, room) for room in rooms] )
 
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
@@ -63,44 +63,5 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
-            
-class MediaSystemSwitch(SwitchEntity, RestoreEntity):
-    """Representation of a Switch for the Media System."""
 
-    _attr_name = "Media System"
-    _attr_unique_id = "switch.media_system"
-
-    def __init__(self, hass):
-        """Initialize the switch."""
-        self.hass = hass
-        # Check if the state is already stored in hass.data
-        if 'switch_media_system_state' in hass.data:
-            self._attr_is_on = hass.data['switch_media_system_state']
-        else:
-            self._attr_is_on = False
-            hass.data['switch_media_system_state'] = False  # Initialize in hass.data
-
-    @property
-    def is_on(self):
-        """Return true if the switch is on."""
-        return self._attr_is_on
-
-    def turn_on(self, **kwargs):
-        """Turn the switch on."""
-        self._attr_is_on = True
-        self.hass.data['switch_media_system_state'] = True
-        self.async_schedule_update_ha_state()
-
-    def turn_off(self, **kwargs):
-        """Turn the switch off."""
-        self._attr_is_on = False
-        self.hass.data['switch_media_system_state'] = False
-        self.async_schedule_update_ha_state()
-
-    async def async_added_to_hass(self):
-        """Run when entity about to be added to hass."""
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state:
-            self._attr_is_on = last_state.state == "on"
-            self.hass.data['switch_media_system_state'] = self._attr_is_on
+           
