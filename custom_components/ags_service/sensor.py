@@ -4,6 +4,7 @@ from datetime import timedelta
 
 SCAN_INTERVAL = timedelta(seconds=1)
 
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -43,7 +44,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # List of entity ids to track
     sensor_entity_ids = [
     "sensor.ags_status"
-
     ]
 
 
@@ -115,8 +115,10 @@ class ActiveSpeakersSensor(SensorEntity):
         self.hass = hass
 
     @property
+
     def unique_id(self):
         return "ags_active_speakers"
+
 
     @property
     def name(self):
@@ -136,8 +138,10 @@ class InactiveSpeakersSensor(SensorEntity):
         self.hass = hass
 
     @property
+
     def unique_id(self):
         return "ags_inactive_speakers"
+
 
     @property
     def name(self):
@@ -148,12 +152,15 @@ class InactiveSpeakersSensor(SensorEntity):
         inactive_speakers = self.hass.data.get('inactive_speakers', None)
         return inactive_speakers
 
+
     
 ## Sensor for Status 
 class AGSStatusSensor(SensorEntity):
     def __init__(self, hass):
         """Initialize the sensor."""
+
         self.hass = hass
+
 
     @property
     def unique_id(self):
@@ -164,11 +171,15 @@ class AGSStatusSensor(SensorEntity):
         return "AGS Status"
 
     @property
+
     def state(self):
+
         ags_status = self.hass.data.get('ags_status', "OFF")
+
         return ags_status
 
     
+
 
 
 # sensor for primary speaker #
