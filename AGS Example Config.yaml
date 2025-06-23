@@ -1,0 +1,39 @@
+# Sample AGS Service configuration for Home Assistant
+ags_service:
+  rooms:
+    - room: "Living Room"
+      devices:
+        - device_id: "media_player.tv_living"
+          device_type: "tv"
+          priority: 1
+        - device_id: "media_player.sonos_living"
+          device_type: "speaker"
+          priority: 2
+    - room: "Kitchen"
+      devices:
+        - device_id: "media_player.sonos_kitchen"
+          device_type: "speaker"
+          priority: 3
+  Sources:
+    # Default source played when AGS turns on
+    - Source: "Chill"
+      Source_Value: "2/12"
+      media_content_type: "favorite_item_id"
+      source_default: true
+    - Source: "Top Hit"
+      Source_Value: "2/11"
+      media_content_type: "favorite_item_id"
+  # seconds before the primary speaker resets
+  primary_delay: 5
+  # ignore zone.home state when true
+  disable_zone: false
+  # optional secondary player name for HomeKit integration
+  homekit_player: null
+  # create sensors like AGS Media Status
+  create_sensors: true
+  # start AGS in ON state after restart
+  default_on: false
+  # fixed name for AGS Media Player
+  static_name: null
+  # hide TV from source list when true
+  disable_Tv_Source: false

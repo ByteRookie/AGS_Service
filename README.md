@@ -18,7 +18,7 @@ The integration also exposes sensors so automations can react to the current aud
 
 ## Configuration
 
-Add an `ags_service` block to `configuration.yaml`. A minimal example:
+Add an `ags_service` block to `configuration.yaml`. A minimal example is shown below. A more complete version can be found in [`AGS Example Config.yaml`](AGS%20Example%20Config.yaml):
 
 ```yaml
 ags_service:
