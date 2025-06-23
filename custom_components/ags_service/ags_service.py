@@ -194,7 +194,7 @@ def check_primary_speaker_logic(ags_config, hass):
                 if sorted_devices:
                     for device in sorted_devices:
                         device_state = hass.states.get(device['device_id'])
-                        group_members = device_state.attributes.get('group_members')
+                        group_members = device_state.attributes.get('group_members') if device_state else None
 
                         if (
                             device['device_type'] == 'speaker' and
@@ -427,7 +427,7 @@ def ags_select_source(ags_config, hass):
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
-        if source == "TV" or status == "ON TV":
+        if source == "TV":
             # Use async service call to avoid blocking the event loop
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
@@ -442,13 +442,23 @@ def ags_select_source(ags_config, hass):
             source_info = source_dict.get(source)
 
             if source_info:
+                media_id = source_info["value"]
+                media_type = source_info["type"]
+
+                if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
+                    media_id = f"FV:{media_id}"
+
                 hass.loop.call_soon_threadsafe(
                     lambda: hass.async_create_task(
-                        hass.services.async_call('media_player', 'play_media', {
-                            'entity_id': primary_speaker_entity_id,
-                            'media_content_id': source_info["value"],
-                            'media_content_type': source_info["type"]
-                        })
+                        hass.services.async_call(
+                            'media_player',
+                            'play_media',
+                            {
+                                'entity_id': primary_speaker_entity_id,
+                                'media_content_id': media_id,
+                                'media_content_type': media_type,
+                            }
+                        )
                     )
                 )
 
