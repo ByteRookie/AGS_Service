@@ -48,10 +48,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         async_add_entities(entities, True)
 
     
-    async def async_primary_speaker_changed(entity_id, old_state, new_state):
-        """Handle the primary speaker's state changes."""
-        ags_media_player.update()
-        await ags_media_player.async_update_ha_state(force_refresh=True)
+
 
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
@@ -165,8 +162,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
 
 
-    async def async_primary_speaker_changed(self, entity_id, old_state, new_state):
-        # Update primary speaker entity ID when sensor.ags_primary_speaker changes
+    async def async_primary_speaker_changed(self, event):
+        """Handle state change events for tracked entities."""
         self.update()
         self.async_schedule_update_ha_state(True)
 
