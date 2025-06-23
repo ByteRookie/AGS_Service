@@ -442,13 +442,23 @@ def ags_select_source(ags_config, hass):
             source_info = source_dict.get(source)
 
             if source_info:
+                media_id = source_info["value"]
+                media_type = source_info["type"]
+
+                if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
+                    media_id = f"FV:{media_id}"
+
                 hass.loop.call_soon_threadsafe(
                     lambda: hass.async_create_task(
-                        hass.services.async_call('media_player', 'play_media', {
-                            'entity_id': primary_speaker_entity_id,
-                            'media_content_id': source_info["value"],
-                            'media_content_type': source_info["type"]
-                        })
+                        hass.services.async_call(
+                            'media_player',
+                            'play_media',
+                            {
+                                'entity_id': primary_speaker_entity_id,
+                                'media_content_id': media_id,
+                                'media_content_type': media_type,
+                            }
+                        )
                     )
                 )
 
