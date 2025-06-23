@@ -427,7 +427,7 @@ def ags_select_source(ags_config, hass):
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
-        if source == "TV" or status == "ON TV":
+        if source == "TV":
             # Use async service call to avoid blocking the event loop
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
