@@ -93,6 +93,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
 
+    def _schedule_media_call(self, service: str, data: dict) -> None:
+        """Safely fire a media_player service from any thread."""
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(
+                self.hass.services.async_call("media_player", service, data)
+            )
+        )
+
 
 
 
@@ -261,10 +269,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Set the volume level for all active speakers."""
         active_speakers = self.hass.data.get('active_speakers', [])
         # Use async_call to avoid blocking when changing multiple speakers
-        self.hass.async_create_task(self.hass.services.async_call('media_player', 'volume_set', {
+        self._schedule_media_call('volume_set', {
             'entity_id': active_speakers,
             'volume_level': volume,
-        }))
+        })
 
     @property
     def volume_level(self):
@@ -325,24 +333,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def media_play(self):
         # Fire and forget the service call so the UI stays responsive
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'media_play', {'entity_id': self.primary_speaker_entity_id})
-        )
+        self._schedule_media_call('media_play', {
+            'entity_id': self.primary_speaker_entity_id
+        })
 
     def media_pause(self):
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'media_pause', {'entity_id': self.primary_speaker_entity_id})
-        )
+        self._schedule_media_call('media_pause', {
+            'entity_id': self.primary_speaker_entity_id
+        })
 
     def media_stop(self):
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'media_stop', {'entity_id': self.primary_speaker_entity_id})
-        )
+        self._schedule_media_call('media_stop', {
+            'entity_id': self.primary_speaker_entity_id
+        })
 
     def media_next_track(self):
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'media_next_track', {'entity_id': self.primary_speaker_entity_id})
-        )
+        self._schedule_media_call('media_next_track', {
+            'entity_id': self.primary_speaker_entity_id
+        })
 
     def turn_on(self):
         self.hass.data['switch_media_system_state'] = True
@@ -351,21 +359,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.hass.data['switch_media_system_state'] = False
 
     def media_previous_track(self):
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'media_previous_track', {'entity_id': self.primary_speaker_entity_id})
-        )
+        self._schedule_media_call('media_previous_track', {
+            'entity_id': self.primary_speaker_entity_id
+        })
   
     def media_seek(self, position):
         """Seek to a specific point in the media on the primary speaker."""
-        self._hass.async_create_task(
-            self._hass.services.async_call(
-                'media_player', 'media_seek',
-                {
-                    'entity_id': self.primary_speaker_entity_id,
-                    'seek_position': position
-                }
-            )
-        )
+        self._schedule_media_call('media_seek', {
+            'entity_id': self.primary_speaker_entity_id,
+            'seek_position': position
+        })
     @property
     def source_list(self):
         """List of available sources."""
@@ -426,12 +429,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def set_shuffle(self, shuffle):
         """Enable/Disable shuffle mode."""
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'shuffle_set', {
-                'entity_id': self.primary_speaker_entity_id,
-                'shuffle': not self.shuffle
-            })
-        )
+        self._schedule_media_call('shuffle_set', {
+            'entity_id': self.primary_speaker_entity_id,
+            'shuffle': not self.shuffle
+        })
 
     def set_repeat(self, repeat):
         """Set repeat mode."""
@@ -442,12 +443,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         else:
             repeat_value = "off"
 
-        self.hass.async_create_task(
-            self.hass.services.async_call('media_player', 'repeat_set', {
-                'entity_id': self.primary_speaker_entity_id,
-                'repeat':  repeat_value
-            })
-        )
+        self._schedule_media_call('repeat_set', {
+            'entity_id': self.primary_speaker_entity_id,
+            'repeat':  repeat_value
+        })
 
 
 # Define the secondary "Media System" media player class for homekit

@@ -216,8 +216,10 @@ def determine_primary_speaker(ags_config, hass):
             await asyncio.sleep(delay)
             hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
 
-        # Schedule the re-check but don't wait for it here
-        hass.async_create_task(_delayed_check())
+        # Schedule the re-check from the event loop in a thread safe way
+        hass.loop.call_soon_threadsafe(
+            lambda: hass.async_create_task(_delayed_check())
+        )
 
     # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker
@@ -329,10 +331,16 @@ def execute_ags_logic(hass):
     if active_speakers != []  and status != 'off' and primary_speaker != 'none':
         try:
             # Use async_call so the service invocation doesn't block
-            hass.async_create_task(hass.services.async_call('media_player', 'join', {
-                'entity_id': primary_speaker,
-                'group_members': active_speakers,
-            }))
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call(
+                        'media_player', 'join', {
+                            'entity_id': primary_speaker,
+                            'group_members': active_speakers,
+                        }
+                    )
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -340,9 +348,21 @@ def execute_ags_logic(hass):
     # Logic for remove action
     if inactive_speakers != []:
         try:
-            hass.async_create_task(hass.services.async_call('media_player', 'unjoin', {'entity_id': inactive_speakers }))
-            hass.async_create_task(hass.services.async_call('media_player', 'media_pause', {'entity_id': inactive_speakers }))
-            hass.async_create_task(hass.services.async_call('media_player', 'clear_playlist', {'entity_id': inactive_speakers }))
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'unjoin', {'entity_id': inactive_speakers })
+                )
+            )
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'media_pause', {'entity_id': inactive_speakers })
+                )
+            )
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -350,10 +370,14 @@ def execute_ags_logic(hass):
     # Logic for resetting TV speakers
     if inactive_tv_speakers != []:
         try:
-            hass.async_create_task(hass.services.async_call('media_player', 'select_source', {
-                'source': 'TV',
-                'entity_id': inactive_tv_speakers,
-            }))
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        'source': 'TV',
+                        'entity_id': inactive_tv_speakers,
+                    })
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -397,20 +421,28 @@ def ags_select_source(ags_config, hass):
 
         if source == "TV" or status == "ON TV":
             # Use async service call to avoid blocking the event loop
-            hass.async_create_task(hass.services.async_call('media_player', 'select_source', {
-                "source": source,
-                "entity_id": primary_speaker_entity_id
-            }))
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        "source": source,
+                        "entity_id": primary_speaker_entity_id
+                    })
+                )
+            )
 
         elif source != "Unknown" and status != "OFF":
             source_info = source_dict.get(source)
 
             if source_info:
-                hass.async_create_task(hass.services.async_call('media_player', 'play_media', {
-                    'entity_id': primary_speaker_entity_id,
-                    'media_content_id': source_info["value"],
-                    'media_content_type': source_info["type"]
-                }))
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        hass.services.async_call('media_player', 'play_media', {
+                            'entity_id': primary_speaker_entity_id,
+                            'media_content_id': source_info["value"],
+                            'media_content_type': source_info["type"]
+                        })
+                    )
+                )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
