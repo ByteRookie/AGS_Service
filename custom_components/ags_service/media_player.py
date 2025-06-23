@@ -289,15 +289,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         
         return self.primary_speaker_state.attributes.get('media_content_type') if self.primary_speaker_state else None
     @property
-    def shuffle(self):
-        
-        return self.primary_speaker_state.attributes.get('shuffle') if self.primary_speaker_state else None
-    @property
-    def repeat(self):
-        
-        return self.primary_speaker_state.attributes.get('repeat') if self.primary_speaker_state else None
-
-    @property
     def media_duration(self):
         
         return self.primary_speaker_state.attributes.get('media_duration') if self.primary_speaker_state else None
