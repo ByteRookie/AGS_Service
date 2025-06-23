@@ -1,6 +1,6 @@
 # ags_service .py
 import logging
-import time
+import asyncio
 
 
 
@@ -27,7 +27,9 @@ def update_ags_sensors(ags_config, hass):
     try:
     
         # Call and execute the functions to set sensor values for all of AGS
-        get_configured_rooms(rooms, hass)
+        # Configured rooms rarely change, only compute once
+        if 'configured_rooms' not in hass.data:
+            get_configured_rooms(rooms, hass)
         get_active_rooms(rooms, hass)
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
@@ -50,13 +52,17 @@ def update_ags_sensors(ags_config, hass):
 ## Get Configured Rooms ##
 def get_configured_rooms(rooms, hass):
     """Get the list of configured rooms and store it in hass.data."""
-    
-    # Extract the list of configured rooms
+
+    # If we've already computed this list return the cached value
+    if 'configured_rooms' in hass.data:
+        return hass.data['configured_rooms']
+
+    # Extract the list of configured rooms once at startup
     configured_rooms = [room['room'] for room in rooms]
-    
+
     # Store the list in hass.data
     hass.data['configured_rooms'] = configured_rooms
-    
+
     return configured_rooms
 
 ## Function for Active room ###
@@ -197,19 +203,25 @@ def check_primary_speaker_logic(ags_config, hass):
 
 ### Function to get primary speaker ##
 def determine_primary_speaker(ags_config, hass):
-    # First check
+    """Determine the primary speaker without blocking Home Assistant."""
+
+    # First pass through the logic
     primary_speaker = check_primary_speaker_logic(ags_config, hass)
 
     if primary_speaker == "none":
-        # Introduce a delay of 5 seconds
-        time.sleep(5)
-        # Recheck the logic
-        primary_speaker = check_primary_speaker_logic(ags_config, hass)
+        delay = hass.data['ags_service'].get('primary_delay', 5)
 
-    # Store the primary speaker's state to hass.data
+        async def _delayed_check():
+            """Recheck after a short delay using asyncio to avoid blocking."""
+            await asyncio.sleep(delay)
+            hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
+
+        # Schedule the re-check but don't wait for it here
+        hass.async_create_task(_delayed_check())
+
+    # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker
 
-    # Return the primary speaker's state
     return primary_speaker
 
 ### Function for Active and Inactive list ###
@@ -316,10 +328,11 @@ def execute_ags_logic(hass):
     # Logic for join action
     if active_speakers != []  and status != 'off' and primary_speaker != 'none':
         try:
-            hass.services.call('media_player', 'join', {
+            # Use async_call so the service invocation doesn't block
+            hass.async_create_task(hass.services.async_call('media_player', 'join', {
                 'entity_id': primary_speaker,
                 'group_members': active_speakers,
-            })
+            }))
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -327,9 +340,9 @@ def execute_ags_logic(hass):
     # Logic for remove action
     if inactive_speakers != []:
         try:
-            hass.services.call('media_player', 'unjoin', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'media_pause', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
+            hass.async_create_task(hass.services.async_call('media_player', 'unjoin', {'entity_id': inactive_speakers }))
+            hass.async_create_task(hass.services.async_call('media_player', 'media_pause', {'entity_id': inactive_speakers }))
+            hass.async_create_task(hass.services.async_call('media_player', 'clear_playlist', {'entity_id': inactive_speakers }))
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -337,10 +350,10 @@ def execute_ags_logic(hass):
     # Logic for resetting TV speakers
     if inactive_tv_speakers != []:
         try:
-            hass.services.call('media_player', 'select_source', {
+            hass.async_create_task(hass.services.async_call('media_player', 'select_source', {
                 'source': 'TV',
                 'entity_id': inactive_tv_speakers,
-            })
+            }))
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -383,20 +396,21 @@ def ags_select_source(ags_config, hass):
 
 
         if source == "TV" or status == "ON TV":
-            hass.services.call('media_player', 'select_source', {
+            # Use async service call to avoid blocking the event loop
+            hass.async_create_task(hass.services.async_call('media_player', 'select_source', {
                 "source": source,
                 "entity_id": primary_speaker_entity_id
-            })
+            }))
 
         elif source != "Unknown" and status != "OFF":
             source_info = source_dict.get(source)
 
             if source_info:
-                hass.services.call('media_player', 'play_media', {
+                hass.async_create_task(hass.services.async_call('media_player', 'play_media', {
                     'entity_id': primary_speaker_entity_id,
                     'media_content_id': source_info["value"],
                     'media_content_type': source_info["type"]
-                })
+                }))
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
