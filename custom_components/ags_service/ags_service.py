@@ -46,8 +46,16 @@ def update_ags_sensors(ags_config, hass):
 
     finally:
         # Ensure that the AGS_SENSOR_RUNNING flag is reset to False once the function completes,
-        # regardless of whether it completes successfully or due to an
-        AGS_SENSOR_RUNNING = False 
+        # regardless of whether it completes successfully or due to an error
+        AGS_SENSOR_RUNNING = False
+
+        # Immediately refresh any registered sensors so new values appear without delay
+        sensors = hass.data.get('ags_sensors', [])
+        for sensor in sensors:
+            try:
+                hass.loop.call_soon_threadsafe(sensor.async_schedule_update_ha_state, True)
+            except Exception as exc:
+                _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
 
 ## Get Configured Rooms ##
 def get_configured_rooms(rooms, hass):

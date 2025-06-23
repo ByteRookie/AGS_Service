@@ -43,14 +43,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         for sensor in sensors:
             await sensor.async_update_ha_state(True)
 
-    # List of entity ids to track
-    sensor_entity_ids = [
-    "sensor.ags_status"
-    ]
-
+    # Register sensors so other modules can refresh them immediately
+    hass.data['ags_sensors'] = sensors
 
     entities_to_track = ['zone.home']
-    entities_to_track.extend(sensor_entity_ids)
     
   
 
