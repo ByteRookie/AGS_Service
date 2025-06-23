@@ -54,14 +54,14 @@ To install the AGS Service integration, follow these steps:
 ## Configuration
 
 The integration can be configured from Home Assistant's **Devices & Services** UI.
-The wizard lets you add any number of rooms and the devices in each room one by one.
+The wizard lets you add any number of rooms using the area selector and choose devices from available media players.
 Advanced users may still configure it via `configuration.yaml` using the structure below.
 
 Available options:
 - `disable_zone` – if `True`, the service ignores the state of `zone.home`.
 - `override_content` – for a device entry; when the device plays media containing this value, AGS remains active.
 - `primary_delay` – seconds to wait before clearing the primary speaker (default `5`).
-- `homekit_player` – entity ID used when exposing the media player to HomeKit.
+- `homekit_player` – media player entity used when exposing the player to HomeKit.
 - `create_sensors` – create dedicated sensor entities.
 - `default_on` – default system state after a restart.
 - `static_name` – friendly name to use for the generated media player.

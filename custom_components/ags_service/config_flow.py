@@ -6,6 +6,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.helpers.selector import selector
 
 from .const import (
     DOMAIN,
@@ -64,7 +65,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Optional(CONF_DISABLE_ZONE, default=False): bool,
                 vol.Optional(CONF_PRIMARY_DELAY, default=5): int,
-                vol.Optional(CONF_HOMEKIT_PLAYER, default=""): str,
+                vol.Optional(CONF_HOMEKIT_PLAYER): selector({"entity": {"domain": "media_player"}}),
                 vol.Optional(CONF_CREATE_SENSORS, default=False): bool,
                 vol.Optional(CONF_DEFAULT_ON, default=False): bool,
                 vol.Optional(CONF_STATIC_NAME, default=""): str,
@@ -79,7 +80,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._current_room = {CONF_ROOM: user_input[CONF_ROOM], "devices": []}
             return await self.async_step_add_device()
 
-        schema = vol.Schema({vol.Required(CONF_ROOM): str})
+        schema = vol.Schema({vol.Required(CONF_ROOM): selector({"area": {}})})
         return self.async_show_form(step_id="add_room", data_schema=schema)
 
     async def async_step_add_device(self, user_input=None):
@@ -103,8 +104,8 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_DEVICE_ID): str,
-                vol.Required(CONF_DEVICE_TYPE): str,
+                vol.Required(CONF_DEVICE_ID): selector({"entity": {"domain": "media_player"}}),
+                vol.Required(CONF_DEVICE_TYPE): vol.In(["tv", "speaker"]),
                 vol.Required(CONF_PRIORITY): int,
                 vol.Optional(CONF_OVERRIDE_CONTENT): str,
                 vol.Optional(CONF_ADD_ANOTHER, default=False): bool,
@@ -195,7 +196,7 @@ class AGSServiceOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_SOURCES, default=current.get(CONF_SOURCES, [])): str,
                 vol.Optional(CONF_DISABLE_ZONE, default=current.get(CONF_DISABLE_ZONE, False)): bool,
                 vol.Optional(CONF_PRIMARY_DELAY, default=current.get(CONF_PRIMARY_DELAY, 5)): int,
-                vol.Optional(CONF_HOMEKIT_PLAYER, default=current.get(CONF_HOMEKIT_PLAYER, "")): str,
+                vol.Optional(CONF_HOMEKIT_PLAYER, default=current.get(CONF_HOMEKIT_PLAYER, "")): selector({"entity": {"domain": "media_player"}}),
                 vol.Optional(CONF_CREATE_SENSORS, default=current.get(CONF_CREATE_SENSORS, False)): bool,
                 vol.Optional(CONF_DEFAULT_ON, default=current.get(CONF_DEFAULT_ON, False)): bool,
                 vol.Optional(CONF_STATIC_NAME, default=current.get(CONF_STATIC_NAME, "")): str,
