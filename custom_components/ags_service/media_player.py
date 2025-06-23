@@ -101,6 +101,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             )
         )
 
+    def _schedule_ags_update(self) -> None:
+        """Refresh AGS sensor data without waiting for polling."""
+        def _update() -> None:
+            update_ags_sensors(self.ags_config, self.hass)
+            self.async_schedule_update_ha_state(True)
+
+        self.hass.loop.call_soon_threadsafe(_update)
+
 
 
 
@@ -354,9 +362,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def turn_on(self):
         self.hass.data['switch_media_system_state'] = True
+        self._schedule_ags_update()
 
     def turn_off(self):
         self.hass.data['switch_media_system_state'] = False
+        self._schedule_ags_update()
 
     def media_previous_track(self):
         self._schedule_media_call('media_previous_track', {
@@ -405,11 +415,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if source == "TV" or self.ags_status == "ON TV":
             self.hass.data["ags_media_player_source"] = "TV"
             ags_select_source(self.ags_config, self.hass)
+            self._schedule_ags_update()
 
         else:
             # Update the source in hass.data
             self.hass.data["ags_media_player_source"] = source
             ags_select_source(self.ags_config, self.hass)
+            self._schedule_ags_update()
            
 
     @property
