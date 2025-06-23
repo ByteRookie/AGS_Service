@@ -7,22 +7,24 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.restore_state import RestoreEntity
 
 # Setup platform function
-def setup_platform(
+async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
-    add_entities: AddEntitiesCallback,
+    async_add_entities: AddEntitiesCallback,
     discovery_info: DiscoveryInfoType | None = None
 ) -> None:
     """Set up the switch platform."""
     # Retrieve the room information from the shared data
-    ags_config = hass.data['ags_service']
-    rooms = ags_config['rooms']
+    ags_config = hass.data["ags_service"]
+    rooms = ags_config["rooms"]
 
     # Add the switch entities
-    add_entities([RoomSwitch(hass, room) for room in rooms] )
+    async_add_entities([RoomSwitch(hass, room) for room in rooms])
 
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
+
+    _attr_should_poll = False
 
     def __init__(self, hass, room):
         """Initialize the switch."""
@@ -44,17 +46,17 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         """Return true if the switch is on."""
         return self._attr_is_on
 
-    def turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
-        self.async_schedule_update_ha_state()
+        self.async_write_ha_state()
 
-    def turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
-        self.async_schedule_update_ha_state()
+        self.async_write_ha_state()
 
     async def async_added_to_hass(self):
         """Run when entity about to be added to hass."""
