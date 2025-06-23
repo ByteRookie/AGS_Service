@@ -53,7 +53,8 @@ To install the AGS Service integration, follow these steps:
 
 ## Configuration
 
-The integration is configured via `configuration.yaml`. Here's an example configuration:
+The integration can be configured from Home Assistant's **Devices & Services** UI.
+Advanced users may still configure it via `configuration.yaml`. Here's an example configuration:
 
 New optional Value of disable_zone and override_content.
 disable_zone If set to True it will disable logic looking at zone.home 
