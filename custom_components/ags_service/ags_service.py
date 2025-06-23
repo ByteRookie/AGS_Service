@@ -114,13 +114,14 @@ def update_ags_status(ags_config, hass):
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        if  ags_config['default_on']: 
+        if ags_config['default_on']:
             ags_status = "ON"
         else:
             ags_status = "OFF"
 
         hass.data['ags_status'] = ags_status
         hass.data['media_system_state'] = ags_config['default_on']
+        hass.data['switch_media_system_state'] = ags_config['default_on']
         return ags_status
 
     if not media_system_state:
@@ -392,9 +393,13 @@ def ags_select_source(ags_config, hass):
             source_info = source_dict.get(source)
 
             if source_info:
+                media_id = source_info["value"]
+                if source_info.get("type") == "favorite_item_id" and not media_id.startswith("FV:"):
+                    media_id = f"FV:{media_id}"
+
                 hass.services.call('media_player', 'play_media', {
                     'entity_id': primary_speaker_entity_id,
-                    'media_content_id': source_info["value"],
+                    'media_content_id': media_id,
                     'media_content_type': source_info["type"]
                 })
 

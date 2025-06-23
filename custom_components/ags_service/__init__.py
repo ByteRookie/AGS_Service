@@ -91,7 +91,8 @@ async def async_setup(hass, config):
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None), 
-        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False) 
+        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
+        'switch_media_system_state': ags_config.get(CONF_DEFAULT_ON, False)
     }
     ...
 

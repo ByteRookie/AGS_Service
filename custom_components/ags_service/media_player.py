@@ -17,7 +17,7 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change
-from .ags_service import update_ags_sensors, ags_select_source 
+from .ags_service import update_ags_sensors, ags_select_source, execute_ags_logic
 import logging
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
+        self._last_ags_status = None
 
 
 
@@ -102,6 +103,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ### Move logic here for sensor to remove sensor.py ##
 
         update_ags_sensors(self.ags_config, self._hass)
+
+        previous_status = self._last_ags_status
        
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
@@ -112,6 +115,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = self.hass.data.get('ags_source', None )
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
+
+        if (
+            self.ags_status != "ON TV" and
+            self.primary_speaker in [None, "none"] and
+            self.preferred_primary_speaker not in [None, "none"]
+        ):
+            ags_select_source(self.ags_config, self._hass)
+
+        if (
+            previous_status == "ON TV" and
+            self.ags_status == "ON" and
+            self.primary_speaker in [None, "none"]
+        ):
+            ags_select_source(self.ags_config, self._hass)
 
         found_room = False
         for room in self.ags_config['rooms']:
@@ -142,6 +159,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
+
+        # Run speaker grouping logic similar to the standalone automation.
+        execute_ags_logic(self._hass)
+
+        self._last_ags_status = self.ags_status
 
 
 
@@ -316,9 +338,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def turn_on(self):
         self.hass.data['switch_media_system_state'] = True
+        self.update()
+        self.async_schedule_update_ha_state(True)
 
     def turn_off(self):
         self.hass.data['switch_media_system_state'] = False
+        self.update()
+        self.async_schedule_update_ha_state(True)
 
     def media_previous_track(self):
         self.hass.services.call('media_player', 'media_previous_track', {'entity_id': self.primary_speaker_entity_id})
@@ -368,11 +394,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if source == "TV" or self.ags_status == "ON TV":
             self.hass.data["ags_media_player_source"] = "TV"
             ags_select_source(self.ags_config, self.hass)
+            execute_ags_logic(self.hass)
 
         else:
             # Update the source in hass.data
             self.hass.data["ags_media_player_source"] = source
             ags_select_source(self.ags_config, self.hass)
+            execute_ags_logic(self.hass)
            
 
     @property
