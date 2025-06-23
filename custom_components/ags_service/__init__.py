@@ -3,7 +3,7 @@ import logging
 import voluptuous as vol
 
 from homeassistant.const import CONF_DEVICES
-from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
@@ -13,6 +13,7 @@ from .const import (
     CONF_ROOM,
     CONF_ROOMS,
     CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
     CONF_DEVICE_TYPE,
     CONF_PRIORITY,
     CONF_OVERRIDE_CONTENT,
@@ -45,6 +46,7 @@ DEVICE_SCHEMA = vol.Schema({
                             vol.Schema(
                                 {
                                     vol.Required("device_id"): cv.string,
+                                    vol.Optional(CONF_DEVICE_NAME): cv.string,
                                     vol.Required("device_type"): cv.string,
                                     vol.Required("priority"): cv.positive_int,
                                     vol.Optional("override_content"): cv.string,
@@ -86,11 +88,26 @@ async def async_setup(hass: HomeAssistant, config: dict):
     if DOMAIN not in config:
         return True
 
-    hass.async_create_task(
-        hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_IMPORT}, data=config[DOMAIN]
-        )
-    )
+    ags_config = config[DOMAIN]
+
+    hass.data[DOMAIN] = {
+        "rooms": ags_config["rooms"],
+        "Sources": ags_config["Sources"],
+        "disable_zone": ags_config.get(CONF_DISABLE_ZONE, False),
+        "primary_delay": ags_config.get(CONF_PRIMARY_DELAY, 5),
+        "homekit_player": ags_config.get(CONF_HOMEKIT_PLAYER, None),
+        "create_sensors": ags_config.get(CONF_CREATE_SENSORS, False),
+        "default_on": ags_config.get(CONF_DEFAULT_ON, False),
+        "static_name": ags_config.get(CONF_STATIC_NAME, None),
+        "disable_Tv_Source": ags_config.get(CONF_DISABLE_TV_SOURCE, False),
+    }
+
+    create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
+    if create_sensors:
+        await async_load_platform(hass, "sensor", DOMAIN, {}, config)
+
+    await async_load_platform(hass, "switch", DOMAIN, {}, config)
+    await async_load_platform(hass, "media_player", DOMAIN, {}, config)
 
     return True
 

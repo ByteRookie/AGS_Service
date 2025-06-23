@@ -6,6 +6,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.helpers import area_registry
 from homeassistant.helpers.selector import selector
 
 from .const import (
@@ -13,6 +14,7 @@ from .const import (
     CONF_ROOMS,
     CONF_ROOM,
     CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
     CONF_DEVICE_TYPE,
     CONF_PRIORITY,
     CONF_OVERRIDE_CONTENT,
@@ -44,40 +46,19 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._current_room: dict | None = None
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step or YAML import."""
-        if user_input is not None:
-            # If called via YAML import the structure will already contain lists
-            if isinstance(user_input.get(CONF_ROOMS), list):
-                return self.async_create_entry(title="AGS Service", data=user_input)
+        """Start the flow or handle YAML import."""
+        if user_input is not None and isinstance(user_input.get(CONF_ROOMS), list):
+            return self.async_create_entry(title="AGS Service", data=user_input)
 
-            self.data = {
-                CONF_DISABLE_ZONE: user_input.get(CONF_DISABLE_ZONE, False),
-                CONF_PRIMARY_DELAY: user_input.get(CONF_PRIMARY_DELAY, 5),
-                CONF_HOMEKIT_PLAYER: user_input.get(CONF_HOMEKIT_PLAYER),
-                CONF_CREATE_SENSORS: user_input.get(CONF_CREATE_SENSORS, False),
-                CONF_DEFAULT_ON: user_input.get(CONF_DEFAULT_ON, False),
-                CONF_STATIC_NAME: user_input.get(CONF_STATIC_NAME),
-                CONF_DISABLE_TV_SOURCE: user_input.get(CONF_DISABLE_TV_SOURCE, False),
-            }
-            return await self.async_step_add_room()
-
-        data_schema = vol.Schema(
-            {
-                vol.Optional(CONF_DISABLE_ZONE, default=False): bool,
-                vol.Optional(CONF_PRIMARY_DELAY, default=5): int,
-                vol.Optional(CONF_HOMEKIT_PLAYER): selector({"entity": {"domain": "media_player"}}),
-                vol.Optional(CONF_CREATE_SENSORS, default=False): bool,
-                vol.Optional(CONF_DEFAULT_ON, default=False): bool,
-                vol.Optional(CONF_STATIC_NAME, default=""): str,
-                vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): bool,
-            }
-        )
-        return self.async_show_form(step_id="user", data_schema=data_schema)
+        return await self.async_step_add_room()
 
     async def async_step_add_room(self, user_input=None):
         """Add a room to the configuration."""
         if user_input is not None:
-            self._current_room = {CONF_ROOM: user_input[CONF_ROOM], "devices": []}
+            reg = await area_registry.async_get_registry(self.hass)
+            area = reg.async_get_area(user_input[CONF_ROOM])
+            name = area.name if area else user_input[CONF_ROOM]
+            self._current_room = {CONF_ROOM: name, "devices": []}
             return await self.async_step_add_device()
 
         schema = vol.Schema({vol.Required(CONF_ROOM): selector({"area": {}})})
@@ -87,8 +68,12 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Add a device to the current room."""
         if user_input is not None and self._current_room is not None:
             add_more = user_input.pop(CONF_ADD_ANOTHER)
+            entity_id = user_input[CONF_DEVICE_ID]
+            state = self.hass.states.get(entity_id)
+            name = state.name if state else entity_id
             device = {
-                CONF_DEVICE_ID: user_input[CONF_DEVICE_ID],
+                CONF_DEVICE_ID: entity_id,
+                CONF_DEVICE_NAME: name,
                 CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
                 CONF_PRIORITY: user_input[CONF_PRIORITY],
             }
@@ -136,13 +121,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.sources.append(source)
             if add_more:
                 return await self.async_step_add_source()
-
-            data = {
-                **self.data,
-                CONF_ROOMS: self.rooms,
-                CONF_SOURCES: self.sources,
-            }
-            return self.async_create_entry(title="AGS Service", data=data)
+            return await self.async_step_options()
 
         schema = vol.Schema(
             {
@@ -154,6 +133,47 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
         return self.async_show_form(step_id="add_source", data_schema=schema)
+
+    async def async_step_options(self, user_input=None):
+        """Collect global options after rooms and sources."""
+        if user_input is not None:
+            self.data = {
+                CONF_DISABLE_ZONE: user_input.get(CONF_DISABLE_ZONE, False),
+                CONF_PRIMARY_DELAY: user_input.get(CONF_PRIMARY_DELAY, 5),
+                CONF_HOMEKIT_PLAYER: user_input.get(CONF_HOMEKIT_PLAYER),
+                CONF_CREATE_SENSORS: user_input.get(CONF_CREATE_SENSORS, False),
+                CONF_DEFAULT_ON: user_input.get(CONF_DEFAULT_ON, False),
+                CONF_STATIC_NAME: user_input.get(CONF_STATIC_NAME),
+                CONF_DISABLE_TV_SOURCE: user_input.get(CONF_DISABLE_TV_SOURCE, False),
+            }
+            return await self.async_step_summary()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_DISABLE_ZONE, default=False): bool,
+                vol.Optional(CONF_PRIMARY_DELAY, default=5): int,
+                vol.Optional(CONF_HOMEKIT_PLAYER): selector({"entity": {"domain": "media_player"}}),
+                vol.Optional(CONF_CREATE_SENSORS, default=False): bool,
+                vol.Optional(CONF_DEFAULT_ON, default=False): bool,
+                vol.Optional(CONF_STATIC_NAME, default=""): str,
+                vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): bool,
+            }
+        )
+        return self.async_show_form(step_id="options", data_schema=schema)
+
+    async def async_step_summary(self, user_input=None):
+        """Show summary before creating entry."""
+        if user_input is not None:
+            data = {**self.data, CONF_ROOMS: self.rooms, CONF_SOURCES: self.sources}
+            return self.async_create_entry(title="AGS Service", data=data)
+
+        summary = json.dumps({"rooms": self.rooms, "sources": self.sources}, indent=2)
+        schema = vol.Schema({})
+        return self.async_show_form(
+            step_id="summary",
+            description_placeholders={"summary": summary},
+            data_schema=schema,
+        )
 
     @staticmethod
     @callback

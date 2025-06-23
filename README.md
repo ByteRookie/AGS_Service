@@ -54,8 +54,8 @@ To install the AGS Service integration, follow these steps:
 ## Configuration
 
 The integration can be configured from Home Assistant's **Devices & Services** UI.
-The wizard lets you add any number of rooms using the area selector and choose devices from available media players.
-Advanced users may still configure it via `configuration.yaml` using the structure below.
+Rooms and their devices are selected first using area and entity selectors. After adding sources and options, a summary screen lets you review everything before finishing.
+Manual YAML configuration continues to work for advanced setups using the structure below.
 
 Available options:
 - `disable_zone` – if `True`, the service ignores the state of `zone.home`.
