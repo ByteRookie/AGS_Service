@@ -2,15 +2,16 @@
 from __future__ import annotations
 from datetime import timedelta
 
-# Sensors mostly update via the state change listener below, so heavy polling
-# isn't required. 30 seconds keeps them responsive without excessive work.
-SCAN_INTERVAL = timedelta(seconds=30)
+# Sensors update primarily from the state change listener below.  A shorter poll
+# interval keeps things responsive without relying on a 30 second refresh.
+SCAN_INTERVAL = timedelta(seconds=5)
 
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from .ags_service import update_ags_sensors
 
 import asyncio
 # Setup platform function
@@ -36,10 +37,14 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     # Define a function to be called when a tracked entity changes its state
     def state_changed_listener(entity_id, old_state, new_state):
-        # Make sure the new state is not None
+        # Ignore events with no new state
         if new_state is None:
             return
-        # Trigger an update of your sensor
+
+        # Update internal AGS data immediately
+        update_ags_sensors(ags_config, hass)
+
+        # Refresh the sensors so the UI reflects the new data
         for sensor in sensors:
             hass.async_create_task(sensor.async_update_ha_state(True))
 
