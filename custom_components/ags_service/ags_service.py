@@ -194,7 +194,7 @@ def check_primary_speaker_logic(ags_config, hass):
                 if sorted_devices:
                     for device in sorted_devices:
                         device_state = hass.states.get(device['device_id'])
-                        group_members = device_state.attributes.get('group_members')
+                        group_members = device_state.attributes.get('group_members') if device_state else None
 
                         if (
                             device['device_type'] == 'speaker' and
