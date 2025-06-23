@@ -33,12 +33,21 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_track_state_change(hass, "switch.media_system", ags_media_player.async_primary_speaker_changed)
 
     # Set up a listener to monitor changes to the primary speaker (from hass.data)
-    keys_to_check = ['primary_speaker', 'ags_status', 'switch_media_system_state', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
+    keys_to_check = [
+        'primary_speaker',
+        'ags_status',
+        'switch_media_system_state',
+        'active_rooms',
+        'active_speakers',
+        'ags_media_player_source',
+    ]
 
     for key in keys_to_check:
         entity_id = hass.data.get(key)
-        if entity_id:
-            async_track_state_change(hass, entity_id, ags_media_player.async_primary_speaker_changed)
+        if isinstance(entity_id, str) and '.' in entity_id:
+            async_track_state_change(
+                hass, entity_id, ags_media_player.async_primary_speaker_changed
+            )
 
     # Add switches for rooms and zone.home
     entities_to_track = ['zone.home']
