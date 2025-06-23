@@ -54,15 +54,20 @@ To install the AGS Service integration, follow these steps:
 ## Configuration
 
 The integration can be configured from Home Assistant's **Devices & Services** UI.
-Advanced users may still configure it via `configuration.yaml`. Here's an example configuration:
+The wizard lets you add any number of rooms and the devices in each room one by one.
+Advanced users may still configure it via `configuration.yaml` using the structure below.
 
-New optional Value of disable_zone and override_content.
-disable_zone If set to True it will disable logic looking at zone.home 
-override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
+Available options:
+- `disable_zone` – if `True`, the service ignores the state of `zone.home`.
+- `override_content` – for a device entry; when the device plays media containing this value, AGS remains active.
+- `primary_delay` – seconds to wait before clearing the primary speaker (default `5`).
+- `homekit_player` – entity ID used when exposing the media player to HomeKit.
+- `create_sensors` – create dedicated sensor entities.
+- `default_on` – default system state after a restart.
+- `static_name` – friendly name to use for the generated media player.
+- `disable_Tv_Source` – skip audio switching when a TV is active.
 
-primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker. 
-
-this has all features: 
+Complete YAML example:
 
 ```yaml
 ags_service:
@@ -86,20 +91,23 @@ ags_service:
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
-  Source_selector: "input_select.station"
   Sources:
     - Source: "Top Hit"
       Source_Value: "2/11"
+      media_content_type: "music"
+      source_default: true
     - Source: "Chill"
       Source_Value: "2/12"
+      media_content_type: "music"
     - Source: "Alternative"
+      Source_Value: "2/13"
+      media_content_type: "music"
   
 
 ```
 
-rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-source_selector: The entity ID of the input selector that is used to select the audio source. This is a required value.
-sources: The sources of audio that can be selected. The keys in this object should match the options in the source selector, and the values are the corresponding human-readable names.
+rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string.
+sources: Items that can be selected for playback. Each source has a `Source` name, a `Source_Value` used as the content ID, and a `media_content_type`. Set `source_default: true` on one entry to mark it as the default.
 
 
 ##Automation

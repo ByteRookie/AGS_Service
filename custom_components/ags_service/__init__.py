@@ -76,7 +76,7 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
     vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
-})
+}, extra=vol.ALLOW_EXTRA)
 
 CONFIG_SCHEMA = vol.Schema({DOMAIN: DEVICE_SCHEMA}, extra=vol.ALLOW_EXTRA)
 
