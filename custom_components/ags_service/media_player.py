@@ -109,7 +109,23 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
-        self.ags_source = self.hass.data.get('ags_source', None )
+        # Determine the currently selected source. Historically the attribute
+        # ``ags_source`` was expected to expose the numeric Sonos favorite ID so
+        # that automations could directly feed it to ``media_player.play_media``.
+        # The integration however only stored the human readable source name in
+        # ``ags_media_player_source`` and never populated ``ags_source``.  As a
+        # result the attribute constantly returned ``Not available`` which led to
+        # errors like ``Missing favorite for media_id`` when the automation tried
+        # to use the value.  Compute the source ID from the selected name so the
+        # attribute is always valid. If no source has been picked yet fall back
+        # to the first configured entry so automations still have something
+        # usable.
+        selected_source = self.hass.data.get('ags_media_player_source')
+        if selected_source is None:
+            sources = self.hass.data['ags_service']['Sources']
+            if sources:
+                selected_source = sources[0]["Source"]
+        self.ags_source = self.get_source_value_by_name(selected_source)
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
@@ -164,7 +180,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_status": self.ags_status or "Not available",
             "primary_speaker": self.primary_speaker or "Not available",
             "preferred_primary_speaker": self.preferred_primary_speaker or "Not available",
-            "ags_source": self.ags_source or "Not available",
+            # ags_source now contains the numeric favorite ID. If no source is
+            # selected the value will be ``None`` which allows automations to
+            # skip calling ``play_media`` rather than passing an invalid
+            # favourite reference.
+            "ags_source": self.ags_source,
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
         }
         return attributes
