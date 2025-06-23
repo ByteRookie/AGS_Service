@@ -14,7 +14,7 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 import asyncio
 # Setup platform function
-from homeassistant.helpers.event import async_track_state_change
+from homeassistant.helpers.event import async_track_state_change_event
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
@@ -60,7 +60,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             entities_to_track.append(device['device_id'])
 
     # Register the state change listener
-    async_track_state_change(hass, entities_to_track, state_changed_listener)
+    async_track_state_change_event(hass, entities_to_track, state_changed_listener)
 
     # Add the sensors to Home Assistant
     
