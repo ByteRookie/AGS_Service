@@ -2,7 +2,9 @@
 from __future__ import annotations
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(seconds=1)
+# Sensors mostly update via the state change listener below, so heavy polling
+# isn't required. 30 seconds keeps them responsive without excessive work.
+SCAN_INTERVAL = timedelta(seconds=30)
 
 
 from homeassistant.components.sensor import SensorEntity
