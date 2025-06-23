@@ -408,32 +408,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         return None  # if not found
 
     def select_source(self, source):
-        """Select input source."""
-        if source == "TV":
-            self.hass.data["ags_media_player_source"] = "TV"
-            self._schedule_media_call(
-                "select_source",
-                {
-                    "entity_id": self.primary_speaker_entity_id,
-                    "source": source,
-                },
-            )
-        else:
-            # Update the source in hass.data to the requested value
-            self.hass.data["ags_media_player_source"] = source
+        """Select the desired source and play it on the primary speaker."""
+        self.hass.data["ags_media_player_source"] = source
 
-            for src in self.hass.data["ags_service"]["Sources"]:
-                if src["Source"] == source:
-                    self._schedule_media_call(
-                        "play_media",
-                        {
-                            "entity_id": self.primary_speaker_entity_id,
-                            "media_content_id": src["Source_Value"],
-                            "media_content_type": src.get("media_content_type"),
-                        },
-                    )
-                    break
-
+        ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
            
 
