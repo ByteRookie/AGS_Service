@@ -43,7 +43,6 @@
         "description": "You are on {progress}. {summary}\nEnter playback source details",
         "data": {
           "Source": "Name*",
-          "media_item": "Browse media",
           "Source_Value": "Source value*",
           "media_content_type": "Content type*",
           "source_default": "Default",
