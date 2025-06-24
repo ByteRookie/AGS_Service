@@ -2,12 +2,9 @@
 import logging
 import time
 
-
-
 _LOGGER = logging.getLogger(__name__)
 # Global flag to indicate whether the update_sensors function is currently running
 AGS_SENSOR_RUNNING = False
-AGS_LOGIC_RUNNING = False
 ags_select_source_running = False
 
 ### Sensor Functions ###
@@ -34,13 +31,6 @@ def update_ags_sensors(ags_config, hass):
         determine_primary_speaker(ags_config, hass)
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
-        ## Use in Future release ###
-        ### Call and execute the Control System for AGS #### 
-        #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
-         #   _LOGGER.error("ags source change has been called")
-          #  ags_select_source(ags_config, hass)    
-       # if  hass.data.get('active_speakers') != "OFF" and ( hass.data.get('active_speakers') != [] or hass.data.get('inactive_tv_speakers') != [] or hass.data.get('inactive_speakers') != []):
-        #    execute_ags_logic(hass)
 
     finally:
         # Ensure that the AGS_SENSOR_RUNNING flag is reset to False once the function completes,
@@ -245,9 +235,6 @@ def update_speaker_states(rooms, hass):
 
     return active_speakers, inactive_speakers
 
-
-
-
 ### Function for Preferred primary speaker ### 
 def get_preferred_primary_speaker(rooms, hass):
     active_speakers = hass.data.get('active_speakers')
@@ -287,73 +274,11 @@ def get_inactive_tv_speakers(rooms, hass):
 
     return inactive_tv_speakers
 
-
-
-
-
-
-
-
-### Controls from this point ###
-def execute_ags_logic(hass):
-    global AGS_LOGIC_RUNNING
-
-    # If the logic is already running, exit the function
-    if AGS_LOGIC_RUNNING:
-        return
-
-    # Set the flag to indicate that the logic is running
-    AGS_LOGIC_RUNNING = True
-
-    # Fetch data from hass.data
-    active_speakers = hass.data.get('active_speakers', [])
-    status = hass.data.get('ags_status', "OFF")
-    inactive_speakers = hass.data.get('inactive_speakers', [])
-    primary_speaker = hass.data.get('primary_speaker', "None")
-    inactive_tv_speakers = hass.data.get('ags_inactive_tv_speakers', [])
-    
-    # Logic for join action
-    if active_speakers != []  and status != 'off' and primary_speaker != 'none':
-        try:
-            hass.services.call('media_player', 'join', {
-                'entity_id': primary_speaker,
-                'group_members': active_speakers,
-            })
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Logic for remove action
-    if inactive_speakers != []:
-        try:
-            hass.services.call('media_player', 'unjoin', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'media_pause', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Logic for resetting TV speakers
-    if inactive_tv_speakers != []:
-        try:
-            hass.services.call('media_player', 'select_source', {
-                'source': 'TV',
-                'entity_id': inactive_tv_speakers,
-            })
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Reset the flag to indicate that the logic has finished
-    AGS_LOGIC_RUNNING = False
-    return
-
 def ags_select_source(ags_config, hass):
     global ags_select_source_running
 
     # Check if the logic is already running
     if ags_select_source_running:
-
 
         _LOGGER.warning("ags_select_source is already running!")
         return
@@ -380,7 +305,6 @@ def ags_select_source(ags_config, hass):
         sources_list = hass.data['ags_service']['Sources'] 
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
-
         if source == "TV" or status == "ON TV":
             hass.services.call('media_player', 'select_source', {
                 "source": source,
@@ -403,6 +327,4 @@ def ags_select_source(ags_config, hass):
     finally:
         # Reset the flag to indicate that the logic has finished
         ags_select_source_running = False
-
-
 
