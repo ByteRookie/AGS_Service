@@ -90,18 +90,40 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return min(devices, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
         return min(speakers, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
 
+    def _format_rooms(self) -> str:
+        """Return a table of rooms and devices."""
+        if not self.rooms:
+            return "No rooms configured"
+        lines: list[str] = []
+        for room in sorted(self.rooms, key=lambda r: r[CONF_ROOM]):
+            lines.append(f"- {room[CONF_ROOM]}")
+            for d in sorted(room["devices"], key=lambda x: x[CONF_PRIORITY]):
+                over = f" (override: {d[CONF_OVERRIDE_CONTENT]})" if d.get(CONF_OVERRIDE_CONTENT) else ""
+                lines.append(
+                    f"  {d[CONF_PRIORITY]}. {d[CONF_DEVICE_NAME]} [{d[CONF_DEVICE_TYPE]}]{over}"
+                )
+        return "\n".join(lines)
+
+    def _format_sources(self) -> str:
+        """Return a table of playback sources."""
+        if not self.sources:
+            return "No sources configured"
+        lines: list[str] = []
+        for idx, s in enumerate(self.sources, 1):
+            default = " (default)" if s.get(CONF_SOURCE_DEFAULT) else ""
+            lines.append(f"{idx}. {s[CONF_SOURCE]} -> {s[CONF_SOURCE_VALUE]}{default}")
+        return "\n".join(lines)
+
     def _summary(self) -> str:
-        """Return formatted JSON summary of rooms, sources and options."""
-        rooms = [
-            {**room, "devices": sorted(room["devices"], key=lambda d: d[CONF_PRIORITY])}
-            for room in self.rooms
-        ]
-        if self.sort_by == "room":
-            rooms.sort(key=lambda r: r[CONF_ROOM])
-        elif self.sort_by == "priority":
-            rooms.sort(key=lambda r: r["devices"][0][CONF_PRIORITY] if r["devices"] else 0)
-        summary = {"rooms": rooms, "sources": self.sources, "options": self.data}
-        return json.dumps(summary, indent=2)
+        """Return human readable summary of rooms, sources and options."""
+        parts: list[str] = []
+        parts.append("Rooms:\n" + self._format_rooms())
+        parts.append("Sources:\n" + self._format_sources())
+        if self.data:
+            options = [f"{k}: {v}" for k, v in self.data.items() if v is not None]
+            if options:
+                parts.append("Options:\n" + "\n".join(options))
+        return "\n\n".join(parts)
 
     def _progress(self, step: int) -> str:
         return f"Step {step}/{TOTAL_STEPS}"

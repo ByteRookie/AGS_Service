@@ -4,14 +4,14 @@
     "step": {
       "select_rooms": {
         "title": "Select rooms",
-        "description": "{progress}\n{summary}\nChoose one or more areas to include",
+        "description": "You are on {progress}. {summary}\nChoose the areas you want AGS to manage",
         "data": {
           "rooms": "Rooms*"
         }
       },
       "manage_devices": {
         "title": "Manage devices",
-        "description": "{progress}\n{summary}\nAdd or remove media players and sort them",
+        "description": "You are on {progress}. {summary}\nUse this table to add or remove media players and choose how they are sorted",
         "data": {
           "action": "Action",
           "index": "Index",
@@ -20,7 +20,7 @@
       },
       "add_device": {
         "title": "Add device",
-        "description": "{progress}\n{summary}\nProvide details for the new device",
+        "description": "You are on {progress}. {summary}\nFill in the device details below",
         "data": {
           "room": "Room*",
           "device_id": "Select your devices*",
@@ -32,7 +32,7 @@
       },
       "manage_sources": {
         "title": "Manage sources",
-        "description": "{progress}\n{summary}\nCreate or remove playback sources",
+        "description": "You are on {progress}. {summary}\nCreate or remove playback sources",
         "data": {
           "action": "Action",
           "index": "Index"
@@ -40,7 +40,7 @@
       },
       "add_source": {
         "title": "Add source",
-        "description": "{progress}\n{summary}\nEnter playback source details",
+        "description": "You are on {progress}. {summary}\nEnter playback source details",
         "data": {
           "Source": "Name*",
           "media_item": "Browse media",
@@ -52,15 +52,15 @@
       },
       "options": {
         "title": "Global options",
-        "description": "{progress}\n{summary}",
+        "description": "You are on {progress}. {summary}",
         "data": {
-          "disable_zone": "Disable zone",
-          "primary_delay": "Primary delay",
-          "homekit_player": "HomeKit player",
-          "create_sensors": "Create sensors",
-          "default_on": "Default on",
-          "static_name": "Static name",
-          "disable_Tv_Source": "Disable TV source"
+          "disable_zone": "Ignore zone.home",
+          "primary_delay": "Delay before clearing primary speaker",
+          "homekit_player": "HomeKit bridge player",
+          "create_sensors": "Create sensor entities",
+          "default_on": "Turn on after restart",
+          "static_name": "Static entity name",
+          "disable_Tv_Source": "Ignore TV source"
         }
       },
       "summary": {

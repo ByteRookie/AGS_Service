@@ -50,10 +50,10 @@ To install the AGS Service integration, follow these steps:
 
 ## Configuration
 
-The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Each form displays your progress (for example, "Step 2/5") and a running summary of previous choices.  Labels and tooltips explain every option and show defaults when available.
-1. **Select rooms** – pick one or more areas using the area selector. The summary lists the chosen rooms.
-2. **Add devices** – for each media player select its room, type (`tv` or `speaker`) and unique priority from dropdowns. If the chosen priority is already in use the remaining devices shift down so every number stays unique. You may supply an `override_content` text that, when found inside the device's `media_content_id`, forces the room to stay active. New devices start with the last rank automatically.
-3. **Manage sources** – add or remove any number of playback sources. You can browse media from the top‑priority speaker using Home Assistant's media selector and mark one entry as the default.
+The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Each page shows your progress (for example, "Step 2/5") and a text summary of your selections so far. Labels include helpful tooltips describing what each setting does and show the default value when optional.
+1. **Select rooms** – pick one or more areas using the built‑in area selector. The running summary lists every chosen room.
+2. **Add devices** – use the device table to add media players. Choose the room, device type (`tv` or `speaker`) and a unique priority. If you pick a number already in use the other devices shift down automatically. Optionally supply an `override_content` keyword that keeps the room active when detected.
+3. **Manage sources** – a similar table lets you add or remove playback sources. Browsing media from the highest‑priority speaker fills in the source value automatically and one entry can be marked as the default.
 4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation. Every field includes a short tooltip explaining its purpose. Required fields show a `*` and defaults appear in parentheses. Available options (defaults in parentheses):
    - `disable_zone` – ignore the state of `zone.home` when `True` (`False`).
    - `primary_delay` – seconds to wait before clearing the primary speaker (`5`).
@@ -62,7 +62,7 @@ The integration can be configured entirely from Home Assistant's **Devices & Ser
    - `default_on` – default system state after a restart (`False`).
    - `static_name` – friendly name for the generated media player (none).
    - `disable_Tv_Source` – skip audio switching when a TV is active (`False`).
-5. **Review the summary** – confirm the rooms, devices, sources and options. This page displays a formatted summary of every setting and lets you return to previous steps before saving.
+5. **Review the summary** – view tables of all rooms, devices, sources and options. Links allow returning to the room or device tables or to edit the options before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below. When both UI and YAML are used, rooms and sources from each are combined and any conflicting options take the value from the UI entry.
 
 Complete YAML example:
