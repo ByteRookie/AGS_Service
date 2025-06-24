@@ -11,9 +11,9 @@ class DummyVol:
             return v
         return identity
 
-sys.modules.setdefault('voluptuous', DummyVol())
-
 # Provide minimal stubs for Home Assistant modules required by the media_player
+sys.modules['voluptuous'] = DummyVol()
+
 class DummyRestoreEntity:
     pass
 
@@ -22,59 +22,54 @@ class DummyMediaPlayerEntity:
     pass
 
 
-sys.modules.setdefault(
-    'homeassistant.helpers.restore_state',
-    types.SimpleNamespace(RestoreEntity=DummyRestoreEntity),
-)
-sys.modules.setdefault(
-    'homeassistant.components.media_player',
-    types.SimpleNamespace(MediaPlayerEntity=DummyMediaPlayerEntity),
-)
+ORIGINAL_MODULES = {}
 
 class DummyFeature:
     SEEK = PLAY = PAUSE = STOP = SHUFFLE_SET = REPEAT_SET = NEXT_TRACK = (
         PREVIOUS_TRACK
     ) = SELECT_SOURCE = VOLUME_SET = TURN_ON = TURN_OFF = 1
 
-sys.modules.setdefault(
-    'homeassistant.components.media_player.const',
-    types.SimpleNamespace(MediaPlayerEntityFeature=DummyFeature),
-)
-sys.modules.setdefault(
-    'homeassistant.const',
-    types.SimpleNamespace(
+STUB_MODULES = {
+    'homeassistant.helpers.restore_state': types.SimpleNamespace(
+        RestoreEntity=DummyRestoreEntity
+    ),
+    'homeassistant.components.media_player': types.SimpleNamespace(
+        MediaPlayerEntity=DummyMediaPlayerEntity
+    ),
+    'homeassistant.components.media_player.const': types.SimpleNamespace(
+        MediaPlayerEntityFeature=DummyFeature
+    ),
+    'homeassistant.const': types.SimpleNamespace(
         STATE_IDLE='idle',
         STATE_PLAYING='playing',
         STATE_PAUSED='paused',
-        CONF_DEVICES='devices'
+        CONF_DEVICES='devices',
     ),
-)
-sys.modules.setdefault(
-    'homeassistant.helpers.event',
-    types.SimpleNamespace(async_track_state_change_event=lambda *a, **k: None),
-)
-sys.modules.setdefault(
-    'homeassistant.helpers.config_validation',
-    types.SimpleNamespace(
+    'homeassistant.helpers.event': types.SimpleNamespace(
+        async_track_state_change_event=lambda *a, **k: None
+    ),
+    'homeassistant.helpers.config_validation': types.SimpleNamespace(
         Schema=lambda v: v,
         ensure_list=lambda v: v,
         string=lambda v=None: v,
         boolean=lambda v=None: v,
         positive_int=lambda v=None: v,
-    )
-)
-sys.modules.setdefault(
-    'homeassistant.helpers.discovery',
-    types.SimpleNamespace(async_load_platform=lambda *a, **k: None)
-)
-sys.modules.setdefault(
-    'homeassistant.helpers',
-    types.SimpleNamespace(
-        config_validation=sys.modules['homeassistant.helpers.config_validation'],
-        discovery=sys.modules['homeassistant.helpers.discovery'],
-        event=sys.modules['homeassistant.helpers.event'],
     ),
+    'homeassistant.helpers.discovery': types.SimpleNamespace(
+        async_load_platform=lambda *a, **k: None
+    ),
+}
+
+for name, stub in STUB_MODULES.items():
+    ORIGINAL_MODULES[name] = sys.modules.get(name)
+    sys.modules[name] = stub
+
+sys.modules['homeassistant.helpers'] = types.SimpleNamespace(
+    config_validation=sys.modules['homeassistant.helpers.config_validation'],
+    discovery=sys.modules['homeassistant.helpers.discovery'],
+    event=sys.modules['homeassistant.helpers.event'],
 )
+sys.modules.setdefault('custom_components', types.ModuleType('custom_components'))
 
 # Load ags_service module directly without executing package __init__
 MODULE_PATH = os.path.join(os.path.dirname(__file__), '..', 'ags_service.py')
@@ -590,3 +585,12 @@ def test_async_setup_skips_sensors(monkeypatch):
     monkeypatch.setattr(ags_init, "async_load_platform", fake_load)
     asyncio.get_event_loop().run_until_complete(ags_init.async_setup(hass, config))
     assert "sensor" not in calls
+
+
+def teardown_module(module):
+    """Restore any Home Assistant modules we replaced with stubs."""
+    for name, original in ORIGINAL_MODULES.items():
+        if original is None:
+            del sys.modules[name]
+        else:
+            sys.modules[name] = original
