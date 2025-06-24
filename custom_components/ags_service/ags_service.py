@@ -474,6 +474,7 @@ def run_internal_tests(hass):
     """Run the built in pytest suite and return a formatted summary string."""
     import os
     import pytest
+    import asyncio
 
     # The tests now live alongside this module under a "tests" folder
     tests_path = os.path.join(os.path.dirname(__file__), 'tests')
@@ -497,7 +498,14 @@ def run_internal_tests(hass):
                 self.results.append((name, report.outcome == "passed"))
 
     collector = ResultCollector()
-    pytest.main([tests_path, '-q'], plugins=[collector])
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        pytest.main([tests_path, '-q'], plugins=[collector])
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
 
     if not collector.results:
         message = "\u274c AGS Service Tests Failed\nNo tests executed"

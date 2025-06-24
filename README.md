@@ -224,6 +224,8 @@ script:
           message: >-
             {{ state_attr('persistent_notification.ags_service_tests', 'message') }}
 ```
+The integration creates a temporary event loop to execute the suite, so the
+tests run reliably even though the service itself runs in a background thread.
 
 Invoking the script runs the tests and posts a persistent notification with ID
 `ags_service_tests`. The message begins with an overall summary line and then
