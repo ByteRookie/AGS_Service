@@ -73,7 +73,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_add_source()
 
         self._current_room_id = self._room_ids.pop(0)
-        reg = await area_registry.async_get_registry(self.hass)
+        reg = area_registry.async_get(self.hass)
         area = reg.async_get_area(self._current_room_id)
         name = area.name if area else self._current_room_id
         self._current_room = {CONF_ROOM: name, "devices": []}
