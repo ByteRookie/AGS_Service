@@ -84,10 +84,10 @@ action:
     then:
       - service: media_player.join
         data:
-          entity_id: "{{ state_attr('media_player.ags_media_system', 'primary_speaker' )}}"
+          entity_id: "{{ state_attr('media_player.ags_media_system', 'primary_speaker' ) }}"
           group_members: >-
-            {{ state_attr('media_player.ags_media_system', 'active_speakers' )
-            }}
+            {{ state_attr('media_player.ags_media_system', 'active_speakers' ) }}
+      - delay: '00:00:02'
     else: null
     alias: Join Action
   - if:

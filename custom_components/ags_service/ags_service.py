@@ -216,26 +216,27 @@ def check_primary_speaker_logic(ags_config, hass):
 def determine_primary_speaker(ags_config, hass):
     """Determine the primary speaker without blocking Home Assistant."""
 
-    # First pass through the logic
-    primary_speaker = check_primary_speaker_logic(ags_config, hass)
+    # First evaluate potential primary speaker
+    new_primary = check_primary_speaker_logic(ags_config, hass)
+    current_primary = hass.data.get('primary_speaker')
 
-    if primary_speaker == "none":
+    if new_primary == "none":
         delay = hass.data['ags_service'].get('primary_delay', 5)
 
         async def _delayed_check():
-            """Recheck after a short delay using asyncio to avoid blocking."""
+            """Recheck after a delay before clearing the primary."""
             await asyncio.sleep(delay)
             hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
 
-        # Schedule the re-check from the event loop in a thread safe way
-        hass.loop.call_soon_threadsafe(
-            lambda: hass.async_create_task(_delayed_check())
-        )
+        # Schedule the re-check without blocking
+        hass.loop.call_soon_threadsafe(lambda: hass.async_create_task(_delayed_check()))
 
-    # Store the immediate result
-    hass.data['primary_speaker'] = primary_speaker
+        # Keep the current primary until the delayed check runs
+        return current_primary
 
-    return primary_speaker
+    hass.data['primary_speaker'] = new_primary
+
+    return new_primary
 
 ### Function for Active and Inactive list ###
 def update_speaker_states(rooms, hass):
