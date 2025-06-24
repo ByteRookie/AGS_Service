@@ -361,7 +361,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data = {**self.data, CONF_ROOMS: self.rooms, CONF_SOURCES: self.sources}
             return self.async_create_entry(title="AGS Service", data=data)
 
-        summary = json.dumps({"rooms": self.rooms, "sources": self.sources, "options": self.data}, indent=2)
+        summary = self._summary()
         return self.async_show_form(
             step_id="summary",
             description_placeholders={
