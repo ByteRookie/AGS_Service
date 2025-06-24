@@ -6,7 +6,13 @@ import datetime as dt
 # Import ScheduleEntity from the schedule component. In Home Assistant the
 # entity class is defined in ``homeassistant.components.schedule.entity`` rather
 # than being exported directly from the component package.
-from homeassistant.components.schedule.entity import ScheduleEntity
+# Importing the schedule entity differs across Home Assistant versions.
+# Newer releases expose ``ScheduleEntity`` directly from the schedule
+# component package, while older releases provide it from a submodule.
+try:  # pragma: no cover - the import path depends on the HA version
+    from homeassistant.components.schedule import ScheduleEntity
+except ImportError:  # pragma: no cover - fallback for older versions
+    from homeassistant.components.schedule.entity import ScheduleEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 
 
