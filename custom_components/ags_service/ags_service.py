@@ -470,4 +470,135 @@ def ags_select_source(ags_config, hass):
         ags_select_source_running = False
 
 
+def run_internal_tests(hass):
+    """Run the built in pytest suite and return a formatted summary string."""
+    import os
+    import pytest
+
+    tests_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tests')
+
+    class ResultCollector:
+        def __init__(self):
+            self.results = []
+
+        def pytest_runtest_logreport(self, report):
+            if report.when == "call":
+                name = report.nodeid.split("::")[-1]
+                self.results.append((name, report.outcome == "passed"))
+
+    collector = ResultCollector()
+    pytest.main([tests_path, '-q'], plugins=[collector])
+
+    overall = all(p for _, p in collector.results)
+    header_icon = "✅" if overall else "❌"
+    header = f"{header_icon} AGS Service Tests {'Passed' if overall else 'Failed'}"
+    TEST_DESCRIPTIONS = {
+        'test_get_configured_rooms':
+            'verifies configured rooms are stored in hass.data',
+        'test_get_active_rooms':
+            'ensures room switches determine active rooms',
+        'test_update_ags_status_zone_off':
+            'zone.home=0 forces the system OFF',
+        'test_update_ags_status_override':
+            'override playback sets status',
+        'test_update_ags_status_tv_mode':
+            'TV playing sets status to ON TV',
+        'test_check_primary_speaker_logic_override':
+            'override content selects that speaker as primary',
+        'test_determine_primary_speaker':
+            'delayed recheck sets the primary speaker',
+        'test_determine_primary_speaker_priority_order':
+            'primary speaker follows priority order',
+        'test_update_speaker_states_on':
+            'updates active speakers when AGS is ON',
+        'test_get_preferred_primary_speaker':
+            'highest priority active speaker chosen',
+        'test_get_inactive_tv_speakers':
+            'detects TVs in inactive rooms',
+        'test_execute_ags_logic_calls_services':
+            'join service called for speaker groups',
+        'test_ags_select_source_tv':
+            'selecting TV source issues service request',
+        'test_determine_primary_speaker_delay_default':
+            'uses default primary_delay of 5s',
+        'test_determine_primary_speaker_delay_custom':
+            'uses custom primary_delay value',
+        'test_update_ags_status_disable_zone_true':
+            'disable_zone=True ignores zone.home',
+        'test_update_speaker_states_off':
+            'all speakers inactive when AGS OFF',
+        'test_default_on_behavior':
+            'service starts ON only if default_on',
+        'test_default_source_used_when_blank':
+            'first source used when none selected',
+        'test_disable_tv_sources_behavior':
+            'TV sources skipped when disabled',
+        'test_homekit_player_creation_and_sync':
+            'HomeKit player created and synced',
+        'test_homekit_player_absent':
+            'no HomeKit player when not configured',
+        'test_update_ags_status_override_when_off':
+            'override works even when service off',
+        'test_async_setup_creates_sensors':
+            'sensors created when enabled',
+        'test_async_setup_skips_sensors':
+            'sensors skipped when disabled',
+    }
+
+    TEST_GROUPS = {
+        'Configuration': [
+            'test_get_configured_rooms',
+            'test_get_active_rooms',
+            'test_update_ags_status_disable_zone_true',
+            'test_default_on_behavior',
+            'test_default_source_used_when_blank',
+            'test_disable_tv_sources_behavior',
+            'test_update_ags_status_override_when_off',
+            'test_async_setup_creates_sensors',
+            'test_async_setup_skips_sensors',
+        ],
+        'Status and Overrides': [
+            'test_update_ags_status_zone_off',
+            'test_update_ags_status_override',
+            'test_update_ags_status_tv_mode',
+        ],
+        'Primary Speaker Logic': [
+            'test_check_primary_speaker_logic_override',
+            'test_determine_primary_speaker',
+            'test_determine_primary_speaker_priority_order',
+            'test_determine_primary_speaker_delay_default',
+            'test_determine_primary_speaker_delay_custom',
+            'test_get_preferred_primary_speaker',
+        ],
+        'Speaker States': [
+            'test_update_speaker_states_on',
+            'test_update_speaker_states_off',
+            'test_get_inactive_tv_speakers',
+        ],
+        'Sources and HomeKit': [
+            'test_execute_ags_logic_calls_services',
+            'test_ags_select_source_tv',
+            'test_homekit_player_creation_and_sync',
+            'test_homekit_player_absent',
+        ],
+    }
+
+    results_dict = {name: passed for name, passed in collector.results}
+    lines = []
+    for idx, (group, tests) in enumerate(TEST_GROUPS.items()):
+        lines.append(f"{group}:")
+        for name in tests:
+            if name in results_dict:
+                passed = results_dict[name]
+                icon = '✅' if passed else '❌'
+                lines.append(f"  {icon} {TEST_DESCRIPTIONS.get(name, name)}")
+        if idx < len(TEST_GROUPS) - 1:
+            lines.append("")
+
+    message = header + "\n" + "\n".join(lines)
+
+    hass.data['ags_last_test_result'] = message
+    return message
+
+
 

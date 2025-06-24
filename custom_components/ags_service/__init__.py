@@ -6,6 +6,8 @@ from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
 
+from .ags_service import run_internal_tests
+
 # Define the domain for the integration
 DOMAIN = "ags_service"
 
@@ -84,15 +86,31 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'], 
+        'Sources': ags_config['Sources'],
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
         'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5), ## Not Done ###
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
-        'static_name': ags_config.get(CONF_STATIC_NAME, None), 
-        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False) 
+        'static_name': ags_config.get(CONF_STATIC_NAME, None),
+        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False)
     }
+
+    async def handle_run_tests(call):
+        """Execute the built in pytest suite and announce the result."""
+        message = await hass.async_add_executor_job(run_internal_tests, hass)
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "AGS Service Tests",
+                "message": message,
+                "notification_id": "ags_service_tests",
+            },
+        )
+
+    hass.services.async_register(DOMAIN, "run_tests", handle_run_tests)
+
     ...
 
     # Load the sensor and switch platforms and pass the configuration to them
