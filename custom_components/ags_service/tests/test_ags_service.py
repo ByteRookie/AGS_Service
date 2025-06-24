@@ -77,7 +77,7 @@ sys.modules.setdefault(
 )
 
 # Load ags_service module directly without executing package __init__
-MODULE_PATH = os.path.join(os.path.dirname(__file__), '..', 'custom_components', 'ags_service', 'ags_service.py')
+MODULE_PATH = os.path.join(os.path.dirname(__file__), '..', 'ags_service.py')
 spec = importlib.util.spec_from_file_location('ags_service', MODULE_PATH)
 ags_service = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ags_service)
@@ -91,7 +91,7 @@ sys.modules[pkg_name + '.ags_service'] = ags_service
 
 # Load the media_player module used for additional tests
 MP_MODULE_PATH = os.path.join(
-    os.path.dirname(__file__), '..', 'custom_components', 'ags_service', 'media_player.py'
+    os.path.dirname(__file__), '..', 'media_player.py'
 )
 mp_spec = importlib.util.spec_from_file_location(
     'custom_components.ags_service.media_player', MP_MODULE_PATH
@@ -101,7 +101,7 @@ mp_spec.loader.exec_module(ags_media_player)
 
 # Load __init__ module for async_setup tests
 INIT_PATH = os.path.join(
-    os.path.dirname(__file__), '..', 'custom_components', 'ags_service', '__init__.py'
+    os.path.dirname(__file__), '..', '__init__.py'
 )
 init_spec = importlib.util.spec_from_file_location('custom_components.ags_service.__init__', INIT_PATH)
 ags_init = importlib.util.module_from_spec(init_spec)

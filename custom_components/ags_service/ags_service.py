@@ -475,7 +475,8 @@ def run_internal_tests(hass):
     import os
     import pytest
 
-    tests_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tests')
+    # The tests now live alongside this module under a "tests" folder
+    tests_path = os.path.join(os.path.dirname(__file__), 'tests')
 
     if not os.path.isdir(tests_path):
         message = (

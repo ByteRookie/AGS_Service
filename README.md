@@ -127,7 +127,8 @@ AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Spe
 
 ## Testing
 
-Unit tests for this integration are located in `tests/test_ags_service.py`. The
+Unit tests for this integration are located in
+`custom_components/ags_service/tests/test_ags_service.py`. The
 suite verifies the following helper functions and behaviors:
 
 - `get_configured_rooms`
@@ -272,8 +273,9 @@ Sources and HomeKit:
   ✅ HomeKit player absent
 ```
 
-If the tests cannot be executed (for example if the `tests` folder was not
-installed), the notification shows a failure header such as:
+If the tests cannot be executed (for example if the
+`custom_components/ags_service/tests` folder was not installed), the
+notification shows a failure header such as:
 
 ```
 ❌ AGS Service Tests Failed
@@ -281,10 +283,10 @@ No tests executed
 ```
 
 Reinstall the integration from the full GitHub repository so the suite can
-run properly. HACS releases may omit the `tests` directory, which prevents the
-`run_tests` service from executing.
+run properly. HACS releases may omit the `tests` directory inside the
+integration, which prevents the `run_tests` service from executing.
 
-If the folder is entirely missing you will instead see:
+If the `custom_components/ags_service/tests` folder is entirely missing you will instead see:
 
 ```
 ❌ AGS Service Tests Failed
