@@ -56,7 +56,7 @@ To install the AGS Service integration, follow these steps:
 The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Every form includes a short summary of your rooms and a progress indicator (for example "Step 3/5").
 1. **Select rooms** – pick one or more areas using the built‑in area selector.
 2. **Add devices** – use a table to create a row for each media player. Choose the room from a dropdown and device type (`tv` or `speaker`). Priority is selected from a drop‑down list; picking a value used by another device shifts the rest down so no numbers are duplicated. New devices are automatically assigned the last rank.
-3. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
+3. **Manage sources** – a table style form lets you add or remove as many playback sources as you like. When adding a source you can browse media from the highest priority speaker using Home Assistant's media selector. The chosen item's `media_content_id` is saved as the source value and its `media_content_type` is stored automatically. You can also mark any source as the default.
 4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
 5. **Review the summary** – confirm the listed rooms, devices, sources and options. The final screen shows every setting including delays and flags. From here you can jump back to add more rooms, devices or edit the options before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below.
@@ -65,15 +65,16 @@ Manual YAML configuration continues to work for advanced setups using the struct
 
 Device priorities are chosen from a list rather than via drag‑and‑drop. Selecting a value rearranges the other devices so each rank is unique. The options screen in the UI marks required fields with a `*` and shows defaults in parentheses.
 
-Available options (UI defaults in parentheses):
+All global options (defaults in parentheses):
 - `disable_zone` – ignore the state of `zone.home` when `True` (`False`).
-- `override_content` – per‑device string that forces a room to stay active if the media identifier contains it (empty).
 - `primary_delay` – seconds to wait before clearing the primary speaker (`5`).
 - `homekit_player` – media player entity exposed to HomeKit (none).
 - `create_sensors` – create sensor entities (`False`).
 - `default_on` – default system state after a restart (`False`).
 - `static_name` – friendly name for the generated media player (none).
 - `disable_Tv_Source` – skip audio switching when a TV is active (`False`).
+
+Each device row can also include an optional `override_content` string that keeps the room active whenever the device's `media_content_id` contains that value.
 
 Complete YAML example:
 
@@ -116,6 +117,7 @@ ags_service:
 
 rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string. Priorities are automatically renumbered so no two devices share the same value.
 sources: Items that can be selected for playback. Each source has a `Source` name, a `Source_Value` used as the content ID, and a `media_content_type`. Set `source_default: true` on one entry to mark it as the default.
+If you use the media selector during setup the chosen item's `media_content_id` and `media_content_type` are saved automatically.
 
 
 ##Automation

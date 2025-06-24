@@ -23,6 +23,7 @@ from .const import (
     CONF_SOURCE_VALUE,
     CONF_MEDIA_CONTENT_TYPE,
     CONF_SOURCE_DEFAULT,
+    CONF_MEDIA_ITEM,
     CONF_DISABLE_ZONE,
     CONF_PRIMARY_DELAY,
     CONF_HOMEKIT_PLAYER,
@@ -74,6 +75,20 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._used_priorities = {
             d[CONF_PRIORITY] for _, d in self._all_devices()
         }
+
+    def _highest_priority_speaker(self) -> str | None:
+        """Return device_id of the highest priority speaker."""
+        speakers = [
+            d
+            for _, d in self._all_devices()
+            if d.get(CONF_DEVICE_TYPE) == "speaker"
+        ]
+        if not speakers:
+            devices = [d for _, d in self._all_devices()]
+            if not devices:
+                return None
+            return min(devices, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
+        return min(speakers, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
 
     def _summary(self) -> str:
         """Return formatted JSON summary of rooms, sources and options."""
@@ -250,6 +265,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_add_source(self, user_input=None):
         """Add playback sources."""
         if user_input is not None:
+            if user_input.get(CONF_MEDIA_ITEM):
+                media = user_input.pop(CONF_MEDIA_ITEM)
+                user_input[CONF_SOURCE_VALUE] = media.get("media_content_id", "")
+                user_input[CONF_MEDIA_CONTENT_TYPE] = media.get("media_content_type", "music")
             add_more = user_input.pop(CONF_SOURCE_DEFAULT, False)
             source = {
                 CONF_SOURCE: user_input[CONF_SOURCE],
@@ -262,11 +281,14 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_add_source()
             return await self.async_step_manage_sources()
 
+        entity = self._highest_priority_speaker()
+        media_sel = {"media": {"entity_id": entity}} if entity else {"media": {}}
         schema = vol.Schema(
             {
                 vol.Required(CONF_SOURCE): str,
-                vol.Required(CONF_SOURCE_VALUE): str,
-                vol.Required(CONF_MEDIA_CONTENT_TYPE): str,
+                vol.Optional(CONF_MEDIA_ITEM): selector(media_sel),
+                vol.Required(CONF_SOURCE_VALUE, default=""): str,
+                vol.Required(CONF_MEDIA_CONTENT_TYPE, default="music"): str,
                 vol.Optional(CONF_SOURCE_DEFAULT, default=False): bool,
                 vol.Optional("add_another", default=False): bool,
             }
