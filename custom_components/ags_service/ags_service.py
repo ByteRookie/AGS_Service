@@ -494,6 +494,11 @@ def run_internal_tests(hass):
     collector = ResultCollector()
     pytest.main([tests_path, '-q'], plugins=[collector])
 
+    if not collector.results:
+        message = "\u274c AGS Service Tests Failed\nNo tests executed"
+        hass.data['ags_last_test_result'] = message
+        return message
+
     overall = all(p for _, p in collector.results)
     header_icon = "✅" if overall else "❌"
     header = f"{header_icon} AGS Service Tests {'Passed' if overall else 'Failed'}"

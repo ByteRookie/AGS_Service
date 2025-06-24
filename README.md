@@ -272,6 +272,13 @@ Sources and HomeKit:
   ✅ HomeKit player absent
 ```
 
-If the notification only shows the section headings, the tests directory was
-not installed. Reinstall the integration from the full repository so the tests
-can be executed.
+If the tests cannot be executed (for example if the `tests` folder was not
+installed), the notification shows a failure header such as:
+
+```
+❌ AGS Service Tests Failed
+No tests executed
+```
+
+Reinstall the integration from the full repository so the suite can run
+properly.
