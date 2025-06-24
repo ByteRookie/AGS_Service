@@ -4,14 +4,14 @@
     "step": {
       "select_rooms": {
         "title": "Select rooms",
-        "description": "Choose one or more areas to include",
+        "description": "{progress}\n{summary}\nChoose one or more areas to include",
         "data": {
-          "rooms": "Rooms"
+          "rooms": "Rooms*"
         }
       },
       "manage_devices": {
         "title": "Manage devices",
-        "description": "Add or remove media players and sort them",
+        "description": "{progress}\n{summary}\nAdd or remove media players and sort them",
         "data": {
           "action": "Action",
           "index": "Index",
@@ -20,18 +20,19 @@
       },
       "add_device": {
         "title": "Add device",
+        "description": "{progress}\n{summary}\nProvide details for the new device",
         "data": {
-          "room": "Room",
-          "device_id": "Select your devices",
-          "device_type": "Type",
-          "priority": "Priority",
+          "room": "Room*",
+          "device_id": "Select your devices*",
+          "device_type": "Type*",
+          "priority": "Priority*",
           "override_content": "Override keyword",
           "add_another": "Add another"
         }
       },
       "manage_sources": {
         "title": "Manage sources",
-        "description": "Create or remove playback sources",
+        "description": "{progress}\n{summary}\nCreate or remove playback sources",
         "data": {
           "action": "Action",
           "index": "Index"
@@ -39,17 +40,19 @@
       },
       "add_source": {
         "title": "Add source",
+        "description": "{progress}\n{summary}\nEnter playback source details",
         "data": {
-          "Source": "Name",
+          "Source": "Name*",
           "media_item": "Browse media",
-          "Source_Value": "Source value",
-          "media_content_type": "Content type",
+          "Source_Value": "Source value*",
+          "media_content_type": "Content type*",
           "source_default": "Default",
           "add_another": "Add another"
         }
       },
       "options": {
         "title": "Global options",
+        "description": "{progress}\n{summary}",
         "data": {
           "disable_zone": "Disable zone",
           "primary_delay": "Primary delay",
@@ -61,7 +64,13 @@
         }
       },
       "summary": {
-        "title": "Summary"
+        "title": "Summary",
+        "description": "{progress}\n{summary}",
+        "data": {
+          "add_room": "Edit rooms",
+          "add_device": "Edit devices",
+          "edit_options": "Edit options"
+        }
       }
     }
   }
