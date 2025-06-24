@@ -3,7 +3,7 @@ from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
-from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
+from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
 from .ags_service import update_ags_sensors, ags_select_source 
 import logging
@@ -300,14 +300,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def media_content_type(self):
         
         return self.primary_speaker_state.attributes.get('media_content_type') if self.primary_speaker_state else None
-    @property
-    def shuffle(self):
-        
-        return self.primary_speaker_state.attributes.get('shuffle') if self.primary_speaker_state else None
-    @property
-    def repeat(self):
-        
-        return self.primary_speaker_state.attributes.get('repeat') if self.primary_speaker_state else None
 
     @property
     def media_duration(self):

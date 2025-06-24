@@ -1,8 +1,6 @@
 """Main module for the AGS Service integration."""
-import logging
 import voluptuous as vol
 
-from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
 
@@ -88,7 +86,7 @@ async def async_setup(hass, config):
         'rooms': ags_config['rooms'],
         'Sources': ags_config['Sources'], 
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5), ## Not Done ###
+        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5),
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
@@ -96,7 +94,6 @@ async def async_setup(hass, config):
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'interval_sync': ags_config.get(CONF_INTERVAL_SYNC, 30)
     }
-    ...
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)

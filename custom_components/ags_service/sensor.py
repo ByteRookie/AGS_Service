@@ -8,12 +8,6 @@ SCAN_INTERVAL = timedelta(seconds=30)
 
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-
-import asyncio
-# Setup platform function
 from homeassistant.helpers.event import async_track_state_change_event
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
@@ -67,7 +61,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 
 
-# Sensor for configured rooms
 class ConfiguredRoomsSensor(SensorEntity):
     """Representation of a Sensor for Configured Rooms."""
     def __init__(self, hass):
@@ -87,7 +80,6 @@ class ConfiguredRoomsSensor(SensorEntity):
         return configured_rooms
 
 
-# Sensor for active rooms
 class ActiveRoomsSensor(SensorEntity):
     """Representation of a Sensor for Active Rooms."""
     def __init__(self, hass):
@@ -108,7 +100,6 @@ class ActiveRoomsSensor(SensorEntity):
         return ags_status
 
 
-# Sensor for active speakers
 class ActiveSpeakersSensor(SensorEntity):
     """Representation of a Sensor for Active Speakers."""
     def __init__(self, hass):
@@ -130,7 +121,6 @@ class ActiveSpeakersSensor(SensorEntity):
         active_speakers = self.hass.data.get('active_speakers', None)
         return active_speakers
 
-# Sensor for inactive speakers
 class InactiveSpeakersSensor(SensorEntity):
     """Representation of a Sensor for Inactive Speakers."""
 
@@ -155,7 +145,6 @@ class InactiveSpeakersSensor(SensorEntity):
 
 
     
-## Sensor for Status 
 class AGSStatusSensor(SensorEntity):
     def __init__(self, hass):
         """Initialize the sensor."""
@@ -183,7 +172,6 @@ class AGSStatusSensor(SensorEntity):
 
 
 
-# sensor for primary speaker #
 class PrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
 
@@ -205,7 +193,6 @@ class PrimarySpeakerSensor(SensorEntity):
         return primary_speaker
 
     
-# sensor for back up speaker if primary is none #
 class PreferredPrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
 
@@ -227,7 +214,6 @@ class PreferredPrimarySpeakerSensor(SensorEntity):
         return preferred_primary_speaker
 
    
-#sensor to see selected source #
 class AGSSourceSensor(SensorEntity):
     """Representation of a Sensor."""
     def __init__(self, hass):
@@ -247,7 +233,6 @@ class AGSSourceSensor(SensorEntity):
         ags_source = self.hass.data.get('ags_media_player_source', None)
         return ags_source
 
-# sensor to see speakers for tv's that are inactive #
 class AGSInactiveTVSpeakersSensor(SensorEntity):
     """Representation of a Sensor."""
     def __init__(self, hass):
