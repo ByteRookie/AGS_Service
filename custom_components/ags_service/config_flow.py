@@ -45,65 +45,54 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self.data: dict = {}
-        self.rooms: list = []
+        self.rooms: list[str] = []
+        self.devices: list = []
         self.sources: list = []
-        self.sort_by: str = "priority"
-        self._used_priorities: set[int] = set()
+        self.device_index: int = 0
+
+    def _room_structure(self):
+        rooms: dict[str, list] = {}
+        for d in self.devices:
+            rooms.setdefault(d[CONF_ROOM], []).append(
+                {k: v for k, v in d.items() if k != CONF_ROOM}
+            )
+        return [{CONF_ROOM: name, "devices": devs} for name, devs in rooms.items()]
 
     async def async_step_import(self, import_data: dict):
         """Create a config entry from YAML."""
         return self.async_create_entry(title="AGS Service", data=import_data)
 
     def _resort_devices(self):
-        """Sort stored device lists according to current sort order."""
-        if self.sort_by == "priority":
-            for room in self.rooms:
-                room["devices"].sort(key=lambda d: d[CONF_PRIORITY])
-        else:
-            self.rooms.sort(key=lambda r: r[CONF_ROOM])
-
-    def _all_devices(self):
-        """Return list of (room, device) tuples."""
-        return [(room, d) for room in self.rooms for d in room["devices"]]
-
-    def _all_devices_sorted(self):
-        devices = self._all_devices()
-        if self.sort_by == "priority":
-            devices.sort(key=lambda pair: pair[1][CONF_PRIORITY])
-        else:
-            devices.sort(key=lambda pair: pair[0][CONF_ROOM])
-        return devices
-
-    def _update_used_priorities(self):
-        self._used_priorities = {
-            d[CONF_PRIORITY] for _, d in self._all_devices()
-        }
+        """Sort devices by priority."""
+        self.devices.sort(key=lambda d: d[CONF_PRIORITY])
 
     def _highest_priority_speaker(self) -> str | None:
         """Return device_id of the highest priority speaker."""
-        speakers = [
-            d
-            for _, d in self._all_devices()
-            if d.get(CONF_DEVICE_TYPE) == "speaker"
-        ]
+        speakers = [d for d in self.devices if d.get(CONF_DEVICE_TYPE) == "speaker"]
         if not speakers:
-            devices = [d for _, d in self._all_devices()]
-            if not devices:
+            if not self.devices:
                 return None
-            return min(devices, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
+            return min(self.devices, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
         return min(speakers, key=lambda x: x[CONF_PRIORITY])[CONF_DEVICE_ID]
 
     def _format_rooms(self) -> str:
         """Return a table of rooms and devices."""
-        if not self.rooms:
+        if not self.devices:
             return "No rooms configured"
+        grouped: dict[str, list] = {}
+        for d in self.devices:
+            grouped.setdefault(d[CONF_ROOM], []).append(d)
         lines: list[str] = []
-        for room in sorted(self.rooms, key=lambda r: r[CONF_ROOM]):
-            lines.append(f"- {room[CONF_ROOM]}")
-            for d in sorted(room["devices"], key=lambda x: x[CONF_PRIORITY]):
-                over = f" (override: {d[CONF_OVERRIDE_CONTENT]})" if d.get(CONF_OVERRIDE_CONTENT) else ""
+        for room in sorted(grouped):
+            lines.append(f"- {room}")
+            for dev in sorted(grouped[room], key=lambda x: x[CONF_PRIORITY]):
+                over = (
+                    f" (override: {dev[CONF_OVERRIDE_CONTENT]})"
+                    if dev.get(CONF_OVERRIDE_CONTENT)
+                    else ""
+                )
                 lines.append(
-                    f"  {d[CONF_PRIORITY]}. {d[CONF_DEVICE_NAME]} [{d[CONF_DEVICE_TYPE]}]{over}"
+                    f"  {dev[CONF_PRIORITY]}. {dev[CONF_DEVICE_NAME]} [{dev[CONF_DEVICE_TYPE]}]{over}"
                 )
         return "\n".join(lines)
 
@@ -149,9 +138,8 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for rid in room_ids:
                 area = reg.async_get_area(rid)
                 name = area.name if area else rid
-                self.rooms.append({CONF_ROOM: name, "devices": []})
-            self._resort_devices()
-            return await self.async_step_manage_devices()
+                self.rooms.append(name)
+            return await self.async_step_select_devices()
 
         schema = vol.Schema({vol.Required(CONF_ROOMS): selector({"area": {"multiple": True}})})
         return self.async_show_form(
@@ -163,38 +151,28 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_manage_devices(self, user_input=None):
-        """Manage the list of devices."""
+    async def async_step_select_devices(self, user_input=None):
+        """Select all media players to configure."""
         if user_input is not None:
-            self.sort_by = user_input.get(CONF_SORT_BY, self.sort_by)
-            self._resort_devices()
-            action = user_input.get("action")
-            if action == "add":
-                return await self.async_step_add_device()
-            if action == "remove":
-                index = user_input.get("index", 0)
-                devices = self._all_devices_sorted()
-                if 0 <= index < len(devices):
-                    room, device = devices[index]
-                    room["devices"].remove(device)
-                    self._update_used_priorities()
-                    self._resort_devices()
-                return await self.async_step_manage_devices()
-            return await self.async_step_manage_sources()
+            device_ids = user_input.get(CONF_DEVICE_ID, [])
+            if not isinstance(device_ids, list):
+                device_ids = [device_ids]
+            new_devices: list = []
+            for eid in device_ids:
+                existing = next((d for d in self.devices if d[CONF_DEVICE_ID] == eid), None)
+                if existing:
+                    new_devices.append(existing)
+                else:
+                    state = self.hass.states.get(eid)
+                    name = state.name if state else eid
+                    new_devices.append({CONF_DEVICE_ID: eid, CONF_DEVICE_NAME: name})
+            self.devices = new_devices
+            self.device_index = 0
+            return await self.async_step_device_details()
 
-        actions = ["add", "done"]
-        total = sum(len(r["devices"]) for r in self.rooms)
-        if total:
-            actions.insert(1, "remove")
-        schema = vol.Schema(
-            {
-                vol.Required("action"): vol.In(actions),
-                vol.Optional("index", default=0): int,
-                vol.Optional(CONF_SORT_BY, default=self.sort_by): vol.In(["priority", "room"]),
-            }
-        )
+        schema = vol.Schema({vol.Required(CONF_DEVICE_ID): selector({"entity": {"domain": "media_player", "multiple": True}})})
         return self.async_show_form(
-            step_id="manage_devices",
+            step_id="select_devices",
             data_schema=schema,
             description_placeholders={
                 "summary": self._summary(),
@@ -202,58 +180,49 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_add_device(self, user_input=None):
-        """Add a device entry."""
-        errors = {}
+    async def async_step_device_details(self, user_input=None):
+        """Collect per-device details one by one."""
+        if self.device_index >= len(self.devices):
+            self._resort_devices()
+            return await self.async_step_manage_sources()
+
+        device = self.devices[self.device_index]
         if user_input is not None:
             priority = user_input[CONF_PRIORITY]
-            entity_id = user_input[CONF_DEVICE_ID]
-            state = self.hass.states.get(entity_id)
-            name = state.name if state else entity_id
-            # Shift priorities if needed
-            for r, dev in self._all_devices_sorted():
-                if dev[CONF_PRIORITY] >= priority:
-                    dev[CONF_PRIORITY] += 1
-            device = {
-                CONF_DEVICE_ID: entity_id,
-                CONF_DEVICE_NAME: name,
-                CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
-                CONF_PRIORITY: priority,
-            }
+            for d in self.devices:
+                if CONF_PRIORITY in d and d[CONF_PRIORITY] >= priority:
+                    d[CONF_PRIORITY] += 1
+            device.update(
+                {
+                    CONF_ROOM: user_input[CONF_ROOM],
+                    CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
+                    CONF_PRIORITY: priority,
+                }
+            )
             if user_input.get(CONF_OVERRIDE_CONTENT):
                 device[CONF_OVERRIDE_CONTENT] = user_input[CONF_OVERRIDE_CONTENT]
-            room_name = user_input[CONF_ROOM]
-            for room in self.rooms:
-                if room[CONF_ROOM] == room_name:
-                    room["devices"].append(device)
-                    break
-            self._update_used_priorities()
-            self._resort_devices()
-            if user_input.get(CONF_ADD_ANOTHER, False):
-                return await self.async_step_add_device()
-            return await self.async_step_manage_devices()
+            self.device_index += 1
+            return await self.async_step_device_details()
 
-        room_names = [r[CONF_ROOM] for r in self.rooms]
-        total_devices = len(self._all_devices())
-        priority_options = list(range(1, total_devices + 2))
+        room_names = self.rooms
+        total_devices = len(self.devices)
+        priority_options = list(range(1, total_devices + 1))
         schema = vol.Schema(
             {
                 vol.Required(CONF_ROOM): vol.In(room_names),
-                vol.Required(CONF_DEVICE_ID): selector({"entity": {"domain": "media_player"}}),
-                vol.Required(CONF_DEVICE_TYPE): vol.In(["tv", "speaker"]),
-                vol.Required(CONF_PRIORITY, default=total_devices + 1): vol.In(priority_options),
+                vol.Required(CONF_DEVICE_TYPE, default="speaker"): vol.In(["tv", "speaker"]),
+                vol.Required(CONF_PRIORITY, default=self.device_index + 1): vol.In(priority_options),
                 vol.Optional(CONF_OVERRIDE_CONTENT): str,
-                vol.Optional(CONF_ADD_ANOTHER, default=False): bool,
             }
         )
         return self.async_show_form(
-            step_id="add_device",
+            step_id="device_details",
             data_schema=schema,
             description_placeholders={
                 "summary": self._summary(),
                 "progress": self._progress(2),
+                "device": device[CONF_DEVICE_NAME],
             },
-            errors=errors,
         )
 
     async def async_step_manage_sources(self, user_input=None):
@@ -359,10 +328,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if user_input.get("add_room"):
                 return await self.async_step_select_rooms()
             if user_input.get("add_device"):
-                return await self.async_step_manage_devices()
+                return await self.async_step_select_devices()
             if user_input.get("edit_options"):
                 return await self.async_step_options()
-            data = {**self.data, CONF_ROOMS: self.rooms, CONF_SOURCES: self.sources}
+            data = {**self.data, CONF_ROOMS: self._room_structure(), CONF_SOURCES: self.sources}
             return self.async_create_entry(title="AGS Service", data=data)
 
         summary = self._summary()

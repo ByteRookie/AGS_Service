@@ -2,8 +2,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
-    SUPPORT_TURN_ON as _SUPPORT_TURN_ON,
-    SUPPORT_TURN_OFF as _SUPPORT_TURN_OFF,
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
@@ -300,8 +298,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MPFeature.PREVIOUS_TRACK
             | MPFeature.SELECT_SOURCE
             | MPFeature.VOLUME_SET
-            | _SUPPORT_TURN_ON
-            | _SUPPORT_TURN_OFF
+            | MPFeature.TURN_ON
+            | MPFeature.TURN_OFF
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -446,8 +444,8 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
             | MPFeature.PAUSE
             | MPFeature.SELECT_SOURCE
             | MPFeature.VOLUME_SET
-            | _SUPPORT_TURN_ON
-            | _SUPPORT_TURN_OFF
+            | MPFeature.TURN_ON
+            | MPFeature.TURN_OFF
         )
 
     @property

@@ -9,25 +9,21 @@
           "rooms": "Rooms*"
         }
       },
-      "manage_devices": {
-        "title": "Manage devices",
-        "description": "You are on {progress}. {summary}\nUse this table to add or remove media players and choose how they are sorted",
+      "select_devices": {
+        "title": "Set up devices",
+        "description": "You are on {progress}. {summary}\nSelect the media players you want to configure",
         "data": {
-          "action": "Action",
-          "index": "Index",
-          "sort_by": "Sort by"
+          "device_id": "Devices*"
         }
       },
-      "add_device": {
-        "title": "Add device",
-        "description": "You are on {progress}. {summary}\nFill in the device details below",
+      "device_details": {
+        "title": "Configure {device}",
+        "description": "You are on {progress}. {summary}\nChoose the room, type and priority for this device",
         "data": {
           "room": "Room*",
-          "device_id": "Select your devices*",
           "device_type": "Type*",
           "priority": "Priority*",
-          "override_content": "Override keyword",
-          "add_another": "Add another"
+          "override_content": "Override keyword"
         }
       },
       "manage_sources": {

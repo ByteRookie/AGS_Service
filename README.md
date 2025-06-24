@@ -52,7 +52,7 @@ To install the AGS Service integration, follow these steps:
 
 The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Each page shows your progress (for example, "Step 2/5") and a text summary of your selections so far. Labels include helpful tooltips describing what each setting does and show the default value when optional.
 1. **Select rooms** – pick one or more areas using the built‑in area selector. The running summary lists every chosen room.
-2. **Add devices** – use the device table to add media players. Choose the room, device type (`tv` or `speaker`) and a unique priority. If you pick a number already in use the other devices shift down automatically. Optionally supply an `override_content` keyword that keeps the room active when detected.
+2. **Set up devices** – choose one or more media players with the multi-select entity dropdown. Each selected device is then configured with its room, type (`tv` or `speaker`) and priority. Removing a device from the selector deletes its configuration. Optionally provide an `override_content` keyword that keeps the room active when detected.
 3. **Manage sources** – use a table to add or remove playback sources. Each entry specifies the name, source value, content type and whether it is the default.
 4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation. Every field includes a short tooltip explaining its purpose. Required fields show a `*` and defaults appear in parentheses. Available options (defaults in parentheses):
    - `disable_zone` – ignore the state of `zone.home` when `True` (`False`).
