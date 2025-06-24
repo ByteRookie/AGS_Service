@@ -61,16 +61,19 @@ The integration can be configured entirely from Home Assistant's **Devices & Ser
 5. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below.
 
-Available options:
-- `disable_zone` – if `True`, the service ignores the state of `zone.home`.
-- `override_content` – optional string for a device entry. When the selected player is playing media whose identifier contains this string, AGS keeps the room active regardless of occupancy (for example `bluetooth`).
-- `primary_delay` – seconds to wait before clearing the primary speaker (default `5`).
-- `homekit_player` – media player entity used when exposing the player to HomeKit.
-- `create_sensors` – create dedicated sensor entities.
-- `default_on` – default system state after a restart.
-- `static_name` – friendly name to use for the generated media player.
-- `disable_Tv_Source` – skip audio switching when a TV is active.
-Device priorities are chosen from a list rather than via drag‑and‑drop. Selecting a value rearranges the other devices so each rank is unique.
+### Global Settings
+
+Device priorities are chosen from a list rather than via drag‑and‑drop. Selecting a value rearranges the other devices so each rank is unique. The options screen in the UI marks required fields with a `*` and shows defaults in parentheses.
+
+Available options (UI defaults in parentheses):
+- `disable_zone` – ignore the state of `zone.home` when `True` (`False`).
+- `override_content` – per‑device string that forces a room to stay active if the media identifier contains it (empty).
+- `primary_delay` – seconds to wait before clearing the primary speaker (`5`).
+- `homekit_player` – media player entity exposed to HomeKit (none).
+- `create_sensors` – create sensor entities (`False`).
+- `default_on` – default system state after a restart (`False`).
+- `static_name` – friendly name for the generated media player (none).
+- `disable_Tv_Source` – skip audio switching when a TV is active (`False`).
 
 Complete YAML example:
 

@@ -50,6 +50,14 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.sort_by: str = "priority"
         self._used_priorities: set[int] = set()
 
+    def _resort_devices(self):
+        """Sort stored device lists according to current sort order."""
+        if self.sort_by == "priority":
+            for room in self.rooms:
+                room["devices"].sort(key=lambda d: d[CONF_PRIORITY])
+        else:
+            self.rooms.sort(key=lambda r: r[CONF_ROOM])
+
     def _all_devices(self):
         """Return list of (room, device) tuples."""
         return [(room, d) for room in self.rooms for d in room["devices"]]
@@ -102,6 +110,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 area = reg.async_get_area(rid)
                 name = area.name if area else rid
                 self.rooms.append({CONF_ROOM: name, "devices": []})
+            self._resort_devices()
             return await self.async_step_manage_devices()
 
         schema = vol.Schema({vol.Required(CONF_ROOMS): selector({"area": {"multiple": True}})})
@@ -118,6 +127,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Manage the list of devices."""
         if user_input is not None:
             self.sort_by = user_input.get(CONF_SORT_BY, self.sort_by)
+            self._resort_devices()
             action = user_input.get("action")
             if action == "add":
                 return await self.async_step_add_device()
@@ -128,6 +138,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     room, device = devices[index]
                     room["devices"].remove(device)
                     self._update_used_priorities()
+                    self._resort_devices()
                 return await self.async_step_manage_devices()
             return await self.async_step_manage_sources()
 
@@ -177,6 +188,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     room["devices"].append(device)
                     break
             self._update_used_priorities()
+            self._resort_devices()
             if user_input.get(CONF_ADD_ANOTHER, False):
                 return await self.async_step_add_device()
             return await self.async_step_manage_devices()
