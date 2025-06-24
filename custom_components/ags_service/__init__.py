@@ -1,8 +1,6 @@
 """Main module for the AGS Service integration."""
-import logging
-import voluptuous as vol
 
-from homeassistant.const import CONF_DEVICES
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
@@ -83,13 +81,8 @@ DEVICE_SCHEMA = vol.Schema({
 CONFIG_SCHEMA = vol.Schema({DOMAIN: DEVICE_SCHEMA}, extra=vol.ALLOW_EXTRA)
 
 
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Set up the integration from YAML."""
-    if DOMAIN not in config:
-        return True
-
-    ags_config = config[DOMAIN]
-
+def _store_config(hass: HomeAssistant, ags_config: dict) -> None:
+    """Persist configuration values in hass.data."""
     hass.data[DOMAIN] = {
         "rooms": ags_config["rooms"],
         "Sources": ags_config["Sources"],
@@ -101,6 +94,15 @@ async def async_setup(hass: HomeAssistant, config: dict):
         "static_name": ags_config.get(CONF_STATIC_NAME, None),
         "disable_Tv_Source": ags_config.get(CONF_DISABLE_TV_SOURCE, False),
     }
+
+
+async def async_setup(hass: HomeAssistant, config: dict):
+    """Set up the integration from YAML."""
+    if DOMAIN not in config:
+        return True
+
+    ags_config = config[DOMAIN]
+    _store_config(hass, ags_config)
 
     create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
     if create_sensors:
@@ -115,18 +117,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AGS Service from a config entry."""
     ags_config = entry.data
-
-    hass.data[DOMAIN] = {
-        "rooms": ags_config["rooms"],
-        "Sources": ags_config["Sources"],
-        "disable_zone": ags_config.get(CONF_DISABLE_ZONE, False),
-        "primary_delay": ags_config.get(CONF_PRIMARY_DELAY, 5),
-        "homekit_player": ags_config.get(CONF_HOMEKIT_PLAYER, None),
-        "create_sensors": ags_config.get(CONF_CREATE_SENSORS, False),
-        "default_on": ags_config.get(CONF_DEFAULT_ON, False),
-        "static_name": ags_config.get(CONF_STATIC_NAME, None),
-        "disable_Tv_Source": ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-    }
+    _store_config(hass, ags_config)
 
     create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
     if create_sensors:

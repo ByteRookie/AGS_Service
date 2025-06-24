@@ -1,6 +1,3 @@
-
-
-
 # AGS Service (Auto Grouping Speaker Service)
 
 AGS Service is a custom Home Assistant integration that functions as an intelligent management and automation system for audio devices grouped in different rooms. With the ability to interface with various audio devices, it dynamically forms and re-forms groups based on the state of the rooms and speakers. Although it has been designed and tested primarily with Sonos speakers and LG TVs, it maintains the flexibility to work with other devices supported by Home Assistant.
@@ -53,11 +50,11 @@ To install the AGS Service integration, follow these steps:
 
 ## Configuration
 
-The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Each form shows your current selections and a progress indicator such as "Step 3/5".
-1. **Select rooms** – pick one or more areas using the built‑in area selector.
-2. **Add devices** – create a row for each media player. Choose its room, type (`tv` or `speaker`) and priority from dropdowns. If you set a priority already used by another device the remaining entries shift down so the numbers stay unique. A device can include an optional `override_content` string which keeps the room active whenever the device's `media_content_id` contains that value. New devices are assigned the last rank automatically.
-3. **Manage sources** – add or remove any number of playback sources. You can browse media from the highest‑priority speaker using Home Assistant's media selector and mark one entry as the default.
-4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation. Device priorities are selected from a list rather than drag‑and‑drop. Required fields show a `*` and defaults appear in parentheses. Available options (defaults in parentheses):
+The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Every form displays your progress (for example, "Step 2/5") and a summary of what has already been entered.
+1. **Select rooms** – pick one or more areas using the area selector. The summary lists the chosen rooms.
+2. **Add devices** – for each media player select its room, type (`tv` or `speaker`) and unique priority from dropdowns. If the chosen priority is already in use the remaining devices shift down so every number stays unique. An optional `override_content` string keeps the room active whenever the player's `media_content_id` contains that value. New devices start with the last rank automatically.
+3. **Manage sources** – add or remove any number of playback sources. You can browse media from the top‑priority speaker using Home Assistant's media selector and mark one entry as the default.
+4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation. Every field includes a short tooltip explaining its purpose. Required fields show a `*` and defaults appear in parentheses. Available options (defaults in parentheses):
    - `disable_zone` – ignore the state of `zone.home` when `True` (`False`).
    - `primary_delay` – seconds to wait before clearing the primary speaker (`5`).
    - `homekit_player` – media player entity exposed to HomeKit (none).
@@ -133,4 +130,4 @@ AGS Service Status: This sensor provides the overall status of the AGS service. 
 
 AGS Service Primary Speaker: This sensor checks each active room to determine the primary speaker. The primary speaker is the speaker with the highest priority (lowest numerical value) in the room.
 
-AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Speaker sensor, but it allows for a preferred primary speaker to be
+AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Speaker sensor, but it allows for a preferred primary speaker to be set based on the configured priorities. If the preferred device is unavailable, the next highest priority speaker is used.

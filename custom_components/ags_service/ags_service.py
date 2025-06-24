@@ -296,7 +296,6 @@ def get_inactive_tv_speakers(rooms, hass):
 
 ### Controls from this point ###
 def execute_ags_logic(hass):
-    import logging
     global AGS_LOGIC_RUNNING
 
     # If the logic is already running, exit the function
