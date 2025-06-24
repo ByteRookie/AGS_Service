@@ -63,7 +63,7 @@ override_content can be used to override media status if a device content ID con
 
 primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
 interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
-An always-on `AGS Schedule` entity is created automatically. Turning this schedule off will force the AGS status to `OFF` unless an override is detected.
+An always-on `AGS Schedule` entity is created automatically using Home Assistant's native Schedule helper. By default the schedule spans every day of the week. Turning this schedule off will force the AGS status to `OFF` unless an override is detected.
 
 this has all features:
 

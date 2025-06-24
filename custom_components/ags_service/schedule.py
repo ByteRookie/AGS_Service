@@ -36,8 +36,14 @@ class AGSSchedule(Schedule, RestoreEntity):
         all_day = {CONF_FROM: dt.time(0, 0, 0), CONF_TO: dt.time(23, 59, 59)}
         default_schedule = {day: [all_day] for day in WEEKDAY_TO_CONF.values()}
 
-        # Initialise the base ``Schedule`` with our default configuration
-        super().__init__(hass, default_schedule)
+        # Build the configuration dictionary expected by ``Schedule``. The
+        # helper's schema requires a name/icon alongside the weekday mapping
+        # when an entity is created programmatically.
+        config = {"name": self._attr_name, "icon": self._attr_icon}
+        config.update(default_schedule)
+
+        # Initialise the base ``Schedule`` with our configuration
+        super().__init__(hass, config)
 
         # Expose the current state via hass.data for use in update_ags_status
         self.hass.data[self._attr_unique_id] = self.is_on
