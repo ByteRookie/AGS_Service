@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from homeassistant.components.schedule import ScheduleEntity
+# Import ScheduleEntity from the schedule component. In Home Assistant the
+# entity class is defined in ``homeassistant.components.schedule.entity`` rather
+# than being exported directly from the component package.
+from homeassistant.components.schedule.entity import ScheduleEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 
 
