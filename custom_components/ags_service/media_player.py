@@ -37,6 +37,15 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for entity in entities_to_track:
         async_track_state_change_event(hass, entity, ags_media_player.async_primary_speaker_changed)
 
+    # Also track state changes for all configured media player devices so the
+    # AGS entity updates immediately when a device reports new state. Without
+    # this the UI lags until the next poll when the primary speaker changes.
+    for room in rooms:
+        for device in room["devices"]:
+            async_track_state_change_event(
+                hass, device["device_id"], ags_media_player.async_primary_speaker_changed
+            )
+
 
 
     # Create and add the secondary "Media System" media player only if SHOW_MEDIA_SYSTEM is True
@@ -289,15 +298,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         
         return self.primary_speaker_state.attributes.get('media_content_type') if self.primary_speaker_state else None
     @property
-    def shuffle(self):
-        
-        return self.primary_speaker_state.attributes.get('shuffle') if self.primary_speaker_state else None
-    @property
-    def repeat(self):
-        
-        return self.primary_speaker_state.attributes.get('repeat') if self.primary_speaker_state else None
-
-    @property
     def media_duration(self):
         
         return self.primary_speaker_state.attributes.get('media_duration') if self.primary_speaker_state else None
@@ -341,21 +341,25 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_play', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
 
     def media_pause(self):
         self._schedule_media_call('media_pause', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
 
     def media_stop(self):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
 
     def media_next_track(self):
         self._schedule_media_call('media_next_track', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
 
     def turn_on(self):
         self.hass.data['switch_media_system_state'] = True
@@ -369,6 +373,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_previous_track', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
   
     def media_seek(self, position):
         """Seek to a specific point in the media on the primary speaker."""
@@ -376,6 +381,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             'entity_id': self.primary_speaker_entity_id,
             'seek_position': position
         })
+        self._schedule_ags_update()
     @property
     def source_list(self):
         """List of available sources."""
@@ -442,6 +448,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             'entity_id': self.primary_speaker_entity_id,
             'shuffle': not self.shuffle
         })
+        self._schedule_ags_update()
 
     def set_repeat(self, repeat):
         """Set repeat mode."""
@@ -456,6 +463,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             'entity_id': self.primary_speaker_entity_id,
             'repeat':  repeat_value
         })
+        self._schedule_ags_update()
 
 
 # Define the secondary "Media System" media player class for homekit

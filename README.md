@@ -123,4 +123,4 @@ AGS Service Status: This sensor provides the overall status of the AGS service. 
 
 AGS Service Primary Speaker: This sensor checks each active room to determine the primary speaker. The primary speaker is the speaker with the highest priority (lowest numerical value) in the room.
 
-AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Speaker sensor, but it allows for a preferred primary speaker to be
+AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Speaker sensor, but it allows for a preferred speaker to take over if the current primary stops playing.
