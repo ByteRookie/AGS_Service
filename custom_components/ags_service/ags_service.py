@@ -477,6 +477,11 @@ def run_internal_tests(hass):
 
     tests_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tests')
 
+    if not os.path.isdir(tests_path):
+        message = "\u274c AGS Service Tests Failed\nTests directory not found"
+        hass.data['ags_last_test_result'] = message
+        return message
+
     class ResultCollector:
         def __init__(self):
             self.results = []

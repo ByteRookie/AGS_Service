@@ -271,3 +271,7 @@ Sources and HomeKit:
   ✅ HomeKit player sync
   ✅ HomeKit player absent
 ```
+
+If the notification only shows the section headings, the tests directory was
+not installed. Reinstall the integration from the full repository so the tests
+can be executed.
