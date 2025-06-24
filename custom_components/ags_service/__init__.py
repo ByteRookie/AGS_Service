@@ -74,7 +74,7 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_HOMEKIT_PLAYER): vol.Any(None, cv.string),
     vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
-    vol.Optional(CONF_STATIC_NAME): vol.Any(None, cv.string),
+    vol.Optional(CONF_STATIC_NAME, default=None): vol.Any(None, cv.string),
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
 }, extra=vol.ALLOW_EXTRA)
 

@@ -397,7 +397,8 @@ class AGSServiceOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for config entry."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+        """Initialize options flow."""
+        super().__init__(config_entry)
 
     async def async_step_init(self, user_input=None):
         errors = {}
