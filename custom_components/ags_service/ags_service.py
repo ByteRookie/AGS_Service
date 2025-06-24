@@ -493,56 +493,31 @@ def run_internal_tests(hass):
     header_icon = "✅" if overall else "❌"
     header = f"{header_icon} AGS Service Tests {'Passed' if overall else 'Failed'}"
     TEST_DESCRIPTIONS = {
-        'test_get_configured_rooms':
-            'verifies configured rooms are stored in hass.data',
-        'test_get_active_rooms':
-            'ensures room switches determine active rooms',
-        'test_update_ags_status_zone_off':
-            'zone.home=0 forces the system OFF',
-        'test_update_ags_status_override':
-            'override playback sets status',
-        'test_update_ags_status_tv_mode':
-            'TV playing sets status to ON TV',
-        'test_check_primary_speaker_logic_override':
-            'override content selects that speaker as primary',
-        'test_determine_primary_speaker':
-            'delayed recheck sets the primary speaker',
-        'test_determine_primary_speaker_priority_order':
-            'primary speaker follows priority order',
-        'test_update_speaker_states_on':
-            'updates active speakers when AGS is ON',
-        'test_get_preferred_primary_speaker':
-            'highest priority active speaker chosen',
-        'test_get_inactive_tv_speakers':
-            'detects TVs in inactive rooms',
-        'test_execute_ags_logic_calls_services':
-            'join service called for speaker groups',
-        'test_ags_select_source_tv':
-            'selecting TV source issues service request',
-        'test_determine_primary_speaker_delay_default':
-            'uses default primary_delay of 5s',
-        'test_determine_primary_speaker_delay_custom':
-            'uses custom primary_delay value',
-        'test_update_ags_status_disable_zone_true':
-            'disable_zone=True ignores zone.home',
-        'test_update_speaker_states_off':
-            'all speakers inactive when AGS OFF',
-        'test_default_on_behavior':
-            'service starts ON only if default_on',
-        'test_default_source_used_when_blank':
-            'first source used when none selected',
-        'test_disable_tv_sources_behavior':
-            'TV sources skipped when disabled',
-        'test_homekit_player_creation_and_sync':
-            'HomeKit player created and synced',
-        'test_homekit_player_absent':
-            'no HomeKit player when not configured',
-        'test_update_ags_status_override_when_off':
-            'override works even when service off',
-        'test_async_setup_creates_sensors':
-            'sensors created when enabled',
-        'test_async_setup_skips_sensors':
-            'sensors skipped when disabled',
+        'test_get_configured_rooms': 'configured rooms stored',
+        'test_get_active_rooms': 'active room detection',
+        'test_update_ags_status_zone_off': 'zone.home=0 -> status OFF',
+        'test_update_ags_status_override': 'override content sets status',
+        'test_update_ags_status_tv_mode': 'TV mode sets status',
+        'test_check_primary_speaker_logic_override': 'override device becomes primary',
+        'test_determine_primary_speaker': 'primary speaker determined',
+        'test_determine_primary_speaker_priority_order': 'priority order respected',
+        'test_update_speaker_states_on': 'speaker states on',
+        'test_get_preferred_primary_speaker': 'preferred primary speaker',
+        'test_get_inactive_tv_speakers': 'inactive TV speakers detected',
+        'test_execute_ags_logic_calls_services': 'service calls executed',
+        'test_ags_select_source_tv': 'TV source selection',
+        'test_determine_primary_speaker_delay_default': 'primary_delay default',
+        'test_determine_primary_speaker_delay_custom': 'primary_delay custom',
+        'test_update_ags_status_disable_zone_true': 'disable_zone ignores zone.home',
+        'test_update_speaker_states_off': 'speaker states off',
+        'test_default_on_behavior': 'default_on behavior',
+        'test_default_source_used_when_blank': 'default source when blank',
+        'test_disable_tv_sources_behavior': 'disable TV sources',
+        'test_homekit_player_creation_and_sync': 'HomeKit player sync',
+        'test_homekit_player_absent': 'HomeKit player absent',
+        'test_update_ags_status_override_when_off': 'override when service off',
+        'test_async_setup_creates_sensors': 'sensors created when enabled',
+        'test_async_setup_skips_sensors': 'sensors skipped when disabled',
     }
 
     TEST_GROUPS = {

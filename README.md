@@ -237,37 +237,37 @@ Example output:
 ```
 ✅ AGS Service Tests Passed
 Configuration:
-  ✅ verifies configured rooms are stored in hass.data
-  ✅ ensures room switches determine active rooms
-  ✅ disable_zone=True ignores zone.home
-  ✅ service starts ON only if default_on
-  ✅ first source used when none selected
-  ✅ TV sources skipped when disabled
-  ✅ override works even when service off
+  ✅ configured rooms stored
+  ✅ active room detection
+  ✅ disable_zone ignores zone.home
+  ✅ default_on behavior
+  ✅ default source when blank
+  ✅ disable TV sources
+  ✅ override when service off
   ✅ sensors created when enabled
   ✅ sensors skipped when disabled
 
 Status and Overrides:
-  ✅ zone.home=0 forces the system OFF
-  ✅ override playback sets status
-  ✅ TV playing sets status to ON TV
+  ✅ zone.home=0 -> status OFF
+  ✅ override content sets status
+  ✅ TV mode sets status
 
 Primary Speaker Logic:
-  ✅ override content selects that speaker as primary
-  ✅ delayed recheck sets the primary speaker
-  ✅ primary speaker follows priority order
-  ✅ uses default primary_delay of 5s
-  ✅ uses custom primary_delay value
-  ✅ highest priority active speaker chosen
+  ✅ override device becomes primary
+  ✅ primary speaker determined
+  ✅ priority order respected
+  ✅ primary_delay default
+  ✅ primary_delay custom
+  ✅ preferred primary speaker
 
 Speaker States:
-  ✅ updates active speakers when AGS is ON
-  ✅ all speakers inactive when AGS OFF
-  ✅ detects TVs in inactive rooms
+  ✅ speaker states on
+  ✅ speaker states off
+  ✅ inactive TV speakers detected
 
 Sources and HomeKit:
-  ✅ join service called for speaker groups
-  ✅ selecting TV source issues service request
-  ✅ HomeKit player created and synced
-  ✅ no HomeKit player when not configured
+  ✅ service calls executed
+  ✅ TV source selection
+  ✅ HomeKit player sync
+  ✅ HomeKit player absent
 ```
