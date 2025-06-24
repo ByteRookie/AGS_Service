@@ -133,8 +133,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
             sources = self.hass.data['ags_service']['Sources']
-            if sources:
+            default = next(
+                (
+                    src["Source"]
+                    for src in sources
+                    if src.get("source_default") is True
+                ),
+                None,
+            )
+            if default:
+                selected_source = default
+            elif sources:
                 selected_source = sources[0]["Source"]
+            if selected_source is not None:
+                self.hass.data['ags_media_player_source'] = selected_source
         self.ags_source = self.get_source_value_by_name(selected_source)
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')

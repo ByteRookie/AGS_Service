@@ -59,14 +59,21 @@ New optional Value of disable_zone and override_content.
 disable_zone If set to True it will disable logic looking at zone.home 
 override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
 
-primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker. 
+primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
+interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
 
-this has all features: 
+this has all features:
 
 ```yaml
 ags_service:
   primary_delay: 5
+  interval_sync: 30
   disable_zone: true
+  homekit_player: "My HomeKit Player"
+  create_sensors: true
+  default_on: false
+  static_name: "AGS Media Player"
+  disable_Tv_Source: false
   rooms:
     - room: "Room 1"
       devices:
@@ -85,20 +92,23 @@ ags_service:
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
-  Source_selector: "input_select.station"
   Sources:
     - Source: "Top Hit"
       Source_Value: "2/11"
+      media_content_type: "favorite_item_id"
+      source_default: true
     - Source: "Chill"
       Source_Value: "2/12"
+      media_content_type: "favorite_item_id"
     - Source: "Alternative"
-  
+      Source_Value: "2/13"
+      media_content_type: "favorite_item_id"
 
 ```
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-source_selector: The entity ID of the input selector that is used to select the audio source. This is a required value.
-sources: The sources of audio that can be selected. The keys in this object should match the options in the source selector, and the values are the corresponding human-readable names.
+sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
+homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities.
 
 
 ##Automation

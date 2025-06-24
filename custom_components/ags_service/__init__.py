@@ -23,6 +23,7 @@ CONF_CREATE_SENSORS = 'create_sensors'
 CONF_DEFAULT_ON = 'default_on'
 CONF_STATIC_NAME = 'static_name'
 CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
+CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SOURCES = 'Sources'
 CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
@@ -75,6 +76,7 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
     vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
+    vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
 })
 
 async def async_setup(hass, config):
@@ -91,8 +93,9 @@ async def async_setup(hass, config):
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
+
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False)
-    }
+   }
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
