@@ -63,7 +63,7 @@ The integration can be configured entirely from Home Assistant's **Devices & Ser
    - `static_name` – friendly name for the generated media player (none).
    - `disable_Tv_Source` – skip audio switching when a TV is active (`False`).
 5. **Review the summary** – confirm the rooms, devices, sources and options. This page displays a formatted summary of every setting and lets you return to previous steps before saving.
-Manual YAML configuration continues to work for advanced setups using the structure below.
+Manual YAML configuration continues to work for advanced setups using the structure below. When both UI and YAML are used, rooms and sources from each are combined and any conflicting options take the value from the UI entry.
 
 Complete YAML example:
 

@@ -83,17 +83,48 @@ CONFIG_SCHEMA = vol.Schema({DOMAIN: DEVICE_SCHEMA}, extra=vol.ALLOW_EXTRA)
 
 def _store_config(hass: HomeAssistant, ags_config: dict) -> None:
     """Persist configuration values in hass.data."""
-    hass.data[DOMAIN] = {
-        "rooms": ags_config["rooms"],
-        "Sources": ags_config["Sources"],
-        "disable_zone": ags_config.get(CONF_DISABLE_ZONE, False),
-        "primary_delay": ags_config.get(CONF_PRIMARY_DELAY, 5),
-        "homekit_player": ags_config.get(CONF_HOMEKIT_PLAYER, None),
-        "create_sensors": ags_config.get(CONF_CREATE_SENSORS, False),
-        "default_on": ags_config.get(CONF_DEFAULT_ON, False),
-        "static_name": ags_config.get(CONF_STATIC_NAME, None),
-        "disable_Tv_Source": ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-    }
+    data = hass.data.setdefault(
+        DOMAIN,
+        {
+            "rooms": [],
+            "Sources": [],
+            "disable_zone": False,
+            "primary_delay": 5,
+            "homekit_player": None,
+            "create_sensors": False,
+            "default_on": False,
+            "static_name": None,
+            "disable_Tv_Source": False,
+            "platforms_loaded": False,
+        },
+    )
+    data["rooms"].extend(ags_config.get("rooms", []))
+    data["Sources"].extend(ags_config.get("Sources", []))
+    for key, default in [
+        (CONF_DISABLE_ZONE, False),
+        (CONF_PRIMARY_DELAY, 5),
+        (CONF_HOMEKIT_PLAYER, None),
+        (CONF_CREATE_SENSORS, False),
+        (CONF_DEFAULT_ON, False),
+        (CONF_STATIC_NAME, None),
+        (CONF_DISABLE_TV_SOURCE, False),
+    ]:
+        value = ags_config.get(key)
+        if value is not None:
+            data[key] = value
+
+
+async def _load_platforms(hass: HomeAssistant, ags_config: dict, source) -> None:
+    """Load platforms if not already loaded."""
+    data = hass.data[DOMAIN]
+    if data.get("platforms_loaded"):
+        return
+    create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
+    if create_sensors:
+        await async_load_platform(hass, "sensor", DOMAIN, {}, source)
+    await async_load_platform(hass, "switch", DOMAIN, {}, source)
+    await async_load_platform(hass, "media_player", DOMAIN, {}, source)
+    data["platforms_loaded"] = True
 
 
 async def async_setup(hass: HomeAssistant, config: dict):
@@ -103,14 +134,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
     ags_config = config[DOMAIN]
     _store_config(hass, ags_config)
-
-    create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
-    if create_sensors:
-        await async_load_platform(hass, "sensor", DOMAIN, {}, config)
-
-    await async_load_platform(hass, "switch", DOMAIN, {}, config)
-    await async_load_platform(hass, "media_player", DOMAIN, {}, config)
-
+    await _load_platforms(hass, ags_config, config)
     return True
 
 
@@ -118,14 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AGS Service from a config entry."""
     ags_config = entry.data
     _store_config(hass, ags_config)
-
-    create_sensors = ags_config.get(CONF_CREATE_SENSORS, False)
-    if create_sensors:
-        await async_load_platform(hass, "sensor", DOMAIN, {}, entry)
-
-    await async_load_platform(hass, "switch", DOMAIN, {}, entry)
-    await async_load_platform(hass, "media_player", DOMAIN, {}, entry)
-
+    await _load_platforms(hass, ags_config, entry)
     return True
 
 
@@ -138,6 +155,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     unload_ok &= await hass.config_entries.async_forward_entry_unload(entry, "switch")
     unload_ok &= await hass.config_entries.async_forward_entry_unload(entry, "media_player")
-    if unload_ok:
-        hass.data.pop(DOMAIN, None)
     return unload_ok
