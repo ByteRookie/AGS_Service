@@ -199,7 +199,7 @@ def check_primary_speaker_logic(ags_config, hass):
                         if (
                             device['device_type'] == 'speaker' and
                             device_state is not None and
-                            device_state.state not in ['off', 'idle', 'paused'] and
+                            device_state.state not in ['off', 'idle'] and
                             group_members and  # Check that group_members exists and is not None
                             group_members[0] == device['device_id']  # Now safe to index
                         ):
