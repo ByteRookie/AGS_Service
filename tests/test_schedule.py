@@ -54,3 +54,28 @@ def test_schedule_off_sets_status_off():
     status = update_ags_status(ags_config, hass)
     assert status == 'OFF'
     assert hass.data['ags_status'] == 'OFF'
+
+
+def test_schedule_off_with_override_keeps_override():
+    """Schedule off but override should still trigger Override status."""
+    hass = FakeHass()
+    hass.data['ags_schedule'] = False
+    config = base_config()
+    config['rooms'] = [
+        {
+            'room': 'Living',
+            'devices': [
+                {
+                    'device_id': 'media_player.demo',
+                    'device_type': 'speaker',
+                    'priority': 1,
+                    'override_content': 'foo',
+                }
+            ],
+        }
+    ]
+    hass.data['ags_service'] = config
+    # Simulate device playing override content
+    hass.states.data['media_player.demo'] = FakeState('playing', {'media_content_id': 'something_foo'})
+    status = update_ags_status(config, hass)
+    assert status == 'Override'

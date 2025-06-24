@@ -28,7 +28,7 @@ The integration creates a series of sensors and switches for each room:
   - `AGS Service Preferred Primary Speaker`: Highlights the preferred primary speaker in each active room, which is selected based on the priority configured for each speaker.
   - `AGS Service Source`: Notes the source of the audio stream that is currently being played.
   - `AGS Service Inactive TV Speakers`: Lists the inactive speakers that are associated with a TV device.
-  - `AGS Schedule`: Defines when AGS should be active. When this schedule is off the service will not start playback unless an override is detected. This schedule entity uses the native Home Assistant schedule helper.
+  - `AGS Schedule`: Defines when AGS should be active. When this schedule is off the service will not start playback unless an override is detected. The entity is built using Home Assistant's native `Schedule` helper.
 
 - Switches:
   - `(Room Name) Media`: Manually controls whether a room is active or not. A switch is automatically created for each room configured within the AGS Service.

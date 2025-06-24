@@ -2,66 +2,51 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
-# Import ScheduleEntity from the schedule component. In Home Assistant the
-# entity class is defined in ``homeassistant.components.schedule.entity`` rather
-# than being exported directly from the component package.
-# Importing the schedule entity differs across Home Assistant versions.
-# Newer releases expose ``ScheduleEntity`` directly from the schedule
-# component package, while older releases provide it from a submodule.
-try:  # pragma: no cover - the import path depends on the HA version
-    from homeassistant.components.schedule import ScheduleEntity
-except ImportError:  # pragma: no cover - fallback for older versions
-    from homeassistant.components.schedule.entity import ScheduleEntity
+# Import the native Schedule helper from Home Assistant.  The class is simply
+# called ``Schedule`` and lives directly in ``homeassistant.components.schedule``.
+from homeassistant.components.schedule import Schedule
 from homeassistant.helpers.restore_state import RestoreEntity
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the AGS schedule entity."""
-    async_add_entities([AGSScheduleEntity(hass)])
+    async_add_entities([AGSSchedule(hass)])
 
 
-class AGSScheduleEntity(ScheduleEntity, RestoreEntity):
-    """Simple schedule entity controlling AGS operation."""
+class AGSSchedule(Schedule, RestoreEntity):
+    """Schedule controlling AGS operation."""
 
     _attr_name = "AGS Schedule"
     _attr_unique_id = "ags_schedule"
     _attr_icon = "mdi:calendar-clock"
 
-    def __init__(self, hass):
+    def __init__(self, hass) -> None:
+        """Initialize with a default always-on schedule."""
         self.hass = hass
-        # default schedule: always on
-        self._schedule = [
-            {
-                "from": dt.time(0, 0, 0),
-                "to": dt.time(23, 59, 59),
-            }
-        ]
-        self._is_on = True
-        # initialize value in hass.data so other modules can read it
-        self.hass.data[self._attr_unique_id] = self._is_on
+        # Default schedule covers the entire day so AGS is enabled unless the
+        # user turns this entity off.  The built-in ``Schedule`` helper will
+        # handle toggling the entity state based on these blocks.
+        default_schedule = [{"from": dt.time(0, 0, 0), "to": dt.time(23, 59, 59)}]
 
-    @property
-    def schedule(self):
-        return self._schedule
+        # Initialise the base ``Schedule`` with our default blocks
+        super().__init__(hass, default_schedule)
 
-    @property
-    def is_on(self):
-        return self._is_on
+        # Expose the current state via hass.data for use in update_ags_status
+        self.hass.data[self._attr_unique_id] = self.is_on
 
-    async def async_turn_on(self, **kwargs):
-        self._is_on = True
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable AGS operation."""
+        await super().async_turn_on(**kwargs)
         self.hass.data[self._attr_unique_id] = True
-        self.async_write_ha_state()
 
-    async def async_turn_off(self, **kwargs):
-        self._is_on = False
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable AGS operation except for overrides."""
+        await super().async_turn_off(**kwargs)
         self.hass.data[self._attr_unique_id] = False
-        self.async_write_ha_state()
 
-    async def async_added_to_hass(self):
+    async def async_added_to_hass(self) -> None:
+        """Restore the previous state and share it via ``hass.data``."""
         await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state:
-            self._is_on = last_state.state == "on"
-        self.hass.data[self._attr_unique_id] = self._is_on
+        self.hass.data[self._attr_unique_id] = self.is_on

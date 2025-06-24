@@ -96,7 +96,7 @@ async def async_setup(hass, config):
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'interval_sync': ags_config.get(CONF_INTERVAL_SYNC, 30)
     }
-    ...
+
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
