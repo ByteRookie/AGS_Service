@@ -45,12 +45,6 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.data: dict = {}
         self.rooms: list = []
         self.sources: list = []
-        self._room_ids: list[str] = []
-        self._current_room_id: str | None = None
-        self._current_room: dict | None = None
-        self._device_ids: list[str] = []
-        self._device_index: int = 0
-        self._return_to_summary: bool = False
         self._used_priorities: set[int] = set()
 
     def _summary(self) -> str:
@@ -73,8 +67,13 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             room_ids = user_input.get(CONF_ROOMS)
             if not isinstance(room_ids, list):
                 room_ids = [room_ids]
-            self._room_ids = room_ids
-            return await self.async_step_next_room()
+            reg = area_registry.async_get(self.hass)
+            self.rooms = []
+            for rid in room_ids:
+                area = reg.async_get_area(rid)
+                name = area.name if area else rid
+                self.rooms.append({CONF_ROOM: name, "devices": []})
+            return await self.async_step_manage_devices()
 
         schema = vol.Schema({vol.Required(CONF_ROOMS): selector({"area": {"multiple": True}})})
         return self.async_show_form(
@@ -86,48 +85,53 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_next_room(self, user_input=None):
-        """Configure the next room in the list."""
-        if not self._room_ids:
+    async def async_step_manage_devices(self, user_input=None):
+        """Manage the list of devices."""
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "add":
+                return await self.async_step_add_device()
+            if action == "remove":
+                index = user_input.get("index", 0)
+                devices = []
+                for room in self.rooms:
+                    for d in room["devices"]:
+                        devices.append((room, d))
+                if 0 <= index < len(devices):
+                    room, device = devices[index]
+                    room["devices"].remove(device)
+                    self._used_priorities.discard(device[CONF_PRIORITY])
+                return await self.async_step_manage_devices()
             return await self.async_step_manage_sources()
 
-        self._current_room_id = self._room_ids.pop(0)
-        reg = area_registry.async_get(self.hass)
-        area = reg.async_get_area(self._current_room_id)
-        name = area.name if area else self._current_room_id
-        self._current_room = {CONF_ROOM: name, "devices": []}
-        return await self.async_step_select_devices()
-
-    async def async_step_select_devices(self, user_input=None):
-        """Select all devices for the current room."""
-        if user_input is not None:
-            device_ids = user_input.get(CONF_DEVICE_ID)
-            if not isinstance(device_ids, list):
-                device_ids = [device_ids]
-            self._device_ids = device_ids
-            self._device_index = 0
-            return await self.async_step_device_details()
-
-        schema = vol.Schema({vol.Required(CONF_DEVICE_ID): selector({"entity": {"domain": "media_player", "multiple": True}})})
+        actions = ["add", "done"]
+        total = sum(len(r["devices"]) for r in self.rooms)
+        if total:
+            actions.insert(1, "remove")
+        schema = vol.Schema(
+            {
+                vol.Required("action"): vol.In(actions),
+                vol.Optional("index", default=0): int,
+            }
+        )
         return self.async_show_form(
-            step_id="select_devices",
+            step_id="manage_devices",
             data_schema=schema,
             description_placeholders={
-                "room": self._current_room[CONF_ROOM],
                 "summary": self._summary(),
                 "progress": self._progress(2),
             },
         )
 
-    async def async_step_device_details(self, user_input=None):
-        """Collect details for each selected device."""
+    async def async_step_add_device(self, user_input=None):
+        """Add a device entry."""
         errors = {}
         if user_input is not None:
             priority = user_input[CONF_PRIORITY]
             if priority in self._used_priorities:
                 errors["base"] = "priority_used"
             else:
-                entity_id = self._device_ids[self._device_index]
+                entity_id = user_input[CONF_DEVICE_ID]
                 state = self.hass.states.get(entity_id)
                 name = state.name if state else entity_id
                 device = {
@@ -138,39 +142,36 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 if user_input.get(CONF_OVERRIDE_CONTENT):
                     device[CONF_OVERRIDE_CONTENT] = user_input[CONF_OVERRIDE_CONTENT]
-                self._current_room["devices"].append(device)
+                room_name = user_input[CONF_ROOM]
+                for room in self.rooms:
+                    if room[CONF_ROOM] == room_name:
+                        room["devices"].append(device)
+                        break
                 self._used_priorities.add(priority)
-                self._device_index += 1
+                if user_input.get(CONF_ADD_ANOTHER, False):
+                    return await self.async_step_add_device()
+                return await self.async_step_manage_devices()
 
-        if self._device_index < len(self._device_ids) or errors:
-            entity_id = self._device_ids[self._device_index]
-            state = self.hass.states.get(entity_id)
-            name = state.name if state else entity_id
-            schema = vol.Schema(
-                {
-                    vol.Required(CONF_DEVICE_TYPE): vol.In(["tv", "speaker"]),
-                    vol.Required(CONF_PRIORITY): int,
-                    vol.Optional(CONF_OVERRIDE_CONTENT): str,
-                }
-            )
-            return self.async_show_form(
-                step_id="device_details",
-                data_schema=schema,
-                description_placeholders={
-                    "device": name,
-                    "room": self._current_room[CONF_ROOM],
-                    "summary": self._summary(),
-                    "progress": self._progress(2),
-                },
-                errors=errors,
-            )
-
-        # all devices handled for this room
-        self.rooms.append(self._current_room)
-        self._current_room = None
-        self._device_ids = []
-        self._device_index = 0
-        return await self.async_step_next_room()
+        room_names = [r[CONF_ROOM] for r in self.rooms]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ROOM): vol.In(room_names),
+                vol.Required(CONF_DEVICE_ID): selector({"entity": {"domain": "media_player"}}),
+                vol.Required(CONF_DEVICE_TYPE): vol.In(["tv", "speaker"]),
+                vol.Required(CONF_PRIORITY): int,
+                vol.Optional(CONF_OVERRIDE_CONTENT): str,
+                vol.Optional(CONF_ADD_ANOTHER, default=False): bool,
+            }
+        )
+        return self.async_show_form(
+            step_id="add_device",
+            data_schema=schema,
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(2),
+            },
+            errors=errors,
+        )
 
     async def async_step_manage_sources(self, user_input=None):
         """Manage the list of sources."""
@@ -276,7 +277,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if user_input.get("add_room"):
                 return await self.async_step_select_rooms()
             if user_input.get("add_device"):
-                return await self.async_step_select_room_for_device()
+                return await self.async_step_manage_devices()
             data = {**self.data, CONF_ROOMS: self.rooms, CONF_SOURCES: self.sources}
             return self.async_create_entry(title="AGS Service", data=data)
 
@@ -295,25 +296,6 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_select_room_for_device(self, user_input=None):
-        """Choose a room to add more devices."""
-        if user_input is not None:
-            name = user_input[CONF_ROOM]
-            for room in self.rooms:
-                if room[CONF_ROOM] == name:
-                    self._current_room = room
-                    break
-            return await self.async_step_select_devices()
-
-        schema = vol.Schema({vol.Required(CONF_ROOM): vol.In([r[CONF_ROOM] for r in self.rooms])})
-        return self.async_show_form(
-            step_id="select_room_for_device",
-            data_schema=schema,
-            description_placeholders={
-                "summary": self._summary(),
-                "progress": self._progress(2),
-            },
-        )
 
     @staticmethod
     @callback
