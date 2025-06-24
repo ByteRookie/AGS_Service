@@ -76,7 +76,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
     def _summary(self) -> str:
-        """Return formatted JSON summary of rooms and sources."""
+        """Return formatted JSON summary of rooms, sources and options."""
         rooms = [
             {**room, "devices": sorted(room["devices"], key=lambda d: d[CONF_PRIORITY])}
             for room in self.rooms
@@ -85,7 +85,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             rooms.sort(key=lambda r: r[CONF_ROOM])
         elif self.sort_by == "priority":
             rooms.sort(key=lambda r: r["devices"][0][CONF_PRIORITY] if r["devices"] else 0)
-        summary = {"rooms": rooms, "sources": self.sources}
+        summary = {"rooms": rooms, "sources": self.sources, "options": self.data}
         return json.dumps(summary, indent=2)
 
     def _progress(self, step: int) -> str:
@@ -321,10 +321,12 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_select_rooms()
             if user_input.get("add_device"):
                 return await self.async_step_manage_devices()
+            if user_input.get("edit_options"):
+                return await self.async_step_options()
             data = {**self.data, CONF_ROOMS: self.rooms, CONF_SOURCES: self.sources}
             return self.async_create_entry(title="AGS Service", data=data)
 
-        summary = json.dumps({"rooms": self.rooms, "sources": self.sources}, indent=2)
+        summary = json.dumps({"rooms": self.rooms, "sources": self.sources, "options": self.data}, indent=2)
         return self.async_show_form(
             step_id="summary",
             description_placeholders={
@@ -335,6 +337,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional("add_room", default=False): bool,
                     vol.Optional("add_device", default=False): bool,
+                    vol.Optional("edit_options", default=False): bool,
                 }
             ),
         )

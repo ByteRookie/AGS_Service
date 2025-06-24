@@ -58,7 +58,7 @@ The integration can be configured entirely from Home Assistant's **Devices & Ser
 2. **Add devices** – use a table to create a row for each media player. Choose the room from a dropdown and device type (`tv` or `speaker`). Priority is selected from a drop‑down list; picking a value used by another device shifts the rest down so no numbers are duplicated. New devices are automatically assigned the last rank.
 3. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
 4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
-5. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
+5. **Review the summary** – confirm the listed rooms, devices, sources and options. The final screen shows every setting including delays and flags. From here you can jump back to add more rooms, devices or edit the options before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below.
 
 ### Global Settings
