@@ -50,6 +50,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.sort_by: str = "priority"
         self._used_priorities: set[int] = set()
 
+    async def async_step_import(self, import_data: dict):
+        """Create a config entry from YAML."""
+        return self.async_create_entry(title="AGS Service", data=import_data)
+
     def _resort_devices(self):
         """Sort stored device lists according to current sort order."""
         if self.sort_by == "priority":

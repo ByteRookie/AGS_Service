@@ -1,22 +1,12 @@
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
-    SUPPORT_TURN_ON as _SUPPORT_TURN_ON, 
-    SUPPORT_TURN_OFF as _SUPPORT_TURN_OFF, 
-    SUPPORT_PLAY,
-    SUPPORT_PAUSE,
-    SUPPORT_STOP,
-    SUPPORT_NEXT_TRACK,
-    SUPPORT_PREVIOUS_TRACK,
-    SUPPORT_SELECT_SOURCE,
-    MEDIA_TYPE_MUSIC,
-    SUPPORT_VOLUME_SET,
-    SUPPORT_SEEK,
-    SUPPORT_SHUFFLE_SET,
-    SUPPORT_REPEAT_SET,
+    MediaPlayerEntityFeature as MPFeature,
+    SUPPORT_TURN_ON as _SUPPORT_TURN_ON,
+    SUPPORT_TURN_OFF as _SUPPORT_TURN_OFF,
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
-from homeassistant.helpers.event import async_track_state_change
+from homeassistant.helpers.event import async_track_state_change_event
 from .ags_service import update_ags_sensors, ags_select_source 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -30,7 +20,14 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities([ags_media_player])
     
     # Set up a listener to monitor changes to sensor.ags_primary_speaker
-    async_track_state_change(hass, "switch.media_system", ags_media_player.async_primary_speaker_changed)
+    async def _listener(event):
+        await ags_media_player.async_primary_speaker_changed(
+            event.data.get("entity_id"),
+            event.data.get("old_state"),
+            event.data.get("new_state"),
+        )
+
+    async_track_state_change_event(hass, "switch.media_system", _listener)
 
     # Set up a listener to monitor changes to the primary speaker (from hass.data)
     keys_to_check = ['primary_speaker', 'ags_status', 'switch_media_system_state', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
@@ -38,7 +35,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for key in keys_to_check:
         entity_id = hass.data.get(key)
         if entity_id:
-            async_track_state_change(hass, entity_id, ags_media_player.async_primary_speaker_changed)
+            async_track_state_change_event(hass, entity_id, _listener)
 
     # Add switches for rooms and zone.home
     entities_to_track = ['zone.home']
@@ -47,7 +44,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         entities_to_track.append(room_switch)
 
     for entity in entities_to_track:
-        async_track_state_change(hass, entity, ags_media_player.async_primary_speaker_changed)
+        async_track_state_change_event(hass, entity, _listener)
 
 
 
@@ -60,11 +57,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         async_add_entities(entities, True)
 
     
-    async def async_primary_speaker_changed(entity_id, old_state, new_state):
-        """Handle the primary speaker's state changes."""
-        ags_media_player.update()
-        await ags_media_player.async_update_ha_state(force_refresh=True)
-
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     async def async_added_to_hass(self):
@@ -297,8 +289,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         return self.primary_speaker_state.attributes.get('media_position_updated_at') if self.primary_speaker_state else None
     @property
     def supported_features(self):
-        return ( SUPPORT_SEEK |SUPPORT_PLAY | SUPPORT_PAUSE | SUPPORT_STOP | SUPPORT_SHUFFLE_SET | SUPPORT_REPEAT_SET |
-                SUPPORT_NEXT_TRACK | SUPPORT_PREVIOUS_TRACK | SUPPORT_SELECT_SOURCE | SUPPORT_VOLUME_SET | _SUPPORT_TURN_ON | _SUPPORT_TURN_OFF)
+        return (
+            MPFeature.SEEK
+            | MPFeature.PLAY
+            | MPFeature.PAUSE
+            | MPFeature.STOP
+            | MPFeature.SHUFFLE_SET
+            | MPFeature.REPEAT_SET
+            | MPFeature.NEXT_TRACK
+            | MPFeature.PREVIOUS_TRACK
+            | MPFeature.SELECT_SOURCE
+            | MPFeature.VOLUME_SET
+            | _SUPPORT_TURN_ON
+            | _SUPPORT_TURN_OFF
+        )
 
     # Implement methods to control the AGS Primary Speaker
 
@@ -437,7 +441,14 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     @property
     def supported_features(self):
         """Flag media player features that are supported."""
-        return SUPPORT_PLAY | SUPPORT_PAUSE | SUPPORT_SELECT_SOURCE | _SUPPORT_TURN_ON | _SUPPORT_TURN_OFF | SUPPORT_VOLUME_SET 
+        return (
+            MPFeature.PLAY
+            | MPFeature.PAUSE
+            | MPFeature.SELECT_SOURCE
+            | MPFeature.VOLUME_SET
+            | _SUPPORT_TURN_ON
+            | _SUPPORT_TURN_OFF
+        )
 
     @property
     def source(self):

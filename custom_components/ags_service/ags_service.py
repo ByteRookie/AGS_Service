@@ -170,14 +170,15 @@ def check_primary_speaker_logic(ags_config, hass):
                 if sorted_devices:
                     for device in sorted_devices:
                         device_state = hass.states.get(device['device_id'])
+                        if device_state is None:
+                            continue
                         group_members = device_state.attributes.get('group_members')
 
                         if (
                             device['device_type'] == 'speaker' and
-                            device_state is not None and
                             device_state.state not in ['off', 'idle', 'paused'] and
-                            group_members and  # Check that group_members exists and is not None
-                            group_members[0] == device['device_id']  # Now safe to index
+                            group_members and
+                            group_members[0] == device['device_id']
                         ):
                             source = device_state.attributes.get('source')
                             if tv_on or (not tv_on and (source is None or source != 'TV')):
