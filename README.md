@@ -280,5 +280,13 @@ installed), the notification shows a failure header such as:
 No tests executed
 ```
 
-Reinstall the integration from the full repository so the suite can run
-properly.
+Reinstall the integration from the full GitHub repository so the suite can
+run properly. HACS releases may omit the `tests` directory, which prevents the
+`run_tests` service from executing.
+
+If the folder is entirely missing you will instead see:
+
+```
+❌ AGS Service Tests Failed
+Tests directory not found. Install from the full GitHub repository to enable tests.
+```
