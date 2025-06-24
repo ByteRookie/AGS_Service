@@ -55,7 +55,7 @@ To install the AGS Service integration, follow these steps:
 
 The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Every form includes a short summary of your rooms and a progress indicator (for example "Step 3/5").
 1. **Select rooms** – pick one or more areas using the built‑in area selector.
-2. **Add devices** – use a table to create a row for each media player. Choose the room from a dropdown, set its type (`tv` or `speaker`), assign a unique numeric priority and optionally enter an override string.
+2. **Add devices** – use a table to create a row for each media player. Choose the room from a dropdown and device type (`tv` or `speaker`). Priority is selected from a drop‑down list; picking a value used by another device shifts the rest down so no numbers are duplicated. New devices are automatically assigned the last rank.
 3. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
 4. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
 5. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
@@ -70,7 +70,7 @@ Available options:
 - `default_on` – default system state after a restart.
 - `static_name` – friendly name to use for the generated media player.
 - `disable_Tv_Source` – skip audio switching when a TV is active.
-Drag‑and‑drop ordering of devices is not available; use the numeric priority field instead.
+Device priorities are chosen from a list rather than via drag‑and‑drop. Selecting a value rearranges the other devices so each rank is unique.
 
 Complete YAML example:
 
@@ -111,7 +111,7 @@ ags_service:
 
 ```
 
-rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string. Priority numbers must be unique across all rooms.
+rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string. Priorities are automatically renumbered so no two devices share the same value.
 sources: Items that can be selected for playback. Each source has a `Source` name, a `Source_Value` used as the content ID, and a `media_content_type`. Set `source_default: true` on one entry to mark it as the default.
 
 
