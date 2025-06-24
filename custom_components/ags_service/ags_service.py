@@ -408,7 +408,21 @@ def ags_select_source(ags_config, hass):
     ags_select_source_running = True
 
     try:
-        source = hass.data.get('ags_media_player_source', "Chill")
+        source = hass.data.get('ags_media_player_source')
+        if source is None:
+            sources_list = hass.data['ags_service']['Sources']
+            source = next(
+                (
+                    src["Source"]
+                    for src in sources_list
+                    if src.get("source_default") is True
+                ),
+                None,
+            )
+            if source is None and sources_list:
+                source = sources_list[0]["Source"]
+            if source is not None:
+                hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
         primary_speaker_entity_id_raw = hass.data.get('primary_speaker', "none")
 
