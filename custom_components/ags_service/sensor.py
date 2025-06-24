@@ -19,6 +19,9 @@ from homeassistant.helpers.event import async_track_state_change_event
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
     ags_config = hass.data['ags_service']
+    global SCAN_INTERVAL
+    interval = ags_config.get('interval_sync', 30)
+    SCAN_INTERVAL = timedelta(seconds=interval)
     rooms = ags_config['rooms']
 
     sensors = [
