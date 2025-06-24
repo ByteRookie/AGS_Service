@@ -126,6 +126,13 @@ def update_ags_status(ags_config, hass):
             hass.data['ags_status'] = ags_status
             return ags_status
 
+    # Respect the AGS schedule. If the schedule entity is off, force the
+    # service status to OFF so no media plays automatically.
+    if hass.data.get('ags_schedule') is False:
+        ags_status = "OFF"
+        hass.data['ags_status'] = ags_status
+        return ags_status
+
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
         if  ags_config['default_on']: 

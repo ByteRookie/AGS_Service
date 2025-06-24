@@ -102,8 +102,9 @@ async def async_setup(hass, config):
     create_sensors = ags_config.get('create_sensors', False)
     if create_sensors:
         await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
-    
+
     await async_load_platform(hass, 'switch', DOMAIN, {}, config)
+    await async_load_platform(hass, 'schedule', DOMAIN, {}, config)
     await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 
     return True

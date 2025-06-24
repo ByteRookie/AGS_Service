@@ -28,9 +28,11 @@ The integration creates a series of sensors and switches for each room:
   - `AGS Service Preferred Primary Speaker`: Highlights the preferred primary speaker in each active room, which is selected based on the priority configured for each speaker.
   - `AGS Service Source`: Notes the source of the audio stream that is currently being played.
   - `AGS Service Inactive TV Speakers`: Lists the inactive speakers that are associated with a TV device.
+  - `AGS Schedule`: Defines when AGS should be active. When this schedule is off the service will not start playback unless an override is detected.
 
 - Switches:
   - `(Room Name) Media`: Manually controls whether a room is active or not. A switch is automatically created for each room configured within the AGS Service.
+  - `AGS Schedule`: Exposes a schedule entity (`schedule.ags_schedule`) controlling when AGS is allowed to operate.
 
 ## File Structure
 
@@ -61,6 +63,7 @@ override_content can be used to override media status if a device content ID con
 
 primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
 interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
+An always-on `AGS Schedule` entity is created automatically. Turning this schedule off will force the AGS status to `OFF` unless an override is detected.
 
 this has all features:
 
