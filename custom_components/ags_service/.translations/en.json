@@ -1,0 +1,68 @@
+{
+  "config": {
+    "title": "Auto Grouping Speaker Service",
+    "step": {
+      "select_rooms": {
+        "title": "Select rooms",
+        "description": "Choose one or more areas to include",
+        "data": {
+          "rooms": "Rooms"
+        }
+      },
+      "manage_devices": {
+        "title": "Manage devices",
+        "description": "Add or remove media players and sort them",
+        "data": {
+          "action": "Action",
+          "index": "Index",
+          "sort_by": "Sort by"
+        }
+      },
+      "add_device": {
+        "title": "Add device",
+        "data": {
+          "room": "Room",
+          "device_id": "Select your devices",
+          "device_type": "Type",
+          "priority": "Priority",
+          "override_content": "Override keyword",
+          "add_another": "Add another"
+        }
+      },
+      "manage_sources": {
+        "title": "Manage sources",
+        "description": "Create or remove playback sources",
+        "data": {
+          "action": "Action",
+          "index": "Index"
+        }
+      },
+      "add_source": {
+        "title": "Add source",
+        "data": {
+          "Source": "Name",
+          "media_item": "Browse media",
+          "Source_Value": "Source value",
+          "media_content_type": "Content type",
+          "source_default": "Default",
+          "add_another": "Add another"
+        }
+      },
+      "options": {
+        "title": "Global options",
+        "data": {
+          "disable_zone": "Disable zone",
+          "primary_delay": "Primary delay",
+          "homekit_player": "HomeKit player",
+          "create_sensors": "Create sensors",
+          "default_on": "Default on",
+          "static_name": "Static name",
+          "disable_Tv_Source": "Disable TV source"
+        }
+      },
+      "summary": {
+        "title": "Summary"
+      }
+    }
+  }
+}
