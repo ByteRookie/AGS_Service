@@ -1,6 +1,6 @@
 # ags_service .py
 import logging
-import time
+import asyncio
 
 
 
@@ -13,7 +13,7 @@ ags_select_source_running = False
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
-def update_ags_sensors(ags_config, hass):
+async def update_ags_sensors(ags_config, hass):
     # Use the global flag
     global AGS_SENSOR_RUNNING
     rooms = ags_config['rooms']
@@ -31,7 +31,7 @@ def update_ags_sensors(ags_config, hass):
         get_active_rooms(rooms, hass)
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
-        determine_primary_speaker(ags_config, hass)
+        await determine_primary_speaker(ags_config, hass)
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
         ## Use in Future release ###
@@ -185,7 +185,7 @@ def check_primary_speaker_logic(ags_config, hass):
                         if (
                             device['device_type'] == 'speaker' and
                             device_state is not None and
-                            device_state.state not in ['off', 'idle', 'paused'] and
+                            device_state.state not in ['off', 'idle'] and
                             group_members and  # Check that group_members exists and is not None
                             group_members[0] == device['device_id']  # Now safe to index
                         ):
@@ -196,14 +196,13 @@ def check_primary_speaker_logic(ags_config, hass):
     return primary_speaker
 
 ### Function to get primary speaker ##
-def determine_primary_speaker(ags_config, hass):
-    # First check
+async def determine_primary_speaker(ags_config, hass):
+    """Determine the primary speaker with an optional delay."""
     primary_speaker = check_primary_speaker_logic(ags_config, hass)
 
     if primary_speaker == "none":
-        # Introduce a delay of 5 seconds
-        time.sleep(5)
-        # Recheck the logic
+        # Non-blocking delay before rechecking
+        await asyncio.sleep(ags_config.get('primary_delay', 5))
         primary_speaker = check_primary_speaker_logic(ags_config, hass)
 
     # Store the primary speaker's state to hass.data

@@ -62,7 +62,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     
     async def async_primary_speaker_changed(entity_id, old_state, new_state):
         """Handle the primary speaker's state changes."""
-        ags_media_player.update()
+        await ags_media_player.async_update()
         await ags_media_player.async_update_ha_state(force_refresh=True)
 
 
@@ -73,6 +73,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         last_state = await self.async_get_last_state()
         if last_state:
             self.hass.data["ags_media_player_source"] = last_state.attributes.get("source")
+        # initial listener for stored primary speaker
+        if self.primary_speaker_entity_id:
+            self._primary_listener = async_track_state_change(
+                self.hass, self.primary_speaker_entity_id, self.async_primary_speaker_changed
+            )
 
     def __init__(self, hass, ags_config):
         """Initialize the media player."""
@@ -92,16 +97,17 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
+        self._primary_listener = None
 
 
 
 
 
-    def update(self):
-        """Fetch latest state."""
+    async def async_update(self):
+        """Fetch latest state asynchronously."""
         ### Move logic here for sensor to remove sensor.py ##
 
-        update_ags_sensors(self.ags_config, self._hass)
+        await update_ags_sensors(self.ags_config, self._hass)
        
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
@@ -142,13 +148,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
+            # update listener if entity changed
+            if self._primary_listener:
+                self._primary_listener()
+                self._primary_listener = None
+            self._primary_listener = async_track_state_change(
+                self.hass, self.primary_speaker_entity_id, self.async_primary_speaker_changed
+            )
 
 
 
     async def async_primary_speaker_changed(self, entity_id, old_state, new_state):
         # Update primary speaker entity ID when sensor.ags_primary_speaker changes
-        self.update()
-        self.async_schedule_update_ha_state(True)
+        await self.async_update()
+        await self.async_update_ha_state(force_refresh=True)
 
     
     @property
