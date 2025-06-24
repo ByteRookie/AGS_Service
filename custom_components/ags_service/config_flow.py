@@ -33,6 +33,9 @@ from .const import (
 )
 
 
+TOTAL_STEPS = 5
+
+
 class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for AGS Service."""
 
@@ -48,10 +51,14 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_ids: list[str] = []
         self._device_index: int = 0
         self._return_to_summary: bool = False
+        self._used_priorities: set[int] = set()
 
     def _summary(self) -> str:
         """Return formatted JSON summary of rooms and sources."""
         return json.dumps({"rooms": self.rooms, "sources": self.sources}, indent=2)
+
+    def _progress(self, step: int) -> str:
+        return f"Step {step}/{TOTAL_STEPS}"
 
     async def async_step_user(self, user_input=None):
         """Start the flow or handle YAML import."""
@@ -73,7 +80,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="select_rooms",
             data_schema=schema,
-            description_placeholders={"summary": self._summary()} if self.rooms else None,
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(1),
+            },
         )
 
     async def async_step_next_room(self, user_input=None):
@@ -86,6 +96,7 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         area = reg.async_get_area(self._current_room_id)
         name = area.name if area else self._current_room_id
         self._current_room = {CONF_ROOM: name, "devices": []}
+        self._used_priorities = set()
         return await self.async_step_select_devices()
 
     async def async_step_select_devices(self, user_input=None):
@@ -105,27 +116,34 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "room": self._current_room[CONF_ROOM],
                 "summary": self._summary(),
+                "progress": self._progress(2),
             },
         )
 
     async def async_step_device_details(self, user_input=None):
         """Collect details for each selected device."""
+        errors = {}
         if user_input is not None:
-            entity_id = self._device_ids[self._device_index]
-            state = self.hass.states.get(entity_id)
-            name = state.name if state else entity_id
-            device = {
-                CONF_DEVICE_ID: entity_id,
-                CONF_DEVICE_NAME: name,
-                CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
-                CONF_PRIORITY: user_input[CONF_PRIORITY],
-            }
-            if user_input.get(CONF_OVERRIDE_CONTENT):
-                device[CONF_OVERRIDE_CONTENT] = user_input[CONF_OVERRIDE_CONTENT]
-            self._current_room["devices"].append(device)
-            self._device_index += 1
+            priority = user_input[CONF_PRIORITY]
+            if priority in self._used_priorities:
+                errors["base"] = "priority_used"
+            else:
+                entity_id = self._device_ids[self._device_index]
+                state = self.hass.states.get(entity_id)
+                name = state.name if state else entity_id
+                device = {
+                    CONF_DEVICE_ID: entity_id,
+                    CONF_DEVICE_NAME: name,
+                    CONF_DEVICE_TYPE: user_input[CONF_DEVICE_TYPE],
+                    CONF_PRIORITY: priority,
+                }
+                if user_input.get(CONF_OVERRIDE_CONTENT):
+                    device[CONF_OVERRIDE_CONTENT] = user_input[CONF_OVERRIDE_CONTENT]
+                self._current_room["devices"].append(device)
+                self._used_priorities.add(priority)
+                self._device_index += 1
 
-        if self._device_index < len(self._device_ids):
+        if self._device_index < len(self._device_ids) or errors:
             entity_id = self._device_ids[self._device_index]
             state = self.hass.states.get(entity_id)
             name = state.name if state else entity_id
@@ -143,7 +161,9 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "device": name,
                     "room": self._current_room[CONF_ROOM],
                     "summary": self._summary(),
+                    "progress": self._progress(2),
                 },
+                errors=errors,
             )
 
         # all devices handled for this room
@@ -178,7 +198,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="manage_sources",
             data_schema=schema,
-            description_placeholders={"summary": self._summary()},
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(3),
+            },
         )
 
     async def async_step_add_source(self, user_input=None):
@@ -208,7 +231,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="add_source",
             data_schema=schema,
-            description_placeholders={"summary": self._summary()},
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(3),
+            },
         )
 
     async def async_step_options(self, user_input=None):
@@ -239,7 +265,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="options",
             data_schema=schema,
-            description_placeholders={"summary": self._summary()},
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(4),
+            },
         )
 
     async def async_step_summary(self, user_input=None):
@@ -255,7 +284,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         summary = json.dumps({"rooms": self.rooms, "sources": self.sources}, indent=2)
         return self.async_show_form(
             step_id="summary",
-            description_placeholders={"summary": summary},
+            description_placeholders={
+                "summary": summary,
+                "progress": self._progress(5),
+            },
             data_schema=vol.Schema(
                 {
                     vol.Optional("add_room", default=False): bool,
@@ -278,7 +310,10 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="select_room_for_device",
             data_schema=schema,
-            description_placeholders={"summary": self._summary()},
+            description_placeholders={
+                "summary": self._summary(),
+                "progress": self._progress(2),
+            },
         )
 
     @staticmethod

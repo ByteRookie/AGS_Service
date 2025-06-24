@@ -53,12 +53,12 @@ To install the AGS Service integration, follow these steps:
 
 ## Configuration
 
-The integration can be configured entirely from Home Assistant's **Devices & Services** UI.
-1. **Select rooms** – pick one or more areas using the built‑in area selector. Previously chosen rooms are listed for reference.
-2. **Choose devices** – for each room, select all media player entities that belong to it. A small summary of rooms and devices entered so far is shown on every screen.
-3. **Enter device details** – specify the type (`tv` or `speaker`), priority and optional **override** string for every selected device. The override value keeps AGS active whenever the device plays media whose identifier contains that string.
+The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Every form includes a short summary of your rooms and a progress indicator (for example "Step 3/5").
+1. **Select rooms** – pick one or more areas using the built‑in area selector.
+2. **Choose devices** – for each room, select all media player entities that belong to it.
+3. **Enter device details** – specify the type (`tv` or `speaker`), priority and optional **override** string for every selected device. Priorities must be unique within a room—lower numbers are preferred. The override value keeps AGS active whenever the device plays media whose identifier contains that string.
 4. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
-5. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation while reviewing the rooms and devices you've entered.
+5. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
 6. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below.
 
@@ -71,6 +71,7 @@ Available options:
 - `default_on` – default system state after a restart.
 - `static_name` – friendly name to use for the generated media player.
 - `disable_Tv_Source` – skip audio switching when a TV is active.
+Drag‑and‑drop ordering of devices is not available; use the numeric priority field instead.
 
 Complete YAML example:
 
