@@ -54,17 +54,17 @@ To install the AGS Service integration, follow these steps:
 ## Configuration
 
 The integration can be configured entirely from Home Assistant's **Devices & Services** UI.
-1. **Select rooms** – pick one or more areas using the built‑in area selector.
-2. **Choose devices** – for each room, select all media player entities that belong to it.
-3. **Enter device details** – specify the type (`tv` or `speaker`), priority and optional override string for every selected device.
-4. **Add playback sources** – supply a name, value and content type. You can repeat this step to add several sources.
-5. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
-6. **Review the summary** – confirm the listed rooms, devices and sources before creating the entry.
+1. **Select rooms** – pick one or more areas using the built‑in area selector. Previously chosen rooms are listed for reference.
+2. **Choose devices** – for each room, select all media player entities that belong to it. A small summary of rooms and devices entered so far is shown on every screen.
+3. **Enter device details** – specify the type (`tv` or `speaker`), priority and optional **override** string for every selected device. The override value keeps AGS active whenever the device plays media whose identifier contains that string.
+4. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
+5. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation while reviewing the rooms and devices you've entered.
+6. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
 Manual YAML configuration continues to work for advanced setups using the structure below.
 
 Available options:
 - `disable_zone` – if `True`, the service ignores the state of `zone.home`.
-- `override_content` – for a device entry; when the device plays media containing this value, AGS remains active.
+- `override_content` – optional string for a device entry. When the selected player is playing media whose identifier contains this string, AGS keeps the room active regardless of occupancy (for example `bluetooth`).
 - `primary_delay` – seconds to wait before clearing the primary speaker (default `5`).
 - `homekit_player` – media player entity used when exposing the player to HomeKit.
 - `create_sensors` – create dedicated sensor entities.
