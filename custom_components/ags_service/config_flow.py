@@ -96,7 +96,6 @@ class AGSServiceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         area = reg.async_get_area(self._current_room_id)
         name = area.name if area else self._current_room_id
         self._current_room = {CONF_ROOM: name, "devices": []}
-        self._used_priorities = set()
         return await self.async_step_select_devices()
 
     async def async_step_select_devices(self, user_input=None):

@@ -55,8 +55,8 @@ To install the AGS Service integration, follow these steps:
 
 The integration can be configured entirely from Home Assistant's **Devices & Services** UI. Every form includes a short summary of your rooms and a progress indicator (for example "Step 3/5").
 1. **Select rooms** – pick one or more areas using the built‑in area selector.
-2. **Choose devices** – for each room, select all media player entities that belong to it.
-3. **Enter device details** – specify the type (`tv` or `speaker`), priority and optional **override** string for every selected device. Priorities must be unique within a room—lower numbers are preferred. The override value keeps AGS active whenever the device plays media whose identifier contains that string.
+2. **Choose devices** – for the currently selected room, pick the media player entities from the dropdown. The flow repeats this step for each room you added.
+3. **Enter device details** – for every chosen entity provide the type (`tv` or `speaker`), a numeric priority and an optional **override** string. Priorities must be unique across all rooms—lower numbers are preferred. The override value keeps AGS active whenever the device plays media whose identifier contains that string.
 4. **Manage sources** – a table style form lets you add or remove as many playback sources as you like, each with a name, value, content type and optional default flag.
 5. **Set global options** – configure items like `primary_delay`, `homekit_player` and sensor creation.
 6. **Review the summary** – confirm the listed rooms, devices and sources. From here you can jump back to add more rooms or devices before saving.
@@ -112,7 +112,7 @@ ags_service:
 
 ```
 
-rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string.
+rooms: A list of rooms. Each room contains a list of devices. A device entry has `device_id`, `device_type` (`tv` or `speaker`), `priority`, and an optional `override_content` string. Priority numbers must be unique across all rooms.
 sources: Items that can be selected for playback. Each source has a `Source` name, a `Source_Value` used as the content ID, and a `media_content_type`. Set `source_default: true` on one entry to mark it as the default.
 
 
