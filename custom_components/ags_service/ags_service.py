@@ -128,14 +128,21 @@ def update_ags_status(ags_config, hass):
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        if  ags_config['default_on']: 
-            ags_status = "ON"
-        else:
-            ags_status = "OFF"
+        # Determine initial state based on currently playing speakers
+        playing = any(
+            device_states.get(d['device_id'])
+            and d['device_type'] == 'speaker'
+            and device_states[d['device_id']].state not in ['off', 'idle']
+            for d in all_devices
+        )
 
-        hass.data['ags_status'] = ags_status
-        hass.data['media_system_state'] = ags_config['default_on']
-        return ags_status
+        media_system_state = playing or ags_config['default_on']
+        hass.data['media_system_state'] = media_system_state
+
+        if not media_system_state:
+            ags_status = "OFF"
+            hass.data['ags_status'] = ags_status
+            return ags_status
 
     if not media_system_state:
         ags_status = "OFF"
@@ -228,10 +235,16 @@ def determine_primary_speaker(ags_config, hass):
             await asyncio.sleep(delay)
             hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
 
-        # Schedule the re-check without blocking
         hass.loop.call_soon_threadsafe(lambda: hass.async_create_task(_delayed_check()))
+        return current_primary
 
-        # Keep the current primary until the delayed check runs
+    if current_primary != new_primary:
+        async def _switch_primary():
+            """Switch primary speaker after a short delay to avoid dropouts."""
+            await asyncio.sleep(1)
+            hass.data['primary_speaker'] = new_primary
+
+        hass.loop.call_soon_threadsafe(lambda: hass.async_create_task(_switch_primary()))
         return current_primary
 
     hass.data['primary_speaker'] = new_primary
