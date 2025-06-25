@@ -8,7 +8,6 @@ trigger:
   - platform: state
     entity_id:
       - media_player.ags_media_system
-    to: none
     attribute: primary_speaker
 condition: []
 action:

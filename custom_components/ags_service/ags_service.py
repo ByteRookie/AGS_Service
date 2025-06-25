@@ -223,9 +223,15 @@ def check_primary_speaker_logic(ags_config, hass):
 def determine_primary_speaker(ags_config, hass):
     """Determine the primary speaker without blocking Home Assistant."""
 
-    # First evaluate potential primary speaker
+    # Evaluate the best available speaker
     new_primary = check_primary_speaker_logic(ags_config, hass)
     current_primary = hass.data.get('primary_speaker')
+
+    # Fall back to the preferred speaker if nothing is currently playing
+    if new_primary == "none":
+        preferred = hass.data.get('preferred_primary_speaker')
+        if preferred and preferred != "none":
+            new_primary = preferred
 
     if new_primary == "none":
         delay = hass.data['ags_service'].get('primary_delay', 5)
@@ -239,13 +245,8 @@ def determine_primary_speaker(ags_config, hass):
         return current_primary
 
     if current_primary != new_primary:
-        async def _switch_primary():
-            """Switch primary speaker after a short delay to avoid dropouts."""
-            await asyncio.sleep(1)
-            hass.data['primary_speaker'] = new_primary
-
-        hass.loop.call_soon_threadsafe(lambda: hass.async_create_task(_switch_primary()))
-        return current_primary
+        hass.data['primary_speaker'] = new_primary
+        return new_primary
 
     hass.data['primary_speaker'] = new_primary
 
