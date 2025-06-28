@@ -4,9 +4,14 @@ import voluptuous as vol
 
 from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.discovery import async_load_platform
+try:
+    from homeassistant.helpers.discovery import async_load_platform
+except Exception:  # function removed in newer Home Assistant versions
+    async_load_platform = None
 
 from .ags_service import run_internal_tests
+
+_LOGGER = logging.getLogger(__name__)
 
 # Define the domain for the integration
 DOMAIN = "ags_service"
@@ -123,10 +128,15 @@ async def async_setup(hass, config):
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
-    if create_sensors:
-        await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
-    
-    await async_load_platform(hass, 'switch', DOMAIN, {}, config)
-    await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
+    if async_load_platform is not None:
+        if create_sensors:
+            await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
+
+        await async_load_platform(hass, 'switch', DOMAIN, {}, config)
+        await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
+    else:
+        _LOGGER.warning(
+            "async_load_platform not available; entity platforms were not loaded"
+        )
 
     return True
