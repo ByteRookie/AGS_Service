@@ -8,6 +8,7 @@ AGS Service is a custom Home Assistant integration that automatically manages sp
 
 The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
 
+## Table of Contents
 * [Features](#features)
 * [File Structure](#file-structure)
 * [Installation](#installation)
