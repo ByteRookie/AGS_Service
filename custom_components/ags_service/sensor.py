@@ -2,21 +2,24 @@
 from __future__ import annotations
 from datetime import timedelta
 
-SCAN_INTERVAL = timedelta(seconds=1)
+# Sensors mostly update via the state change listener below, so heavy polling
+# isn't required. 30 seconds keeps them responsive without excessive work.
+SCAN_INTERVAL = timedelta(seconds=30)
 
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-
-import asyncio
 # Setup platform function
-from homeassistant.helpers.event import async_track_state_change
+from homeassistant.helpers.event import async_track_state_change_event
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
     ags_config = hass.data['ags_service']
+    global SCAN_INTERVAL
+    interval = ags_config.get('interval_sync', 30)
+    SCAN_INTERVAL = timedelta(seconds=interval)
     rooms = ags_config['rooms']
 
     sensors = [
@@ -33,22 +36,21 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 
     # Define a function to be called when a tracked entity changes its state
-    def state_changed_listener(entity_id, old_state, new_state):
-        # Make sure the new state is not None
+    async def state_changed_listener(event):
+        """Refresh sensors when a tracked entity changes state."""
+        new_state = event.data.get("new_state")
         if new_state is None:
             return
-        # Trigger an update of your sensor
         for sensor in sensors:
-            hass.async_create_task(sensor.async_update_ha_state(True))
+            await sensor.async_update_ha_state(True)
 
-    # List of entity ids to track
-    sensor_entity_ids = [
-    "sensor.ags_status"
-    ]
-
+    # Register sensors so other modules can refresh them immediately
+    hass.data['ags_sensors'] = sensors
 
     entities_to_track = ['zone.home']
-    entities_to_track.extend(sensor_entity_ids)
+    schedule_cfg = ags_config.get('schedule_entity')
+    if schedule_cfg and schedule_cfg.get('entity_id'):
+        entities_to_track.append(schedule_cfg['entity_id'])
     
   
 
@@ -58,7 +60,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             entities_to_track.append(device['device_id'])
 
     # Register the state change listener
-    async_track_state_change(hass, entities_to_track, state_changed_listener)
+    async_track_state_change_event(hass, entities_to_track, state_changed_listener)
 
     # Add the sensors to Home Assistant
     

@@ -1,6 +1,6 @@
 # ags_service .py
 import logging
-import time
+import asyncio
 
 
 
@@ -27,7 +27,9 @@ def update_ags_sensors(ags_config, hass):
     try:
     
         # Call and execute the functions to set sensor values for all of AGS
-        get_configured_rooms(rooms, hass)
+        # Configured rooms rarely change, only compute once
+        if 'configured_rooms' not in hass.data:
+            get_configured_rooms(rooms, hass)
         get_active_rooms(rooms, hass)
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
@@ -44,19 +46,31 @@ def update_ags_sensors(ags_config, hass):
 
     finally:
         # Ensure that the AGS_SENSOR_RUNNING flag is reset to False once the function completes,
-        # regardless of whether it completes successfully or due to an
-        AGS_SENSOR_RUNNING = False 
+        # regardless of whether it completes successfully or due to an error
+        AGS_SENSOR_RUNNING = False
+
+        # Immediately refresh any registered sensors so new values appear without delay
+        sensors = hass.data.get('ags_sensors', [])
+        for sensor in sensors:
+            try:
+                hass.loop.call_soon_threadsafe(sensor.async_schedule_update_ha_state, True)
+            except Exception as exc:
+                _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
 
 ## Get Configured Rooms ##
 def get_configured_rooms(rooms, hass):
     """Get the list of configured rooms and store it in hass.data."""
-    
-    # Extract the list of configured rooms
+
+    # If we've already computed this list return the cached value
+    if 'configured_rooms' in hass.data:
+        return hass.data['configured_rooms']
+
+    # Extract the list of configured rooms once at startup
     configured_rooms = [room['room'] for room in rooms]
-    
+
     # Store the list in hass.data
     hass.data['configured_rooms'] = configured_rooms
-    
+
     return configured_rooms
 
 ## Function for Active room ###
@@ -112,21 +126,72 @@ def update_ags_status(ags_config, hass):
             hass.data['ags_status'] = ags_status
             return ags_status
 
+
+    # Determine schedule entity state if configured
+    schedule_cfg = hass.data['ags_service'].get('schedule_entity')
+    schedule_on = True
+    prev_schedule_state = hass.data.get('schedule_prev_state')
+    if schedule_cfg:
+        state_obj = hass.states.get(schedule_cfg['entity_id'])
+        if state_obj is not None:
+            if state_obj.state == schedule_cfg.get('on_state', 'on'):
+                schedule_on = True
+            elif state_obj.state == schedule_cfg.get('off_state', 'off'):
+                schedule_on = False
+            else:
+                schedule_on = False
+        else:
+            schedule_on = False
+
+    # Automatically enable the media system when the schedule switches
+    # from the off state to the on state
+    if (
+        schedule_cfg
+        and prev_schedule_state is not None
+        and not prev_schedule_state
+        and schedule_on
+    ):
+        hass.data['switch_media_system_state'] = True
+
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        if  ags_config['default_on']: 
-            ags_status = "ON"
+        if schedule_cfg and schedule_cfg.get('schedule_override') and not schedule_on:
+            media_system_state = False
         else:
-            ags_status = "OFF"
+            media_system_state = ags_config['default_on']
+        hass.data['switch_media_system_state'] = media_system_state
 
-        hass.data['ags_status'] = ags_status
-        hass.data['media_system_state'] = ags_config['default_on']
-        return ags_status
+    if schedule_cfg:
+
+        if schedule_cfg.get('schedule_override'):
+            if prev_schedule_state is None:
+                prev_schedule_state = schedule_on
+
+            # Only force the system off when the schedule transitions
+            # from "on" to "off" so manual re-enablement is possible
+            if not schedule_on and prev_schedule_state:
+                media_system_state = False
+                hass.data['switch_media_system_state'] = False
+
+            hass.data['schedule_prev_state'] = schedule_on
+            hass.data['schedule_state'] = schedule_on
+
+        else:
+            if not schedule_on:
+                ags_status = "OFF"
+                hass.data['ags_status'] = ags_status
+                hass.data['schedule_prev_state'] = schedule_on
+                hass.data['schedule_state'] = schedule_on
+                return ags_status
+
+            hass.data['schedule_prev_state'] = schedule_on
+            hass.data['schedule_state'] = schedule_on
 
     if not media_system_state:
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status
+
 
     # Check for TV in active rooms
     for room in rooms:
@@ -180,12 +245,15 @@ def check_primary_speaker_logic(ags_config, hass):
                 if sorted_devices:
                     for device in sorted_devices:
                         device_state = hass.states.get(device['device_id'])
+                       
+                        if device_state is None:
+                            continue
                         group_members = device_state.attributes.get('group_members')
+
 
                         if (
                             device['device_type'] == 'speaker' and
-                            device_state is not None and
-                            device_state.state not in ['off', 'idle', 'paused'] and
+                            device_state.state not in ['off', 'idle'] and
                             group_members and  # Check that group_members exists and is not None
                             group_members[0] == device['device_id']  # Now safe to index
                         ):
@@ -197,19 +265,27 @@ def check_primary_speaker_logic(ags_config, hass):
 
 ### Function to get primary speaker ##
 def determine_primary_speaker(ags_config, hass):
-    # First check
+    """Determine the primary speaker without blocking Home Assistant."""
+
+    # First pass through the logic
     primary_speaker = check_primary_speaker_logic(ags_config, hass)
 
     if primary_speaker == "none":
-        # Introduce a delay of 5 seconds
-        time.sleep(5)
-        # Recheck the logic
-        primary_speaker = check_primary_speaker_logic(ags_config, hass)
+        delay = hass.data['ags_service'].get('primary_delay', 5)
 
-    # Store the primary speaker's state to hass.data
+        async def _delayed_check():
+            """Recheck after a short delay using asyncio to avoid blocking."""
+            await asyncio.sleep(delay)
+            hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
+
+        # Schedule the re-check from the event loop in a thread safe way
+        hass.loop.call_soon_threadsafe(
+            lambda: hass.async_create_task(_delayed_check())
+        )
+
+    # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker
 
-    # Return the primary speaker's state
     return primary_speaker
 
 ### Function for Active and Inactive list ###
@@ -316,10 +392,17 @@ def execute_ags_logic(hass):
     # Logic for join action
     if active_speakers != []  and status != 'off' and primary_speaker != 'none':
         try:
-            hass.services.call('media_player', 'join', {
-                'entity_id': primary_speaker,
-                'group_members': active_speakers,
-            })
+            # Use async_call so the service invocation doesn't block
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call(
+                        'media_player', 'join', {
+                            'entity_id': primary_speaker,
+                            'group_members': active_speakers,
+                        }
+                    )
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -327,9 +410,21 @@ def execute_ags_logic(hass):
     # Logic for remove action
     if inactive_speakers != []:
         try:
-            hass.services.call('media_player', 'unjoin', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'media_pause', {'entity_id': inactive_speakers })
-            hass.services.call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'unjoin', {'entity_id': inactive_speakers })
+                )
+            )
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'media_pause', {'entity_id': inactive_speakers })
+                )
+            )
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -337,10 +432,14 @@ def execute_ags_logic(hass):
     # Logic for resetting TV speakers
     if inactive_tv_speakers != []:
         try:
-            hass.services.call('media_player', 'select_source', {
-                'source': 'TV',
-                'entity_id': inactive_tv_speakers,
-            })
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        'source': 'TV',
+                        'entity_id': inactive_tv_speakers,
+                    })
+                )
+            )
         except Exception as e:
             # Log the exception for diagnosis
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
@@ -363,7 +462,21 @@ def ags_select_source(ags_config, hass):
     ags_select_source_running = True
 
     try:
-        source = hass.data.get('ags_media_player_source', "Chill")
+        source = hass.data.get('ags_media_player_source')
+        if source is None:
+            sources_list = hass.data['ags_service']['Sources']
+            source = next(
+                (
+                    src["Source"]
+                    for src in sources_list
+                    if src.get("source_default") is True
+                ),
+                None,
+            )
+            if source is None and sources_list:
+                source = sources_list[0]["Source"]
+            if source is not None:
+                hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
         primary_speaker_entity_id_raw = hass.data.get('primary_speaker', "none")
 
@@ -382,21 +495,40 @@ def ags_select_source(ags_config, hass):
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
-        if source == "TV" or status == "ON TV":
-            hass.services.call('media_player', 'select_source', {
-                "source": source,
-                "entity_id": primary_speaker_entity_id
-            })
+        if source == "TV":
+            # Use async service call to avoid blocking the event loop
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        "source": source,
+                        "entity_id": primary_speaker_entity_id
+                    })
+                )
+            )
 
         elif source != "Unknown" and status != "OFF":
             source_info = source_dict.get(source)
 
             if source_info:
-                hass.services.call('media_player', 'play_media', {
-                    'entity_id': primary_speaker_entity_id,
-                    'media_content_id': source_info["value"],
-                    'media_content_type': source_info["type"]
-                })
+                media_id = source_info["value"]
+                media_type = source_info["type"]
+
+                if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
+                    media_id = f"FV:{media_id}"
+
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        hass.services.async_call(
+                            'media_player',
+                            'play_media',
+                            {
+                                'entity_id': primary_speaker_entity_id,
+                                'media_content_id': media_id,
+                                'media_content_type': media_type,
+                            }
+                        )
+                    )
+                )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))

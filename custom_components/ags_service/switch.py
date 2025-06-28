@@ -18,8 +18,12 @@ async def async_setup_platform(
     ags_config = hass.data["ags_service"]
     rooms = ags_config["rooms"]
 
+    entities = [RoomSwitch(hass, room) for room in rooms]
+
+    schedule_cfg = ags_config.get("schedule_entity")
+
     # Add the switch entities
-    async_add_entities([RoomSwitch(hass, room) for room in rooms])
+    async_add_entities(entities)
 
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
@@ -65,5 +69,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
+
+
 
            
