@@ -60,15 +60,18 @@ STUB_MODULES = {
     ),
 }
 
+# Build a composite stub for the top-level helpers package using the above
+# helper stubs so imports like ``from homeassistant import helpers`` succeed.
+STUB_MODULES['homeassistant.helpers'] = types.SimpleNamespace(
+    config_validation=STUB_MODULES['homeassistant.helpers.config_validation'],
+    discovery=STUB_MODULES['homeassistant.helpers.discovery'],
+    event=STUB_MODULES['homeassistant.helpers.event'],
+)
+
 for name, stub in STUB_MODULES.items():
     ORIGINAL_MODULES[name] = sys.modules.get(name)
     sys.modules[name] = stub
 
-sys.modules['homeassistant.helpers'] = types.SimpleNamespace(
-    config_validation=sys.modules['homeassistant.helpers.config_validation'],
-    discovery=sys.modules['homeassistant.helpers.discovery'],
-    event=sys.modules['homeassistant.helpers.event'],
-)
 sys.modules.setdefault('custom_components', types.ModuleType('custom_components'))
 
 # Load ags_service module directly without executing package __init__
