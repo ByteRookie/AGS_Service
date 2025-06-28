@@ -381,15 +381,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
         if self.ags_status == "ON TV" and disable_Tv_Source == False:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
-
+            sources = []
+            if self.primary_speaker_state:
+                sources = self.primary_speaker_state.attributes.get('source_list', [])
+            # If TV doesn't expose sources fall back to favorites
+            if not sources:
+                update_favorite_sources(self.ags_config, self.hass)
+                sources = [src["Source"] for src in self.hass.data['ags_service'].get('Sources', [])]
+                if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+                    sources.append("TV")
         else:
             update_favorite_sources(self.ags_config, self.hass)
             sources = [src["Source"] for src in self.hass.data['ags_service'].get('Sources', [])]
             if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
                 sources.append("TV")
 
-        return sources
+        return sources or []
 
     @property
     def source(self):
@@ -492,7 +499,7 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
         if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
             sources.append("TV")
 
-        return sources
+        return sources or []
 
     @property
     def volume_level(self):
