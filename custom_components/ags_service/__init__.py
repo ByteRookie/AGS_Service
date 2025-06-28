@@ -23,6 +23,7 @@ CONF_STATIC_NAME = 'static_name'
 CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SCHEDULE_ENTITY = 'schedule_entity'
+CONF_OTT_DEVICE = 'ott_device'
 CONF_SOURCES = 'Sources'
 CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
@@ -47,6 +48,7 @@ DEVICE_SCHEMA = vol.Schema({
                                     vol.Required("device_type"): cv.string,
                                     vol.Required("priority"): cv.positive_int,
                                     vol.Optional("override_content"): cv.string,
+                                    vol.Optional(CONF_OTT_DEVICE): cv.string,
                                 }
                             )
                         ],
@@ -86,8 +88,16 @@ DEVICE_SCHEMA = vol.Schema({
 
 async def async_setup(hass, config):
     """Set up the custom component."""
-    
+
     ags_config = config[DOMAIN]
+
+    # Validate ott_device usage
+    for room in ags_config['rooms']:
+        for device in room['devices']:
+            if CONF_OTT_DEVICE in device and device['device_type'] != 'tv':
+                raise vol.Invalid(
+                    "ott_device is only allowed for devices with device_type 'tv'"
+                )
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],

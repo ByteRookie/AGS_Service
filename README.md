@@ -123,6 +123,7 @@ ags_service:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
+          ott_device: "media_player.ott_1"
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
@@ -154,6 +155,9 @@ ags_service:
 * **schedule_entity** – follow another entity's state. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`.
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
 * If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
+
+
+HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
 
 ## Automation
