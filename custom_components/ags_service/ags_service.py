@@ -152,32 +152,30 @@ def update_ags_status(ags_config, hass):
         hass.data['switch_media_system_state'] = media_system_state
 
     if schedule_cfg:
-        
+
         if schedule_cfg.get('schedule_override'):
             if prev_schedule_state is None:
                 prev_schedule_state = schedule_on
-            if not schedule_on:
-                if prev_schedule_state:
-                    hass.loop.call_soon_threadsafe(
-                        lambda: hass.async_create_task(
-                            hass.services.async_call(
-                                "media_player",
-                                "turn_off",
-                                {"entity_id": "media_player.ags_media_player"},
-                            )
-                        )
-                    )
+
+            # Only force the system off when the schedule transitions
+            # from "on" to "off" so manual re-enablement is possible
+            if not schedule_on and prev_schedule_state:
                 media_system_state = False
                 hass.data['switch_media_system_state'] = False
-        elif not schedule_on:
-            ags_status = "OFF"
-            hass.data['ags_status'] = ags_status
+
             hass.data['schedule_prev_state'] = schedule_on
             hass.data['schedule_state'] = schedule_on
-            return ags_status
 
-        hass.data['schedule_prev_state'] = schedule_on
-        hass.data['schedule_state'] = schedule_on
+        else:
+            if not schedule_on:
+                ags_status = "OFF"
+                hass.data['ags_status'] = ags_status
+                hass.data['schedule_prev_state'] = schedule_on
+                hass.data['schedule_state'] = schedule_on
+                return ags_status
+
+            hass.data['schedule_prev_state'] = schedule_on
+            hass.data['schedule_state'] = schedule_on
 
     if not media_system_state:
         ags_status = "OFF"
