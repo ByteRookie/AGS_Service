@@ -130,11 +130,10 @@ def update_ags_status(ags_config, hass):
     # value in ``ags_schedule_configured`` will be False and we treat the
     # schedule as always on. The override switch also forces the schedule to be
     # ignored.
-    schedule_configured = hass.data.get('ags_schedule_configured', False)
+    from .schedule import ags_schedule_enabled
+
     schedule_override = hass.data.get('ags_schedule_override', False)
-    schedule_state = hass.data.get('ags_schedule', True)
-    if not schedule_configured:
-        schedule_state = True
+    schedule_state = ags_schedule_enabled(hass)
     if schedule_override:
         schedule_state = True
 

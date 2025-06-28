@@ -10,8 +10,28 @@ from typing import Any
 # Home Assistant exposes a ``Schedule`` entity type via the ``schedule`` helper
 # integration. The base class handles all on/off transitions based on defined
 # time blocks. Importing it directly allows us to subclass it for AGS.
-from homeassistant.components.schedule import Schedule
+# Import the native Schedule helper.  Depending on the Home Assistant release
+# the class may be exposed as ``Schedule`` directly or via ``ScheduleEntity``.
+try:
+    # Newer versions expose ``Schedule``
+    from homeassistant.components.schedule import Schedule
+except ImportError:  # pragma: no cover - older core releases
+    # Older versions expose ``ScheduleEntity`` which is functionally
+    # equivalent.  Alias it so the rest of the code can remain the same.
+    from homeassistant.components.schedule import ScheduleEntity as Schedule
 from homeassistant.helpers.restore_state import RestoreEntity
+
+
+def ags_schedule_enabled(hass) -> bool:
+    """Return True if the AGS schedule allows playback."""
+    # When the schedule entity hasn't been configured with any time blocks we
+    # treat it as always on.  The state of the entity is cached in ``hass.data``
+    # under its unique ID.
+    configured = hass.data.get("ags_schedule_configured", False)
+    state = hass.data.get("ags_schedule", True)
+    if not configured:
+        return True
+    return state
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
@@ -51,12 +71,15 @@ class AGSSchedule(Schedule, RestoreEntity):
         # weekday, even if those lists are empty.
         config = {"name": self._attr_name, "icon": self._attr_icon, **default_schedule}
 
-        # Initialise the base ``Schedule`` with our configuration
-        # Explicitly initialise the parent Schedule class with our configuration
-        # dictionary.  Using the class directly avoids ambiguity with ``super``
-        # across multiple bases and mirrors the way the native helper is
-        # typically instantiated.
-        Schedule.__init__(self, hass, config)
+        # Initialise the base ``Schedule`` class.  The constructor signature
+        # changed in different Home Assistant versions, so try both patterns
+        # for maximum compatibility.
+        try:
+            Schedule.__init__(self, hass, config)
+        except TypeError:
+            # Older/newer releases only expect the configuration dictionary
+            # without the ``hass`` parameter.
+            Schedule.__init__(self, config)
 
         # RestoreEntity also needs initialisation so its state can be recovered
         # after Home Assistant restarts.
