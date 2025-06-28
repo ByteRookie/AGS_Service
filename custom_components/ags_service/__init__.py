@@ -80,9 +80,16 @@ DEVICE_SCHEMA = vol.Schema({
 })
 
 async def async_setup(hass, config):
-    """Set up the custom component."""
-    
-    ags_config = config[DOMAIN]
+    """Set up the custom component.
+
+    If the user hasn't defined any configuration for this integration,
+    simply return ``True`` so Home Assistant can continue starting up
+    without raising an exception.
+    """
+
+    ags_config = config.get(DOMAIN)
+    if not ags_config:
+        return True
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
