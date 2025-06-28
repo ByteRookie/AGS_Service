@@ -126,21 +126,62 @@ def update_ags_status(ags_config, hass):
             hass.data['ags_status'] = ags_status
             return ags_status
 
+
+    # Determine schedule entity state if configured
+    schedule_cfg = hass.data['ags_service'].get('schedule_entity')
+    schedule_on = True
+    prev_schedule_state = hass.data.get('schedule_prev_state')
+    if schedule_cfg:
+        state_obj = hass.states.get(schedule_cfg['entity_id'])
+        if state_obj is not None:
+            if state_obj.state == schedule_cfg.get('on_state', 'on'):
+                schedule_on = True
+            elif state_obj.state == schedule_cfg.get('off_state', 'off'):
+                schedule_on = False
+            else:
+                schedule_on = False
+        else:
+            schedule_on = False
+
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        if  ags_config['default_on']: 
-            ags_status = "ON"
+        if schedule_cfg and schedule_cfg.get('schedule_override') and not schedule_on:
+            media_system_state = False
         else:
-            ags_status = "OFF"
+            media_system_state = ags_config['default_on']
+        hass.data['switch_media_system_state'] = media_system_state
 
-        hass.data['ags_status'] = ags_status
-        hass.data['media_system_state'] = ags_config['default_on']
-        return ags_status
+    if schedule_cfg:
+
+        if schedule_cfg.get('schedule_override'):
+            if prev_schedule_state is None:
+                prev_schedule_state = schedule_on
+
+            # Only force the system off when the schedule transitions
+            # from "on" to "off" so manual re-enablement is possible
+            if not schedule_on and prev_schedule_state:
+                media_system_state = False
+                hass.data['switch_media_system_state'] = False
+
+            hass.data['schedule_prev_state'] = schedule_on
+            hass.data['schedule_state'] = schedule_on
+
+        else:
+            if not schedule_on:
+                ags_status = "OFF"
+                hass.data['ags_status'] = ags_status
+                hass.data['schedule_prev_state'] = schedule_on
+                hass.data['schedule_state'] = schedule_on
+                return ags_status
+
+            hass.data['schedule_prev_state'] = schedule_on
+            hass.data['schedule_state'] = schedule_on
 
     if not media_system_state:
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status
+
 
     # Check for TV in active rooms
     for room in rooms:

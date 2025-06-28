@@ -24,6 +24,7 @@ CONF_DEFAULT_ON = 'default_on'
 CONF_STATIC_NAME = 'static_name'
 CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
+CONF_SCHEDULE_ENTITY = 'schedule_entity'
 CONF_SOURCES = 'Sources'
 CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
@@ -77,6 +78,12 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
     vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
+    vol.Optional(CONF_SCHEDULE_ENTITY): vol.Schema({
+        vol.Required('entity_id'): cv.string,
+        vol.Optional('on_state', default='on'): cv.string,
+        vol.Optional('off_state', default='off'): cv.string,
+        vol.Optional('schedule_override', default=False): cv.boolean,
+    }),
 })
 
 async def async_setup(hass, config):
@@ -93,8 +100,8 @@ async def async_setup(hass, config):
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
-
-        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False)
+        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
+        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
    }
 
     # Load the sensor and switch platforms and pass the configuration to them

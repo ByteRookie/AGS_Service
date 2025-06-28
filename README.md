@@ -74,6 +74,11 @@ ags_service:
   default_on: false
   static_name: "AGS Media Player"
   disable_Tv_Source: false
+  schedule_entity:
+    entity_id: schedule.my_music
+    on_state: "on"  # optional
+    off_state: "off"  # optional
+    schedule_override: true  # optional
   rooms:
     - room: "Room 1"
       devices:
@@ -108,7 +113,8 @@ ags_service:
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
 sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
-homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities.
+The schedule entry's ``on_state`` and ``off_state`` fields are optional and default to ``on`` and ``off`` if omitted.
+homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values (defaults are ``on`` and ``off``). ``schedule_override`` is also optional. When enabled, the media system turns off once whenever the schedule changes to its ``off`` state and can then be manually turned back on even if the schedule remains off. If Home Assistant restarts while the schedule is off, the system begins in the off state regardless of ``default_on``.
 
 
 ##Automation
@@ -129,7 +135,7 @@ AGS Service Active Speakers: This sensor checks the list of active rooms and enu
 
 AGS Service Inactive Speakers: This sensor is similar to the Active Speakers sensor, but it enumerates the speakers in inactive rooms. If a speaker device is found in a room that is not active, it is added to the list.
 
-AGS Service Status: This sensor provides the overall status of the AGS service. It checks the override switch and the state of the source selector to determine the status.
+AGS Service Status: This sensor provides the overall status of the AGS service. It evaluates the media system state and, when configured, the schedule entity.
 
 AGS Service Primary Speaker: This sensor checks each active room to determine the primary speaker. The primary speaker is the speaker with the highest priority (lowest numerical value) in the room.
 
