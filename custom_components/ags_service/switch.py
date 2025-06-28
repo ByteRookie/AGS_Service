@@ -21,8 +21,6 @@ async def async_setup_platform(
     entities = [RoomSwitch(hass, room) for room in rooms]
 
     schedule_cfg = ags_config.get("schedule_entity")
-    if schedule_cfg and schedule_cfg.get("schedule_override"):
-        entities.append(ScheduleOverrideSwitch(hass))
 
     # Add the switch entities
     async_add_entities(entities)
@@ -72,43 +70,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
-
-class ScheduleOverrideSwitch(SwitchEntity, RestoreEntity):
-    """Switch to temporarily ignore the schedule."""
-
-    _attr_should_poll = False
-
-    def __init__(self, hass):
-        self.hass = hass
-        self._attr_name = "AGS Schedule Override"
-        self._attr_unique_id = "switch.ags_schedule_override"
-
-        if self._attr_unique_id in hass.data:
-            self._attr_is_on = hass.data[self._attr_unique_id]
-        else:
-            self._attr_is_on = False
-            hass.data[self._attr_unique_id] = False
-
-    @property
-    def is_on(self):
-        return self._attr_is_on
-
-    async def async_turn_on(self, **kwargs):
-        self._attr_is_on = True
-        self.hass.data[self._attr_unique_id] = True
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs):
-        self._attr_is_on = False
-        self.hass.data[self._attr_unique_id] = False
-        self.async_write_ha_state()
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state:
-            self._attr_is_on = last_state.state == "on"
-            self.hass.data[self._attr_unique_id] = self._attr_is_on
 
 
            
