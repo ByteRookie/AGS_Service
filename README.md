@@ -39,14 +39,14 @@ access their values.
 
 The integration consists of several Python modules and support files:
 
-- `__init__.py` – handles setup and stores configuration data.
-- `ags_service.py` – contains the core logic for tracking rooms and speakers.
-- `media_player.py` – implements the virtual AGS Media Player entity.
-- `sensor.py` – defines optional sensor entities.
-- `switch.py` – defines room switch entities.
-- `manifest.json` – metadata about the integration.
-- `AGS Automation Example.yaml` – ready‑to‑use automation example.
-- `README.md` – this documentation file.
+- `custom_components/ags_service/__init__.py` – handles setup and stores configuration data.
+- `custom_components/ags_service/ags_service.py` – contains the core logic for tracking rooms and speakers.
+- `custom_components/ags_service/media_player.py` – implements the virtual AGS Media Player entity.
+- `custom_components/ags_service/sensor.py` – defines optional sensor entities.
+- `custom_components/ags_service/switch.py` – defines room switch entities.
+- `custom_components/ags_service/manifest.json` – metadata about the integration.
+- `custom_components/ags_service/AGS Automation Example.yaml` – ready‑to‑use automation example.
+- `custom_components/ags_service/README.md` – this documentation file.
 
 ## Installation
 
