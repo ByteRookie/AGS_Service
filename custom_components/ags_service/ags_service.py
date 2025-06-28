@@ -268,7 +268,34 @@ def determine_primary_speaker(ags_config, hass):
     """Determine the primary speaker without blocking Home Assistant."""
 
     # First pass through the logic
+    previous_primary = hass.data.get('primary_speaker')
     primary_speaker = check_primary_speaker_logic(ags_config, hass)
+
+    # If the primary speaker changed, transfer playback queue to the new
+    # speaker before dropping the old one from the group. This prevents the
+    # playing song from restarting when the primary device changes.
+    if (
+        previous_primary
+        and previous_primary not in ["", "none"]
+        and primary_speaker not in ["", "none", previous_primary]
+    ):
+        async def _swap_primary():
+            await hass.services.async_call(
+                "media_player",
+                "join",
+                {
+                    "entity_id": previous_primary,
+                    "group_members": [primary_speaker],
+                },
+            )
+            await asyncio.sleep(1)
+            await hass.services.async_call(
+                "media_player", "unjoin", {"entity_id": previous_primary}
+            )
+
+        hass.loop.call_soon_threadsafe(
+            lambda: hass.async_create_task(_swap_primary())
+        )
 
     if primary_speaker == "none":
         delay = hass.data['ags_service'].get('primary_delay', 5)
