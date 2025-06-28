@@ -5,6 +5,7 @@ import voluptuous as vol
 from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
+from .ags_service import update_favorite_sources
 
 # Define the domain for the integration
 DOMAIN = "ags_service"
@@ -25,10 +26,6 @@ CONF_STATIC_NAME = 'static_name'
 CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SOURCES = 'Sources'
-CONF_SOURCE = 'Source'
-CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
-CONF_SOURCE_VALUE = 'Source_Value'
-CONF_SOURCE_DEFAULT = 'source_default'
 
 
 # Define the configuration schema for a device
@@ -56,19 +53,6 @@ DEVICE_SCHEMA = vol.Schema({
             )
         ],
     ),
-    vol.Required("Sources"): vol.All(
-        cv.ensure_list,
-        [
-            vol.Schema(
-                {
-                    vol.Required("Source"): cv.string,
-                    vol.Required("Source_Value"): cv.string,
-                    vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
-                    vol.Optional(CONF_SOURCE_DEFAULT, default=False): cv.boolean,
-                }
-            )
-        ],
-    ),
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
     vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
     vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
@@ -86,7 +70,7 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'], 
+        'Sources': [],
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
         'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5), ## Not Done ###
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
@@ -96,6 +80,8 @@ async def async_setup(hass, config):
 
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False)
    }
+
+    update_favorite_sources(hass.data[DOMAIN], hass)
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)

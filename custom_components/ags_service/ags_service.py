@@ -13,6 +13,24 @@ ags_select_source_running = False
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
+def update_favorite_sources(ags_config, hass):
+    """Refresh available favorites from the highest priority speaker."""
+    rooms = ags_config['rooms']
+    speakers = [d for room in rooms for d in room['devices'] if d['device_type'] == 'speaker']
+    if not speakers:
+        hass.data['ags_service']['Sources'] = []
+        return
+
+    top_speaker = sorted(speakers, key=lambda x: x['priority'])[0]['device_id']
+    state = hass.states.get(top_speaker)
+    if not state:
+        hass.data['ags_service']['Sources'] = []
+        return
+
+    favs = [src for src in state.attributes.get('source_list', []) if src and src != 'TV']
+    hass.data['ags_service']['Sources'] = [{'Source': fav} for fav in favs]
+
+
 def update_ags_sensors(ags_config, hass):
     # Use the global flag
     global AGS_SENSOR_RUNNING
@@ -25,6 +43,7 @@ def update_ags_sensors(ags_config, hass):
     AGS_SENSOR_RUNNING = True
     
     try:
+        update_favorite_sources(ags_config, hass)
     
         # Call and execute the functions to set sensor values for all of AGS
         # Configured rooms rarely change, only compute once
@@ -94,17 +113,10 @@ def get_active_rooms(rooms, hass):
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
     active_rooms = hass.data.get('active_rooms', [])
-    default_source_name = None
-    sources_list = hass.data['ags_service']['Sources'] 
-    for src in sources_list:
-        if src.get("source_default") == True:
-            default_source_name = src["Source"]
-            break
-        
-    if default_source_name:
-        ags_status = default_source_name
-    else:
-        ags_status = "Unknown"
+    sources_list = hass.data['ags_service'].get('Sources', [])
+    default_source_name = sources_list[0]['Source'] if sources_list else None
+
+    ags_status = default_source_name or "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
     if not ags_config.get('disable_zone', False)  and hass.states.get('zone.home').state == '0':
@@ -413,18 +425,9 @@ def ags_select_source(ags_config, hass):
     try:
         source = hass.data.get('ags_media_player_source')
         if source is None:
-            sources_list = hass.data['ags_service']['Sources']
-            source = next(
-                (
-                    src["Source"]
-                    for src in sources_list
-                    if src.get("source_default") is True
-                ),
-                None,
-            )
-            if source is None and sources_list:
-                source = sources_list[0]["Source"]
-            if source is not None:
+            sources_list = hass.data['ags_service'].get('Sources', [])
+            if sources_list:
+                source = sources_list[0]['Source']
                 hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
         primary_speaker_entity_id_raw = hass.data.get('primary_speaker', "none")
@@ -439,10 +442,8 @@ def ags_select_source(ags_config, hass):
             ags_select_source_running = False  # Reset the global flag
             return
 
-        # Convert the list of sources to a dictionary for faster lookups
-        sources_list = hass.data['ags_service']['Sources'] 
-        source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
-
+        # Refresh favorites so newly added items appear
+        update_favorite_sources(ags_config, hass)
 
         if source == "TV":
             # Use async service call to avoid blocking the event loop
@@ -456,28 +457,14 @@ def ags_select_source(ags_config, hass):
             )
 
         elif source != "Unknown" and status != "OFF":
-            source_info = source_dict.get(source)
-
-            if source_info:
-                media_id = source_info["value"]
-                media_type = source_info["type"]
-
-                if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
-                    media_id = f"FV:{media_id}"
-
-                hass.loop.call_soon_threadsafe(
-                    lambda: hass.async_create_task(
-                        hass.services.async_call(
-                            'media_player',
-                            'play_media',
-                            {
-                                'entity_id': primary_speaker_entity_id,
-                                'media_content_id': media_id,
-                                'media_content_type': media_type,
-                            }
-                        )
-                    )
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        'entity_id': primary_speaker_entity_id,
+                        'source': source,
+                    })
                 )
+            )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))

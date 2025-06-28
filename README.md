@@ -92,22 +92,11 @@ ags_service:
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
-  Sources:
-    - Source: "Top Hit"
-      Source_Value: "2/11"
-      media_content_type: "favorite_item_id"
-      source_default: true
-    - Source: "Chill"
-      Source_Value: "2/12"
-      media_content_type: "favorite_item_id"
-    - Source: "Alternative"
-      Source_Value: "2/13"
-      media_content_type: "favorite_item_id"
 
 ```
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
+Sources are automatically retrieved from the highest priority speaker's favorites.
 homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities.
 
 

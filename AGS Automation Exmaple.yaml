@@ -37,16 +37,14 @@ action:
             state: none
             attribute: primary_speaker
         sequence:
-          - service: media_player.play_media
+          - service: media_player.select_source
             target:
               entity_id: >-
                 {{ state_attr('media_player.ags_media_system',
                 'preferred_primary_speaker' ) }}
             data:
-              media_content_id: >-
-                FV:{{ state_attr('media_player.ags_media_system', 'ags_source' )
-                }}
-              media_content_type: favorite_item_id
+              source: >-
+                {{ state_attr('media_player.ags_media_system', 'ags_source' ) }}
           - wait_template: >-
               {{ not(state_attr('media_player.ags_media_system',
               'primary_speaker' ) == "none") }}

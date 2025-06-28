@@ -5,7 +5,7 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
-from .ags_service import update_ags_sensors, ags_select_source 
+from .ags_service import update_ags_sensors, ags_select_source, update_favorite_sources
 import logging
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,35 +119,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
-        # Determine the currently selected source. Historically the attribute
-        # ``ags_source`` was expected to expose the numeric Sonos favorite ID so
-        # that automations could directly feed it to ``media_player.play_media``.
-        # The integration however only stored the human readable source name in
-        # ``ags_media_player_source`` and never populated ``ags_source``.  As a
-        # result the attribute constantly returned ``Not available`` which led to
-        # errors like ``Missing favorite for media_id`` when the automation tried
-        # to use the value.  Compute the source ID from the selected name so the
-        # attribute is always valid. If no source has been picked yet fall back
-        # to the first configured entry so automations still have something
-        # usable.
+        # Determine the currently selected source. ``ags_media_player_source``
+        # stores the human readable Sonos favorite name. ``ags_source`` mirrors
+        # this value so automations can easily reference the selected favorite.
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
-            sources = self.hass.data['ags_service']['Sources']
-            default = next(
-                (
-                    src["Source"]
-                    for src in sources
-                    if src.get("source_default") is True
-                ),
-                None,
-            )
-            if default:
-                selected_source = default
-            elif sources:
-                selected_source = sources[0]["Source"]
-            if selected_source is not None:
+            sources = self.hass.data['ags_service'].get('Sources', [])
+            if sources:
+                selected_source = sources[0]['Source']
                 self.hass.data['ags_media_player_source'] = selected_source
-        self.ags_source = self.get_source_value_by_name(selected_source)
+        self.ags_source = selected_source
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
@@ -401,11 +382,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
         if self.ags_status == "ON TV" and disable_Tv_Source == False:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
+            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
 
         else:
-            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-            # Check if any device has a type of TV and add "TV" to the source list
+            update_favorite_sources(self.ags_config, self.hass)
+            sources = [src["Source"] for src in self.hass.data['ags_service'].get('Sources', [])]
             if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
                 sources.append("TV")
 
@@ -418,12 +399,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None 
         else:
             return self.hass.data.get("ags_media_player_source")
-
-    def get_source_value_by_name(self, source_name):
-        for source_dict in self.hass.data['ags_service']['Sources']:
-            if source_dict["Source"] == source_name:
-                return source_dict["Source_Value"]
-        return None  # if not found
 
     def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
@@ -513,8 +488,8 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
 
     @property
     def source_list(self):
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-        # Check if any device has a type of TV and add "TV" to the source list
+        update_favorite_sources(self._primary_player.ags_config, self.hass)
+        sources = [src["Source"] for src in self.hass.data['ags_service'].get('Sources', [])]
         if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
             sources.append("TV")
 
