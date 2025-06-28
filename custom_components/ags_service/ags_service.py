@@ -151,6 +151,15 @@ def update_ags_status(ags_config, hass):
             if prev_schedule_state is None:
                 prev_schedule_state = schedule_on
             if not schedule_on and prev_schedule_state:
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        hass.services.async_call(
+                            "media_player",
+                            "turn_off",
+                            {"entity_id": "media_player.ags_media_player"},
+                        )
+                    )
+                )
                 media_system_state = False
                 hass.data['media_system_state'] = False
         elif not schedule_on:
