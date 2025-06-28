@@ -520,6 +520,22 @@ def ags_select_source(ags_config, hass):
                     )
                 )
 
+                # Some media players load media in a paused state when using
+                # ``play_media``. Issue #183 reports that playback remained
+                # paused when the first room activated. Trigger an explicit
+                # ``media_play`` to ensure the track actually starts.
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        hass.services.async_call(
+                            'media_player',
+                            'media_play',
+                            {
+                                'entity_id': primary_speaker_entity_id,
+                            }
+                        )
+                    )
+                )
+
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
 
