@@ -8,11 +8,11 @@ AGS Service is a custom Home Assistant integration that functions as an intellig
 The core of AGS Service is to enable seamless control over which speakers are active based on the occupancy of the rooms, thereby enhancing the audio experience in a smart home environment. It achieves this by maintaining real-time tracking of each room's status and the state of the speakers within, adjusting the active speaker groups as necessary. This makes the AGS Service particularly useful in scenarios where audio playback needs to follow the user's location or specific room activities.
 
 
-# V1.1.0 Change Log
+# V1.3.0 Change Log
 
-- Updated Primary speaker logic to include a default of 5 second delay before going to none. This can be adjuted from the default with the new Primary_delay value that can be added to confg.
+- Updated Primary speaker logic to include a default of 5 second delay before going to none. This can be adjusted from the default with the new Primary_delay value that can be added to config.
 - Updated Switches so state now stays after a reboot 
-- New Automation File that improves preformace for AGS actions.
+- New Automation File that improves performance for AGS actions.
 
 ## Features
 
@@ -59,7 +59,7 @@ New optional Value of disable_zone and override_content.
 disable_zone If set to True it will disable logic looking at zone.home 
 override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
 
-primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
+primary_delay is a number in second. default is 5 seconds. this will effect how long the sensor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
 interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
 
 this has all features:
@@ -121,7 +121,7 @@ homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and 
 
 A key aspect of the AGS Service is its automation capabilities. The AGS Service is primarily an orchestrator, managing the state of the speakers and rooms. However, to influence the physical state of your audio devices based on the sensor values provided by the AGS Service, you must set up the appropriate automations. Without these, the AGS Service would merely provide sensor readings.
 
-An automation example is provided in the AGS Automation Example.yaml (https://github.com/ByteRookie/AGS_Service/blob/main/AGS%20Automation%20Exmaple.yaml). simply copy and past it into your new automation and it should work as is. 
+An automation example is provided in the AGS Automation Example.yaml (https://github.com/ByteRookie/AGS_Service/blob/main/AGS%20Automation%20Example.yaml). simply copy and paste it into your new automation and it should work as is. 
 
 ##Sensor Logic
 
