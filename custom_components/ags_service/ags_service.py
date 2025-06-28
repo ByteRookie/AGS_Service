@@ -129,7 +129,7 @@ def update_ags_status(ags_config, hass):
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
         media_system_state = ags_config['default_on']
-        hass.data['media_system_state'] = media_system_state
+        hass.data['switch_media_system_state'] = media_system_state
 
     # Determine schedule entity state if configured
     schedule_cfg = hass.data['ags_service'].get('schedule_entity')
@@ -161,7 +161,7 @@ def update_ags_status(ags_config, hass):
                     )
                 )
                 media_system_state = False
-                hass.data['media_system_state'] = False
+                hass.data['switch_media_system_state'] = False
         elif not schedule_on:
             ags_status = "OFF"
             hass.data['ags_status'] = ags_status

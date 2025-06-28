@@ -134,7 +134,7 @@ AGS Service Active Speakers: This sensor checks the list of active rooms and enu
 
 AGS Service Inactive Speakers: This sensor is similar to the Active Speakers sensor, but it enumerates the speakers in inactive rooms. If a speaker device is found in a room that is not active, it is added to the list.
 
-AGS Service Status: This sensor provides the overall status of the AGS service. It checks the override switch and the state of the source selector to determine the status.
+AGS Service Status: This sensor provides the overall status of the AGS service. It evaluates the media system state and, when configured, the schedule entity.
 
 AGS Service Primary Speaker: This sensor checks each active room to determine the primary speaker. The primary speaker is the speaker with the highest priority (lowest numerical value) in the room.
 
