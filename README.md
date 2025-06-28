@@ -20,6 +20,8 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 
 * Acts as the master player for the entire system. It automatically points to the best speaker based on room activity and exposes normal media controls (play, pause, volume, source, next/previous). Optionally a second HomeKit‑friendly player can mirror these controls for Apple users.
 
+HomeKit can struggle with the AGS player's dynamic name and its automatic switch to a TV source. If you're using Apple's ecosystem either set up the optional `homekit_player` entity, which keeps a stable name and source, or enable both `static_name` and `disable_Tv_Source` in your configuration.
+
 **Sensors**
 
 * `AGS Service Configured Rooms` – lists every room defined in the configuration.
@@ -67,7 +69,7 @@ Key options include:
 * **interval_sync** – How often the sensors refresh, in seconds. Default is `30`.
 * **schedule_entity** – Optional schedule entity that turns the system on or off automatically.
 * **homekit_player** – Name for an extra HomeKit media player entity that mirrors the AGS Media Player.
-* **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source** – Additional settings for advanced behaviour.
+* **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source** – Additional settings for advanced behaviour (see **Advanced Configuration** below).
 
 A complete example configuration looks like this:
 
@@ -121,8 +123,19 @@ ags_service:
 * **rooms** – A list of rooms and the devices in each room. Every device entry defines a `device_id`, `device_type` (`speaker` or `tv`) and `priority`.
 * **sources** – Predefined media sources that AGS can start. Add `source_default: true` to the entry that should be used when no other source has been chosen.
 * **schedule_entity** – When configured, AGS follows this entity's state. `on_state` and `off_state` default to `on` and `off`.
-* **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** provide further control over behaviour. See the example above for placement.
+* **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** provide further control over behaviour (see **Advanced Configuration** below).
 * If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but may be manually re-enabled until the schedule turns on again.
+
+### Advanced Configuration
+
+* **homekit_player** – Adds a second media player with a stable name for HomeKit.
+* **static_name** – Forces a fixed name for the main AGS Media Player.
+* **disable_Tv_Source** – Prevents automatically selecting a TV source.
+* **create_sensors** – Set to `true` if you want the sensor entities enabled.
+* **default_on** – Starts the system enabled after a reboot.
+* **interval_sync** – Sensor refresh interval in seconds.
+* **override_content** – Keeps playback active when this value is found in a device's content ID.
+* **schedule_override** – With a schedule entity, turns the system off once when the schedule goes to its off state but allows manual re‑enable.
 
 
 ## Automation
@@ -140,6 +153,8 @@ Each sensor uses specific logic to report the state of the system:
 * **AGS Service Status** – overall status of the media system and schedule.
 * **AGS Service Primary Speaker** – highest‑priority speaker currently playing.
 * **AGS Service Preferred Primary Speaker** – fallback speaker that will start if the primary stops.
+* **AGS Service Source** – the currently selected source that will play when AGS starts playback.
+* **AGS Service Inactive TV Speakers** – TV speakers that are not part of the active room list.
 
 ## License
 
