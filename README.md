@@ -27,6 +27,7 @@ The integration creates a series of sensors and switches for each room:
   - `AGS Service Primary Speaker`: Indicates the primary speaker in each active room.
   - `AGS Service Preferred Primary Speaker`: Highlights the preferred primary speaker in each active room, which is selected based on the priority configured for each speaker.
   - `AGS Service Source`: Notes the source of the audio stream that is currently being played.
+  - `AGS Service Source ID`: The Sonos favorite ID corresponding to the selected source for use with `play_media`.
   - `AGS Service Inactive TV Speakers`: Lists the inactive speakers that are associated with a TV device.
 
 - Switches:
@@ -96,7 +97,7 @@ ags_service:
 ```
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-Sources are automatically pulled from the first available speaker (in priority order) that exposes a list of favorites. Newly added favorites will appear automatically.
+Sources are automatically pulled from the highest priority speaker by reading its Sonos favorites via ``media_player.browse_media``. Newly added favorites will appear automatically.
 homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities.
 
 

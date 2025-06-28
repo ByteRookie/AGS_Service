@@ -84,6 +84,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.primary_speaker = None
         self.preferred_primary_speaker = None
         self.ags_source = None
+        self.ags_source_id = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
 
@@ -129,6 +130,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 selected_source = sources[0]['Source']
                 self.hass.data['ags_media_player_source'] = selected_source
         self.ags_source = selected_source
+        self.ags_source_id = None
+        for fav in self.hass.data['ags_service'].get('Sources', []):
+            if fav.get('Source') == selected_source:
+                self.ags_source_id = fav.get('id')
+                break
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
@@ -187,6 +193,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             # easily reference it. When nothing has been chosen the value will
             # be ``None`` which signals automations to wait.
             "ags_source": self.ags_source,
+            "ags_source_id": self.ags_source_id,
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
         }
         return attributes
@@ -409,6 +416,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
+        self.ags_source_id = None
+        for fav in self.hass.data['ags_service'].get('Sources', []):
+            if fav.get('Source') == source:
+                self.ags_source_id = fav.get('id')
+                break
 
         ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()

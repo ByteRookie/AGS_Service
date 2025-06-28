@@ -32,9 +32,32 @@ def update_favorite_sources(ags_config, hass):
         state = hass.states.get(speaker['device_id'])
         if not state or state.state in ('unavailable', 'unknown'):
             continue
-        favs = [src for src in state.attributes.get('source_list', []) if src and src != 'TV']
+
+        try:
+            favourites = asyncio.run_coroutine_threadsafe(
+                hass.services.async_call(
+                    'media_player',
+                    'browse_media',
+                    {'entity_id': speaker['device_id']},
+                    blocking=True,
+                    return_response=True,
+                ),
+                hass.loop,
+            ).result()
+        except Exception as exc:  # pragma: no cover - service may not be implemented in tests
+            _LOGGER.debug('Failed to load favorites from %s: %s', speaker['device_id'], exc)
+            continue
+
+        favs = favourites.get('children', []) if favourites else []
         if favs:
-            hass.data['ags_service']['Sources'] = [{'Source': fav} for fav in favs]
+            hass.data['ags_service']['Sources'] = [
+                {
+                    'Source': fav.get('title'),
+                    'id': fav.get('media_content_id'),
+                }
+                for fav in favs
+                if fav.get('title') and fav.get('media_content_id')
+            ]
             return
 
     # If we fall through no speaker exposed favorites
@@ -467,14 +490,25 @@ def ags_select_source(ags_config, hass):
             )
 
         elif source != "Unknown" and status != "OFF":
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'select_source', {
-                        'entity_id': primary_speaker_entity_id,
-                        'source': source,
-                    })
+            favs = hass.data['ags_service'].get('Sources', [])
+            fav = next((f for f in favs if f.get('Source') == source), None)
+            if fav:
+                media_id = fav.get('id')
+                if media_id and not str(media_id).startswith('FV:'):
+                    media_id = f"FV:{media_id}"
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        hass.services.async_call(
+                            'media_player',
+                            'play_media',
+                            {
+                                'entity_id': primary_speaker_entity_id,
+                                'media_content_id': media_id,
+                                'media_content_type': 'favorite_item_id',
+                            },
+                        )
+                    )
                 )
-            )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
