@@ -28,22 +28,26 @@ class AGSSchedule(Schedule, RestoreEntity):
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, hass) -> None:
-        """Initialize with a default always-on schedule."""
+        """Initialize with an empty schedule."""
         self.hass = hass
-        # Default schedule covers the entire day for every weekday so AGS is
-        # enabled unless the user turns this entity off. ``Schedule`` expects a
-        # dictionary mapping each weekday to a list of time blocks.
-        all_day = {CONF_FROM: dt.time(0, 0, 0), CONF_TO: dt.time(23, 59, 59)}
-        default_schedule = {day: [all_day] for day in WEEKDAY_TO_CONF.values()}
+        # The default configuration has no time blocks.  ``Schedule`` treats an
+        # empty schedule as always off, but AGS handles this as "no schedule"
+        # meaning the service is always allowed to run.
+        default_schedule = {day: [] for day in WEEKDAY_TO_CONF.values()}
 
         # Build the configuration dictionary expected by ``Schedule``. The
-        # helper's schema requires a name/icon alongside the weekday mapping
-        # when an entity is created programmatically.
+        # helper's schema requires a name and icon along with a mapping for each
+        # weekday, even if those mappings are empty.
         config = {"name": self._attr_name, "icon": self._attr_icon}
         config.update(default_schedule)
 
         # Initialise the base ``Schedule`` with our configuration
         super().__init__(hass, config)
+
+        # Track whether the schedule actually has any blocks defined.
+        self.hass.data[f"{self._attr_unique_id}_configured"] = any(
+            bool(times) for times in default_schedule.values()
+        )
 
         # Expose the current state via hass.data for use in update_ags_status
         self.hass.data[self._attr_unique_id] = self.is_on

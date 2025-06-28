@@ -126,16 +126,21 @@ def update_ags_status(ags_config, hass):
             hass.data['ags_status'] = ags_status
             return ags_status
 
-    # Respect the AGS schedule. If the schedule entity is off, force the
-    # service status to OFF so no media plays automatically.
-    if hass.data.get('ags_schedule') is False:
-        ags_status = "OFF"
-        hass.data['ags_status'] = ags_status
-        return ags_status
+    # Determine schedule state. If no schedule entries were ever defined the
+    # value in ``ags_schedule_configured`` will be False and we treat the
+    # schedule as always on. The override switch also forces the schedule to be
+    # ignored.
+    schedule_configured = hass.data.get('ags_schedule_configured', False)
+    schedule_override = hass.data.get('ags_schedule_override', False)
+    schedule_state = hass.data.get('ags_schedule', True)
+    if not schedule_configured:
+        schedule_state = True
+    if schedule_override:
+        schedule_state = True
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
-        if  ags_config['default_on']: 
+        if ags_config['default_on'] and schedule_state:
             ags_status = "ON"
         else:
             ags_status = "OFF"
@@ -144,7 +149,7 @@ def update_ags_status(ags_config, hass):
         hass.data['media_system_state'] = ags_config['default_on']
         return ags_status
 
-    if not media_system_state:
+    if not media_system_state or not schedule_state:
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status
