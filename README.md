@@ -12,6 +12,7 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * [Features](#features)
 * [File Structure](#file-structure)
 * [Installation](#installation)
+* [Quick Start](#quick-start)
 * [Configuration](#configuration)
 * [Automation](#automation)
 * [Service Logic](#service-logic)
