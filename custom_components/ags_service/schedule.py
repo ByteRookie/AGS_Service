@@ -1,4 +1,5 @@
 """Schedule entity for AGS Service."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -6,12 +7,10 @@ from typing import Any
 
 # Import the native Schedule helper from Home Assistant.  The class is simply
 # called ``Schedule`` and lives directly in ``homeassistant.components.schedule``.
-from homeassistant.components.schedule import (
-    Schedule,
-    CONF_FROM,
-    CONF_TO,
-    WEEKDAY_TO_CONF,
-)
+# Home Assistant exposes a ``Schedule`` entity type via the ``schedule`` helper
+# integration. The base class handles all on/off transitions based on defined
+# time blocks. Importing it directly allows us to subclass it for AGS.
+from homeassistant.components.schedule import Schedule
 from homeassistant.helpers.restore_state import RestoreEntity
 
 
@@ -30,23 +29,36 @@ class AGSSchedule(Schedule, RestoreEntity):
     def __init__(self, hass) -> None:
         """Initialize with an empty schedule."""
         self.hass = hass
-        # The default configuration has no time blocks.  ``Schedule`` treats an
-        # empty schedule as always off, but AGS handles this as "no schedule"
-        # meaning the service is always allowed to run.
-        default_schedule = {day: [] for day in WEEKDAY_TO_CONF.values()}
+        # The default configuration has no time blocks. ``Schedule`` treats an
+        # empty schedule as always off, but AGS interprets an empty schedule as
+        # "no schedule" meaning AGS is always allowed to run. We therefore
+        # generate a dictionary for each weekday with an empty list of time
+        # blocks.  The schedule integration expects keys named after the days of
+        # the week.
+        days = [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        ]
+        default_schedule = {day: [] for day in days}
 
         # Build the configuration dictionary expected by ``Schedule``. The
-        # helper's schema requires a name and icon along with a mapping for each
-        # weekday, even if those mappings are empty.
-        config = {"name": self._attr_name, "icon": self._attr_icon}
-        config.update(default_schedule)
+        # helper's schema requires a name and icon along with entries for each
+        # weekday, even if those lists are empty.
+        config = {"name": self._attr_name, "icon": self._attr_icon, **default_schedule}
 
         # Initialise the base ``Schedule`` with our configuration
         super().__init__(hass, config)
 
-        # Track whether the schedule actually has any blocks defined.
+        # Track whether the schedule actually has any blocks defined. This flag
+        # allows the rest of the integration to treat an empty schedule as
+        # "always on" rather than always off.
         self.hass.data[f"{self._attr_unique_id}_configured"] = any(
-            bool(times) for times in default_schedule.values()
+            default_schedule.values()
         )
 
         # Expose the current state via hass.data for use in update_ags_status
