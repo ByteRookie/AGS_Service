@@ -167,16 +167,19 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if self.ags_status == "ON TV" and self.primary_speaker_room:
             selected_device_id = None
-            
+
             # Filter out speaker devices and sort remaining devices by priority
             sorted_devices = sorted(
                 [device for device in room["devices"] if device["device_type"] != "speaker"],
                 key=lambda x: x['priority']
             )
-            
-            # If there's a device in the sorted list, use its ID. Otherwise, default to primary speaker.
-            selected_device_id = sorted_devices[0]["device_id"] if sorted_devices else self.hass.data.get('primary_speaker', None)
-            
+
+            if sorted_devices:
+                first_device = sorted_devices[0]
+                selected_device_id = first_device.get('ott_device', first_device["device_id"])
+            else:
+                selected_device_id = self.hass.data.get('primary_speaker', None)
+
             self.primary_speaker_entity_id = selected_device_id
         else:
             self.primary_speaker_entity_id = self.hass.data.get('primary_speaker', None)
