@@ -1,8 +1,6 @@
 """Main module for the AGS Service integration."""
-import logging
 import voluptuous as vol
 
-from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
 
