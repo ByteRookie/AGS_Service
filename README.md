@@ -1,11 +1,15 @@
 
 
 
-# AGS Service (Auto Grouping Speaker Service)
+# Auto Grouping Speaker Service (AGS Service)
 
-AGS Service is a custom Home Assistant integration that functions as an intelligent management and automation system for audio devices grouped in different rooms. With the ability to interface with various audio devices, it dynamically forms and re-forms groups based on the state of the rooms and speakers. Although it has been designed and tested primarily with Sonos speakers and LG TVs, it maintains the flexibility to work with other devices supported by Home Assistant.
+AGS Service is a custom Home Assistant integration that functions as an intelligent management and automation system for audio devices grouped in different rooms. With the ability to interface with various audio devices, it dynamically forms and re-forms groups based on the state of the rooms and speakers. Although it has been designed and tested primarily with Sonos speakers and LG TVs, it maintains the flexibility to work with other devices supported by Home Assistant. When a TV plays content from an external streamer, you can link that streamer as an OTT device under the TV configuration so it supplies play and pause controls and track metadata.
 
 The core of AGS Service is to enable seamless control over which speakers are active based on the occupancy of the rooms, thereby enhancing the audio experience in a smart home environment. It achieves this by maintaining real-time tracking of each room's status and the state of the speakers within, adjusting the active speaker groups as necessary. This makes the AGS Service particularly useful in scenarios where audio playback needs to follow the user's location or specific room activities.
+
+
+### Using an OTT Device
+If your TV relies on an external streaming box, set the TV's `device_type` to `tv` and include an `ott_device` option pointing to the external player's `media_player` entity. When the TV is active, this OTT player handles play and pause commands and provides track details.
 
 
 # V1.1.0 Change Log
@@ -27,7 +31,7 @@ The integration creates a series of sensors and switches for each room:
   - `AGS Service Primary Speaker`: Indicates the primary speaker in each active room.
   - `AGS Service Preferred Primary Speaker`: Highlights the preferred primary speaker in each active room, which is selected based on the priority configured for each speaker.
   - `AGS Service Source`: Notes the source of the audio stream that is currently being played.
-  - `AGS Service Inactive TV Speakers`: Lists the inactive speakers that are associated with a TV device.
+  - `AGS Service Inactive TV Speakers`: Lists speakers in rooms with a TV device that are currently not active. This includes speakers tied to TVs that specify an `ott_device` for external playback.
 
 - Switches:
   - `(Room Name) Media`: Manually controls whether a room is active or not. A switch is automatically created for each room configured within the AGS Service.
@@ -72,6 +76,7 @@ ags_service:
       devices:
         - device_id: "media_player.device_1"
           device_type: "tv"
+          ott_device: "media_player.streaming_box"
           priority: 1
         - device_id: "media_player.device_2"
           device_type: "speaker"
@@ -96,7 +101,7 @@ ags_service:
 
 ```
 
-rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
+rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a `device_id`, `device_type`, and `priority`. Supported `device_type` values are `speaker` and `tv`. To link an external player for a TV, add `ott_device` under that TV with the external player's entity ID.
 source_selector: The entity ID of the input selector that is used to select the audio source. This is a required value.
 sources: The sources of audio that can be selected. The keys in this object should match the options in the source selector, and the values are the corresponding human-readable names.
 
