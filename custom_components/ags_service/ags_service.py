@@ -30,7 +30,7 @@ def update_favorite_sources(ags_config, hass):
 
     for speaker in sorted(speakers, key=lambda x: x['priority']):
         state = hass.states.get(speaker['device_id'])
-        if not state:
+        if not state or state.state in ('unavailable', 'unknown'):
             continue
         favs = [src for src in state.attributes.get('source_list', []) if src and src != 'TV']
         if favs:
