@@ -91,11 +91,14 @@ async def async_setup(hass, config):
     if not ags_config:
         return True
 
+    rooms = ags_config.get('rooms', [])
+    sources = ags_config.get('Sources', [])
+
     hass.data[DOMAIN] = {
-        'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'],
+        'rooms': rooms,
+        'Sources': sources,
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5), ## Not Done ###
+        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5),
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
@@ -117,8 +120,6 @@ async def async_setup(hass, config):
         )
 
     hass.services.async_register(DOMAIN, "run_tests", handle_run_tests)
-
-    ...
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
