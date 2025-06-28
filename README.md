@@ -3,9 +3,9 @@
 
 # AGS Service (Auto Grouping Speaker Service)
 
-AGS Service is a custom Home Assistant integration that functions as an intelligent management and automation system for audio devices grouped in different rooms. With the ability to interface with various audio devices, it dynamically forms and re-forms groups based on the state of the rooms and speakers. Although it has been designed and tested primarily with Sonos speakers and LG TVs, it maintains the flexibility to work with other devices supported by Home Assistant.
+AGS Service is a custom Home Assistant integration that automatically manages speakers across your home.  It creates a virtual **AGS Media Player** that always points to the best speaker for the active rooms and keeps groups in sync as you move around.  Designed around Sonos and LG TVs but compatible with any media player Home Assistant supports, AGS makes whole‑home audio effortless.
 
-The core of AGS Service is to enable seamless control over which speakers are active based on the occupancy of the rooms, thereby enhancing the audio experience in a smart home environment. It achieves this by maintaining real-time tracking of each room's status and the state of the speakers within, adjusting the active speaker groups as necessary. This makes the AGS Service particularly useful in scenarios where audio playback needs to follow the user's location or specific room activities.
+The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
 
 
 # V1.3.0 Change Log
@@ -16,21 +16,25 @@ The core of AGS Service is to enable seamless control over which speakers are ac
 
 ## Features
 
-The integration creates a series of sensors and switches for each room:
+**Virtual AGS Media Player**
 
-- Sensors:
-  - `AGS Service Configured Rooms`: Lists all the rooms configured within the AGS Service.
-  - `AGS Service Active Rooms`: Provides a list of rooms currently considered 'active' based on the state of the room switch and home audio status.
-  - `AGS Service Active Speakers`: Identifies the speaker devices in the active rooms.
-  - `AGS Service Inactive Speakers`: Enumerates the speaker devices not currently in active rooms.
-  - `AGS Service Status`: Gives the overall status of the AGS service.
-  - `AGS Service Primary Speaker`: Indicates the primary speaker in each active room.
-  - `AGS Service Preferred Primary Speaker`: Highlights the preferred primary speaker in each active room, which is selected based on the priority configured for each speaker.
-  - `AGS Service Source`: Notes the source of the audio stream that is currently being played.
-  - `AGS Service Inactive TV Speakers`: Lists the inactive speakers that are associated with a TV device.
+* Acts as the master player for the entire system. It automatically points to the best speaker based on room activity and exposes normal media controls (play, pause, volume, source, next/previous). Optionally a second HomeKit‑friendly player can mirror these controls for Apple users.
 
-- Switches:
-  - `(Room Name) Media`: Manually controls whether a room is active or not. A switch is automatically created for each room configured within the AGS Service.
+**Sensors**
+
+* `AGS Service Configured Rooms` – lists every room defined in the configuration.
+* `AGS Service Active Rooms` – shows which rooms are currently active according to their media switch and overall status.
+* `AGS Service Active Speakers` – the speakers playing in the active rooms.
+* `AGS Service Inactive Speakers` – speakers in rooms that are currently inactive.
+* `AGS Service Status` – overall system state (`ON`, `ON TV`, `Override`, or `OFF`).
+* `AGS Service Primary Speaker` – the speaker chosen as the primary output.
+* `AGS Service Preferred Primary Speaker` – backup speaker that will take over if the primary stops playing.
+* `AGS Service Source` – name of the media source that will be played when AGS starts playback.
+* `AGS Service Inactive TV Speakers` – TV‑related speakers that are currently inactive.
+
+**Switches**
+
+* `(Room Name) Media` – toggle a room on or off manually. One switch is created for every room in your configuration.
 
 ## File Structure
 
@@ -53,16 +57,19 @@ To install the AGS Service integration, follow these steps:
 
 ## Configuration
 
-The integration is configured via `configuration.yaml`. Here's an example configuration:
+The integration is configured via `configuration.yaml`.
 
-New optional Value of disable_zone and override_content.
-disable_zone If set to True it will disable logic looking at zone.home 
-override_content can be used to override media status if a device content ID contents value of override_content. Example use case is if speaker has bluetooth in content ID override media status and turn it on. It will only play  that content in the other rooms and go back to off once that device plays other content. 
+Key options include:
 
-primary_delay is a number in second. default is 5 seconds. this will effect how long the sensor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
-interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
+* **disable_zone** – When `true`, AGS ignores the `zone.home` entity so the system can operate when you are away.
+* **override_content** – If a device's `media_content_id` contains this value it will force AGS into `Override` mode and keep playback active for that source.
+* **primary_delay** – Seconds to wait before clearing the primary speaker when no audio is playing. Default is `5`.
+* **interval_sync** – How often the sensors refresh, in seconds. Default is `30`.
+* **schedule_entity** – Optional schedule entity that turns the system on or off automatically.
+* **homekit_player** – Name for an extra HomeKit media player entity that mirrors the AGS Media Player.
+* **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source** – Additional settings for advanced behaviour.
 
-this has all features:
+A complete example configuration looks like this:
 
 ```yaml
 ags_service:
@@ -111,35 +118,28 @@ ags_service:
 
 ```
 
-rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
-The schedule entry's ``on_state`` and ``off_state`` fields are optional and default to ``on`` and ``off`` if omitted.
-homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values (defaults are ``on`` and ``off``). ``schedule_override`` is also optional. When enabled, the media system turns off once whenever the schedule changes to its ``off`` state and can then be manually turned back on even if the schedule remains off. If Home Assistant restarts while the schedule is off, the system begins in the off state regardless of ``default_on``. When the schedule later returns to its ``on`` state, AGS automatically turns the media system back on via its internal switch, though you may still turn it off manually if desired.
+* **rooms** – A list of rooms and the devices in each room. Every device entry defines a `device_id`, `device_type` (`speaker` or `tv`) and `priority`.
+* **sources** – Predefined media sources that AGS can start. Add `source_default: true` to the entry that should be used when no other source has been chosen.
+* **schedule_entity** – When configured, AGS follows this entity's state. `on_state` and `off_state` default to `on` and `off`.
+* **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** provide further control over behaviour. See the example above for placement.
+* If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but may be manually re-enabled until the schedule turns on again.
 
 
-##Automation
+## Automation
 
-A key aspect of the AGS Service is its automation capabilities. The AGS Service is primarily an orchestrator, managing the state of the speakers and rooms. However, to influence the physical state of your audio devices based on the sensor values provided by the AGS Service, you must set up the appropriate automations. Without these, the AGS Service would merely provide sensor readings.
+AGS ships with an example automation that performs the heavy lifting—joining active speakers, dropping inactive ones and resetting TV speakers when necessary.  Copy `AGS Automation Example.yaml` into Home Assistant and all the logic is ready to go.  You can of course customise it further to fit your own flows.
 
-An automation example is provided in the AGS Automation Example.yaml (https://github.com/ByteRookie/AGS_Service/blob/main/AGS%20Automation%20Example.yaml). simply copy and paste it into your new automation and it should work as is. 
+## Sensor Logic
 
-##Sensor Logic
+Each sensor uses specific logic to report the state of the system:
 
-Each sensor uses a specific logic to determine its state:
-
-AGS Service Configured Rooms: Lists all the rooms that are configured in the AGS Service. This is a straightforward enumeration of the rooms specified in your configuration.yaml file.
-
-AGS Service Active Rooms: This sensor checks the state of each room's media switch and the home audio status. If the media switch is on and the home audio status is 'playing', the room is considered active and added to the list.
-
-AGS Service Active Speakers: This sensor checks the list of active rooms and enumerates the speaker devices within these rooms. If a speaker device is found in an active room, it is added to the list.
-
-AGS Service Inactive Speakers: This sensor is similar to the Active Speakers sensor, but it enumerates the speakers in inactive rooms. If a speaker device is found in a room that is not active, it is added to the list.
-
-AGS Service Status: This sensor provides the overall status of the AGS service. It evaluates the media system state and, when configured, the schedule entity.
-
-AGS Service Primary Speaker: This sensor checks each active room to determine the primary speaker. The primary speaker is the speaker with the highest priority (lowest numerical value) in the room.
-
-AGS Service Preferred Primary Speaker: This sensor is similar to the Primary Speaker sensor, but it allows for a preferred speaker to take over if the current primary stops playing.
+* **AGS Service Configured Rooms** – all rooms defined in the configuration.
+* **AGS Service Active Rooms** – rooms whose media switch is on and where audio is playing.
+* **AGS Service Active Speakers** – speakers located in those active rooms.
+* **AGS Service Inactive Speakers** – speakers that are currently not active.
+* **AGS Service Status** – overall status of the media system and schedule.
+* **AGS Service Primary Speaker** – highest‑priority speaker currently playing.
+* **AGS Service Preferred Primary Speaker** – fallback speaker that will start if the primary stops.
 
 ## License
 
