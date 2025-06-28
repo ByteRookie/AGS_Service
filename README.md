@@ -117,6 +117,8 @@ sources: The sources of audio that can be selected. Add ``source_default: true``
 The schedule entry's ``on_state`` and ``off_state`` fields are optional and default to ``on`` and ``off`` if omitted.
 homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values (defaults are ``on`` and ``off``). ``schedule_override`` is also optional. When enabled, the media system turns off once whenever the schedule changes to its ``off`` state and can then be manually turned back on even if the schedule remains off. If Home Assistant restarts while the schedule is off, the system begins in the off state regardless of ``default_on``. When the schedule later returns to its ``on`` state, AGS automatically turns the media system back on via its internal switch, though you may still turn it off manually if desired.
 
+HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
+
 
 ##Automation
 
