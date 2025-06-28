@@ -126,10 +126,6 @@ def update_ags_status(ags_config, hass):
             hass.data['ags_status'] = ags_status
             return ags_status
 
-    media_system_state = hass.data.get('switch_media_system_state')
-    if media_system_state is None:
-        media_system_state = ags_config['default_on']
-        hass.data['switch_media_system_state'] = media_system_state
 
     # Determine schedule entity state if configured
     schedule_cfg = hass.data['ags_service'].get('schedule_entity')
@@ -147,19 +143,30 @@ def update_ags_status(ags_config, hass):
         else:
             schedule_on = False
 
+    media_system_state = hass.data.get('switch_media_system_state')
+    if media_system_state is None:
+        if schedule_cfg and schedule_cfg.get('schedule_override') and not schedule_on:
+            media_system_state = False
+        else:
+            media_system_state = ags_config['default_on']
+        hass.data['switch_media_system_state'] = media_system_state
+
+    if schedule_cfg:
+        
         if schedule_cfg.get('schedule_override'):
             if prev_schedule_state is None:
                 prev_schedule_state = schedule_on
-            if not schedule_on and prev_schedule_state:
-                hass.loop.call_soon_threadsafe(
-                    lambda: hass.async_create_task(
-                        hass.services.async_call(
-                            "media_player",
-                            "turn_off",
-                            {"entity_id": "media_player.ags_media_player"},
+            if not schedule_on:
+                if prev_schedule_state:
+                    hass.loop.call_soon_threadsafe(
+                        lambda: hass.async_create_task(
+                            hass.services.async_call(
+                                "media_player",
+                                "turn_off",
+                                {"entity_id": "media_player.ags_media_player"},
+                            )
                         )
                     )
-                )
                 media_system_state = False
                 hass.data['switch_media_system_state'] = False
         elif not schedule_on:
