@@ -14,7 +14,7 @@ ags_select_source_running = False
 
 ## update all Sensors Function ##
 def update_favorite_sources(ags_config, hass):
-    """Refresh available favorites from the highest priority speaker."""
+    """Refresh available favorites from the highest priority active speaker."""
     rooms = ags_config['rooms']
 
     speakers = [
@@ -28,13 +28,17 @@ def update_favorite_sources(ags_config, hass):
         hass.data['ags_service']['Sources'] = []
         return
 
-    top_speaker = sorted(speakers, key=lambda x: x['priority'])[0]['device_id']
-    state = hass.states.get(top_speaker)
-    favs = []
-    if state:
+    for speaker in sorted(speakers, key=lambda x: x['priority']):
+        state = hass.states.get(speaker['device_id'])
+        if not state:
+            continue
         favs = [src for src in state.attributes.get('source_list', []) if src and src != 'TV']
+        if favs:
+            hass.data['ags_service']['Sources'] = [{'Source': fav} for fav in favs]
+            return
 
-    hass.data['ags_service']['Sources'] = [{'Source': fav} for fav in favs]
+    # If we fall through no speaker exposed favorites
+    hass.data['ags_service']['Sources'] = []
 
 
 def update_ags_sensors(ags_config, hass):
