@@ -123,26 +123,26 @@ ags_service:
 
 ```yaml
 ags_service:
-  primary_delay: 5
-  interval_sync: 30
-  disable_zone: true
-  homekit_player: "My HomeKit Player"
-  create_sensors: true
-  default_on: false
-  static_name: "AGS Media Player"
-  disable_Tv_Source: false
-  schedule_entity:
-    entity_id: schedule.my_music
-    on_state: "on"  # optional
-    off_state: "off"  # optional
-    schedule_override: true  # optional
+  # primary_delay: 5
+  # interval_sync: 30
+  # disable_zone: true
+  # homekit_player: "My HomeKit Player"
+  # create_sensors: true
+  # default_on: false
+  # static_name: "AGS Media Player"
+  # disable_Tv_Source: false
+  # schedule_entity:
+  #   entity_id: schedule.my_music
+  #   on_state: "on"  # optional
+  #   off_state: "off"  # optional
+  #   schedule_override: true  # optional
   rooms:
     - room: "Room 1"
       devices:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
+          # ott_device: "media_player.ott_1"  # optional: streaming box used for playback
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
@@ -151,7 +151,7 @@ ags_service:
         - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
-          override_content: "bluetooth"
+          # override_content: "bluetooth"
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
