@@ -64,6 +64,14 @@ The integration consists of several Python modules and support files:
 3. Add the configuration details to your `configuration.yaml` file (see below).
 4. Restart Home Assistant.
 
+## Quick Start
+
+Follow these basic steps to try AGS Service immediately:
+
+1. Install the integration through HACS using the instructions above.
+2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
+3. Import `AGS Automation Example.yaml` from this repository via **Settings → Automations** and enable it.
+
 ## Configuration
 
 Add the integration to `configuration.yaml`.
