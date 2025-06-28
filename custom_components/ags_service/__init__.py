@@ -25,7 +25,6 @@ CONF_DEFAULT_ON = 'default_on'
 CONF_STATIC_NAME = 'static_name'
 CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
-CONF_SOURCES = 'Sources'
 
 
 # Define the configuration schema for a device
