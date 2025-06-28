@@ -1,7 +1,7 @@
 
 
 
-# AGS Service (Auto Grouping Speaker Service)
+# Auto Grouping Speaker Service (AGS Service)
 
 AGS Service is a custom Home Assistant integration that automatically manages speakers across your home.  It creates a virtual **AGS Media Player** that always points to the best speaker for the active rooms and keeps groups in sync as you move around.  Designed around Sonos and LG TVs but compatible with any media player Home Assistant supports, AGS makes whole‑home audio effortless.
 
@@ -99,6 +99,7 @@ ags_service:
 * **default_on** – Start enabled on boot. Default `false`.
 * **static_name** – Custom name for the AGS Media Player. Default `none`.
 * **disable_Tv_Source** – Hide TV source in the static source list. Default `false`.
+* **ott_device** – Optional. For TVs that actually play through a separate streaming box or console. Specify the external player's entity ID so AGS pulls play/pause controls and media info from that device whenever the TV is active (`ON TV`).
 
 ### Reference configuration
 
@@ -123,7 +124,7 @@ ags_service:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-          ott_device: "media_player.ott_1"
+          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
