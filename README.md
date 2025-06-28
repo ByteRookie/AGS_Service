@@ -8,54 +8,6 @@ AGS Service is a custom Home Assistant integration that automatically manages sp
 The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
 
 
-# Changelog
-
-### v1.3.0
-- Added schedule entity support and auto-start when the schedule turns on
-- Configurable sensor refresh interval and other optional settings
-- Improved source handling when TVs are active
-- Numerous bug fixes and performance tweaks
-
-### v1.2.7
-- All configuration options now functional
-- Speaker join/leave logic handled in the automation file
-
-### v1.2.6
-- New options like `homekit_player`, `static_name`, `create_sensors`,
-  `disable_zone`, `default_on`, `disable_Tv_Source` and `primary_delay`
-- Updated automation file and removed obsolete files
-
-### v1.2.5
-- Began migrating join and reset actions into Python services
-- Updated autoplay and source selection
-
-### v1.2.4
-- Sensor updates tied to the media player
-- Removed dedicated media player switch and old source dropdown
-- Sensor file optional when automation is disabled
-
-### v1.2.3
-- Initial HomeKit media player support
-
-### v1.2.2
-- Sensor data added as attributes on the media player
-- Experimented with forcing TV media type
-
-### v1.2.1
-- Device priority logic and seek support
-- Player name shows system status and active room count
-- Source list switches to device sources when TV is on
-
-### v1.2.0
-- Introduced the AGS Media Player entity
-
-### v1.1.0
-- Primary speaker delay option
-- Switches retain state across reboots
-- Added the first automation file
-
-### v1.0.11
-- Initial public release
 
 ## Features
 
@@ -206,7 +158,27 @@ ags_service:
 
 ## Automation
 
-AGS ships with an example automation that performs the heavy lifting—joining active speakers, dropping inactive ones and resetting TV speakers when necessary.  Copy `AGS Automation Example.yaml` into Home Assistant and all the logic is ready to go.  You can of course customise it further to fit your own flows.
+AGS Service requires an automation to keep speaker groups in sync. The repository provides **AGS Automation Example.yaml** which you can import directly.
+
+1. Open **Settings → Automations** and create a new automation.
+2. Choose **Edit in YAML** and paste the contents of `AGS Automation Example.yaml`.
+3. Save, enable the automation and reload your automations.
+
+The automation watches the AGS Media Player sensors and calls join, unjoin and source reset services. Without it the integration will not automatically manage your speakers.
+
+## Service Logic
+
+AGS evaluates several conditions to decide when to play and which speaker should be primary:
+
+1. **update_ags_status** checks if `zone.home` is empty unless `disable_zone` is enabled. If nobody is home the status becomes `OFF`.
+2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
+3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
+4. If any active room has a TV that is on, status changes to `ON TV`.
+5. Otherwise the status is simply `ON`.
+
+`determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it checks again after `primary_delay` seconds and falls back to the preferred device.
+
+`execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
 
 ## Sensor Logic
 
@@ -225,3 +197,51 @@ Each sensor uses specific logic to report the state of the system:
 ## License
 
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
+
+# Changelog
+
+### v1.3.0
+- Added schedule entity support and auto-start when the schedule turns on
+- Configurable sensor refresh interval and other optional settings
+- Improved source handling when TVs are active
+- Numerous bug fixes and performance tweaks
+
+### v1.2.7
+- All configuration options now functional
+- Speaker join/leave logic handled in the automation file
+
+### v1.2.6
+- New options like `homekit_player`, `static_name`, `create_sensors`, `disable_zone`, `default_on`, `disable_Tv_Source` and `primary_delay`
+- Updated automation file and removed obsolete files
+
+### v1.2.5
+- Began migrating join and reset actions into Python services
+- Updated autoplay and source selection
+
+### v1.2.4
+- Sensor updates tied to the media player
+- Removed dedicated media player switch and old source dropdown
+- Sensor file optional when automation is disabled
+
+### v1.2.3
+- Initial HomeKit media player support
+
+### v1.2.2
+- Sensor data added as attributes on the media player
+- Experimented with forcing TV media type
+
+### v1.2.1
+- Device priority logic and seek support
+- Player name shows system status and active room count
+- Source list switches to device sources when TV is on
+
+### v1.2.0
+- Introduced the AGS Media Player entity
+
+### v1.1.0
+- Primary speaker delay option
+- Switches retain state across reboots
+- Added the first automation file
+
+### v1.0.11
+- Initial public release
