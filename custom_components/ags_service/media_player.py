@@ -183,10 +183,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_status": self.ags_status or "Not available",
             "primary_speaker": self.primary_speaker or "Not available",
             "preferred_primary_speaker": self.preferred_primary_speaker or "Not available",
-            # ags_source now contains the numeric favorite ID. If no source is
-            # selected the value will be ``None`` which allows automations to
-            # skip calling ``play_media`` rather than passing an invalid
-            # favourite reference.
+            # ags_source mirrors the selected favorite name so automations can
+            # easily reference it. When nothing has been chosen the value will
+            # be ``None`` which signals automations to wait.
             "ags_source": self.ags_source,
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
         }

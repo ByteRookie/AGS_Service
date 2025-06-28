@@ -96,7 +96,7 @@ ags_service:
 ```
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
-Sources are automatically retrieved from the highest priority speaker's favorites.
+Sources are automatically retrieved from the highest priority speaker that is currently available. Newly added favorites will appear automatically.
 homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities.
 
 
