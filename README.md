@@ -97,17 +97,19 @@ ags_service:
 
 ### Optional parameters
 
-* **disable_zone** – Default `false`. When `true`, AGS ignores `zone.home`.
-* **override_content** – No default. If set, overrides status when a player's `media_content_id` contains the value.
-* **primary_delay** – Seconds before clearing the primary speaker. Default `5`.
-* **interval_sync** – Sensor refresh interval in seconds. Default `30`.
-* **schedule_entity** – Optional schedule entity. `on_state`/`off_state` default to `on`/`off`. `schedule_override` defaults to `false`.
-* **homekit_player** – Name for an extra HomeKit player that exposes the same static source list. Default `none`.
-* **create_sensors** – Expose sensors as entities. Default `false`.
-* **default_on** – Start enabled on boot. Default `false`.
-* **static_name** – Custom name for the AGS Media Player. Default `none`.
-* **disable_Tv_Source** – Hide TV source in the static source list. Default `false`.
-* **ott_device** – Optional. For TVs that actually play through a separate streaming box or console. Specify the external player's entity ID so AGS pulls play/pause controls and media info from that device whenever the TV is active (`ON TV`).
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `disable_zone` | `false` | When `true`, AGS ignores `zone.home`. |
+| `override_content` | _None_ | Overrides status when a player's `media_content_id` contains the value. |
+| `primary_delay` | `5` | Seconds before clearing the primary speaker. |
+| `interval_sync` | `30` | Sensor refresh interval in seconds. |
+| `schedule_entity` | _None_ | Optional schedule entity. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`. |
+| `homekit_player` | `none` | Name for an extra HomeKit player that exposes the same static source list. |
+| `create_sensors` | `false` | Expose sensors as entities. |
+| `default_on` | `false` | Start enabled on boot. |
+| `static_name` | `none` | Custom name for the AGS Media Player. |
+| `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
+| `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
 
 ### Reference configuration
 
