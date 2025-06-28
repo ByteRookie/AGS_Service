@@ -65,7 +65,7 @@ override_content can be used to override media status if a device content ID con
 
 primary_delay is a number in second. default is 5 seconds. this will effect how long the sesnor will wait before primary speaker is set to none . Setting to low will result in songs being reset often when changing rooms. Setting it longer will result in longer waits between system auto start new music after there is no active speaker.
 interval_sync determines how frequently the sensors refresh their state. It defaults to 30 seconds.
-An `AGS Schedule` entity is created automatically using Home Assistant's Schedule helper. The default configuration has no entries, which AGS interprets as always on. Once you add time blocks, AGS will only operate during those periods. Turning the schedule entity off forces the AGS status to `OFF` unless the Schedule Override switch or a content override is active.
+An `AGS Schedule` entity is created automatically using Home Assistant's Schedule helper. The default configuration has no entries, which AGS interprets as always on. Once you add time blocks, AGS will only operate during those periods. Turning the schedule entity off forces the AGS status to `OFF` unless the Schedule Override switch or a content override is active. The schedule's on/off state is stored in `hass.data['ags_schedule']` for use by other AGS logic.
 
 this has all features:
 

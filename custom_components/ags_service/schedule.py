@@ -52,7 +52,15 @@ class AGSSchedule(Schedule, RestoreEntity):
         config = {"name": self._attr_name, "icon": self._attr_icon, **default_schedule}
 
         # Initialise the base ``Schedule`` with our configuration
-        super().__init__(hass, config)
+        # Explicitly initialise the parent Schedule class with our configuration
+        # dictionary.  Using the class directly avoids ambiguity with ``super``
+        # across multiple bases and mirrors the way the native helper is
+        # typically instantiated.
+        Schedule.__init__(self, hass, config)
+
+        # RestoreEntity also needs initialisation so its state can be recovered
+        # after Home Assistant restarts.
+        RestoreEntity.__init__(self)
 
         # Track whether the schedule actually has any blocks defined. This flag
         # allows the rest of the integration to treat an empty schedule as
@@ -73,6 +81,11 @@ class AGSSchedule(Schedule, RestoreEntity):
         """Disable AGS operation except for overrides."""
         await super().async_turn_off(**kwargs)
         self.hass.data[self._attr_unique_id] = False
+
+    async def async_write_ha_state(self) -> None:  # type: ignore[override]
+        """Extend to mirror state in ``hass.data`` for other modules."""
+        self.hass.data[self._attr_unique_id] = self.is_on
+        await super().async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
         """Restore the previous state and share it via ``hass.data``."""
