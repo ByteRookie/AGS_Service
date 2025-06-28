@@ -134,10 +134,12 @@ def update_ags_status(ags_config, hass):
     # Determine schedule entity state if configured
     schedule_cfg = hass.data['ags_service'].get('schedule_entity')
     schedule_on = True
-    schedule_override = False
+    override_enabled = False
     prev_schedule_state = hass.data.get('schedule_prev_state')
     if schedule_cfg:
-        schedule_override = schedule_cfg.get('schedule_override', False)
+        if schedule_cfg.get('schedule_override'):
+            override_enabled = hass.data.get('switch.ags_schedule_override', False)
+
         state_obj = hass.states.get(schedule_cfg['entity_id'])
         if state_obj is not None:
             if state_obj.state == schedule_cfg.get('on_state', 'on'):
@@ -149,12 +151,13 @@ def update_ags_status(ags_config, hass):
         else:
             schedule_on = False
 
-        if schedule_override:
+        if override_enabled:
             if prev_schedule_state is None:
                 prev_schedule_state = schedule_on
             if not schedule_on and prev_schedule_state:
                 media_system_state = False
                 hass.data['media_system_state'] = False
+
         hass.data['schedule_prev_state'] = schedule_on
         hass.data['schedule_state'] = schedule_on
 
@@ -163,7 +166,7 @@ def update_ags_status(ags_config, hass):
         hass.data['ags_status'] = ags_status
         return ags_status
 
-    if schedule_cfg and not schedule_override and not schedule_on:
+    if schedule_cfg and (not schedule_cfg.get('schedule_override') or not override_enabled) and not schedule_on:
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status

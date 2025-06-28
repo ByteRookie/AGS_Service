@@ -113,7 +113,7 @@ ags_service:
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
 sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
-homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values. ``schedule_override`` is also optional; when enabled, the media system turns off whenever the schedule indicates ``off`` and can be manually turned back on even if the schedule is off.
+homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values. ``schedule_override`` is optional as well. When ``schedule_override`` is ``true`` an "AGS Schedule Override" switch is created. If that switch is on, AGS only uses the schedule to automatically turn the media player off when the schedule goes to the ``off`` state and ignores it otherwise, allowing you to turn the system back on manually.
 
 
 ##Automation
