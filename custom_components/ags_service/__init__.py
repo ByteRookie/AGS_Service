@@ -82,6 +82,7 @@ DEVICE_SCHEMA = vol.Schema({
         vol.Required('entity_id'): cv.string,
         vol.Optional('on_state', default='on'): cv.string,
         vol.Optional('off_state', default='off'): cv.string,
+        vol.Optional('schedule_override', default=False): cv.boolean,
     }),
 })
 

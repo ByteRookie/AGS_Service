@@ -76,8 +76,9 @@ ags_service:
   disable_Tv_Source: false
   schedule_entity:
     entity_id: schedule.my_music
-    on_state: "on"
-    off_state: "off"
+    on_state: "on"  # optional
+    off_state: "off"  # optional
+    schedule_override: true
   rooms:
     - room: "Room 1"
       devices:
@@ -112,7 +113,7 @@ ags_service:
 
 rooms: A list of rooms. Each room is an object that has a room name and a list of devices. Each device is an object that has a device_id, device_type, and priority.
 sources: The sources of audio that can be selected. Add ``source_default: true`` to mark the entry that should be used when no source has been chosen. If no entry is marked, the first source in the list will be used by default.
-homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values.
+homekit_player, create_sensors, default_on, static_name, disable_Tv_Source, and interval_sync are optional settings that provide extra capabilities. The ``schedule_entity`` option allows AGS to follow a Home Assistant schedule (or any entity) by specifying ``entity_id`` along with optional ``on_state`` and ``off_state`` values. You may also enable ``schedule_override`` to create an ``AGS Schedule Override`` switch that temporarily bypasses the schedule when turned on.
 
 
 ##Automation

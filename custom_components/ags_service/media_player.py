@@ -33,6 +33,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     schedule_cfg = ags_config.get('schedule_entity')
     if schedule_cfg and schedule_cfg.get('entity_id'):
         entities_to_track.append(schedule_cfg['entity_id'])
+        if schedule_cfg.get('schedule_override'):
+            entities_to_track.append('switch.ags_schedule_override')
     for room in rooms:
         room_switch = f"switch.{room['room'].lower().replace(' ', '_')}_media"
         entities_to_track.append(room_switch)
