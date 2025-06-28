@@ -1,9 +1,4 @@
-
-
-
-# Auto Grouping Speaker Service (AGS Service)
-
-![AGS Service cover](cover.png)
+![Auto Grouping Speaker Service (AGS Service)](cover.png)
 
 AGS Service is a custom Home Assistant integration that automatically manages speakers across your home.  It creates a virtual **AGS Media Player** that always points to the best speaker for the active rooms and keeps groups in sync as you move around.  Designed around Sonos and LG TVs but compatible with any media player Home Assistant supports, AGS makes whole‑home audio effortless.
 
