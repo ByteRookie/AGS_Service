@@ -229,10 +229,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.3.7
 - Queue follow-up actions when AGS status switches to TV or no primary speaker remains
 
-### v1.3.8
-- Reworked join and unjoin calls to fix failures
-- Actions now run sequentially without a queue
-
 ### v1.3.5
 - Removed the pre-action sensor refresh for join/unjoin
 
