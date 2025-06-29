@@ -3,6 +3,7 @@ import voluptuous as vol
 
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
+from .ags_service import ensure_action_queue
 
 # Define the domain for the integration
 DOMAIN = "ags_service"
@@ -108,6 +109,9 @@ async def async_setup(hass, config):
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
    }
+
+    # Initialize shared media action queue
+    await ensure_action_queue(hass)
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
