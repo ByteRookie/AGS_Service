@@ -1,6 +1,7 @@
 # ags_service .py
 import logging
 import asyncio
+from homeassistant.core import HomeAssistant
 
 
 
@@ -9,6 +10,37 @@ _LOGGER = logging.getLogger(__name__)
 AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
 ags_select_source_running = False
+
+_ACTION_QUEUE: asyncio.Queue | None = None
+_ACTION_WORKER: asyncio.Task | None = None
+
+
+async def _action_worker(hass: HomeAssistant) -> None:
+    """Process queued media_player actions sequentially."""
+    while True:
+        service, data = await _ACTION_QUEUE.get()
+        try:
+            if service == "delay":
+                await asyncio.sleep(data.get("seconds", 1))
+            else:
+                await hass.services.async_call("media_player", service, data)
+        except Exception as exc:  # pragma: no cover - safety net
+            _LOGGER.warning("Failed media action %s: %s", service, exc)
+        _ACTION_QUEUE.task_done()
+
+
+async def ensure_action_queue(hass: HomeAssistant) -> None:
+    """Initialize the global media action queue if needed."""
+    global _ACTION_QUEUE, _ACTION_WORKER
+    if _ACTION_QUEUE is None:
+        _ACTION_QUEUE = asyncio.Queue()
+        _ACTION_WORKER = hass.loop.create_task(_action_worker(hass))
+
+
+async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) -> None:
+    """Add a media_player service call to the action queue."""
+    await ensure_action_queue(hass)
+    await _ACTION_QUEUE.put((service, data))
 
 ### Sensor Functions ###
 
@@ -378,16 +410,17 @@ def execute_ags_logic(hass):
     inactive_tv_speakers = hass.data.get('ags_inactive_tv_speakers', [])
     
     # Logic for join action
-    if active_speakers != []  and status != 'off' and primary_speaker != 'none':
+    if active_speakers != [] and status != 'off' and primary_speaker != 'none':
         try:
-            # Use async_call so the service invocation doesn't block
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call(
-                        'media_player', 'join', {
+                    enqueue_media_action(
+                        hass,
+                        'join',
+                        {
                             'entity_id': primary_speaker,
                             'group_members': active_speakers,
-                        }
+                        },
                     )
                 )
             )
@@ -400,17 +433,23 @@ def execute_ags_logic(hass):
         try:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'unjoin', {'entity_id': inactive_speakers })
+                    enqueue_media_action(
+                        hass, 'unjoin', {'entity_id': inactive_speakers}
+                    )
                 )
             )
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'media_pause', {'entity_id': inactive_speakers })
+                    enqueue_media_action(
+                        hass, 'media_pause', {'entity_id': inactive_speakers}
+                    )
                 )
             )
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'clear_playlist', {'entity_id': inactive_speakers })
+                    enqueue_media_action(
+                        hass, 'clear_playlist', {'entity_id': inactive_speakers}
+                    )
                 )
             )
         except Exception as e:
@@ -422,10 +461,14 @@ def execute_ags_logic(hass):
         try:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'select_source', {
-                        'source': 'TV',
-                        'entity_id': inactive_tv_speakers,
-                    })
+                    enqueue_media_action(
+                        hass,
+                        'select_source',
+                        {
+                            'source': 'TV',
+                            'entity_id': inactive_tv_speakers,
+                        },
+                    )
                 )
             )
         except Exception as e:
@@ -484,13 +527,16 @@ def ags_select_source(ags_config, hass):
 
 
         if source == "TV":
-            # Use async service call to avoid blocking the event loop
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'select_source', {
-                        "source": source,
-                        "entity_id": primary_speaker_entity_id
-                    })
+                    enqueue_media_action(
+                        hass,
+                        'select_source',
+                        {
+                            "source": source,
+                            "entity_id": primary_speaker_entity_id,
+                        },
+                    )
                 )
             )
 
@@ -506,14 +552,14 @@ def ags_select_source(ags_config, hass):
 
                 hass.loop.call_soon_threadsafe(
                     lambda: hass.async_create_task(
-                        hass.services.async_call(
-                            'media_player',
+                        enqueue_media_action(
+                            hass,
                             'play_media',
                             {
                                 'entity_id': primary_speaker_entity_id,
                                 'media_content_id': media_id,
                                 'media_content_type': media_type,
-                            }
+                            },
                         )
                     )
                 )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from homeassistant.components.switch import SwitchEntity
@@ -11,25 +10,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .ags_service import (
     get_active_rooms,
+    ensure_action_queue,
+    enqueue_media_action,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-_ACTION_QUEUE: asyncio.Queue | None = None
-_ACTION_WORKER: asyncio.Task | None = None
-
-async def _action_worker(hass: HomeAssistant) -> None:
-    """Process join/unjoin requests sequentially."""
-    while True:
-        service, data = await _ACTION_QUEUE.get()
-        try:
-            if service == "delay":
-                await asyncio.sleep(data.get("seconds", 1))
-            else:
-                await hass.services.async_call("media_player", service, data)
-        except Exception as exc:  # pragma: no cover - safety net
-            _LOGGER.warning("Failed media action %s: %s", service, exc)
-        _ACTION_QUEUE.task_done()
 
 # Setup platform function
 async def async_setup_platform(
@@ -41,8 +27,6 @@ async def async_setup_platform(
     """Set up the switch platform."""
     # Retrieve the room information from the shared data
     ags_config = hass.data["ags_service"]
-    global _ACTION_QUEUE, _ACTION_WORKER
-
     rooms = ags_config["rooms"]
 
     entities = [RoomSwitch(hass, room) for room in rooms]
@@ -52,9 +36,7 @@ async def async_setup_platform(
 
     async_add_entities(entities)
 
-    if _ACTION_QUEUE is None:
-        _ACTION_QUEUE = asyncio.Queue()
-        _ACTION_WORKER = hass.loop.create_task(_action_worker(hass))
+    await ensure_action_queue(hass)
 
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
@@ -122,7 +104,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         ]
         if not members:
             return
-        await _ACTION_QUEUE.put(("join", {"entity_id": primary, "group_members": members}))
+        await enqueue_media_action(
+            self.hass,
+            "join",
+            {"entity_id": primary, "group_members": members},
+        )
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
@@ -138,18 +124,22 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         ]
         if not members:
             return
-        await _ACTION_QUEUE.put(("unjoin", {"entity_id": members}))
+        await enqueue_media_action(self.hass, "unjoin", {"entity_id": members})
 
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
         if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
-            await _ACTION_QUEUE.put(("delay", {"seconds": 1}))
+            await enqueue_media_action(self.hass, "delay", {"seconds": 1})
             for member in members:
-                await _ACTION_QUEUE.put(("select_source", {"entity_id": member, "source": "TV"}))
+                await enqueue_media_action(
+                    self.hass,
+                    "select_source",
+                    {"entity_id": member, "source": "TV"},
+                )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
-            await _ACTION_QUEUE.put(("media_stop", {"entity_id": members}))
+            await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
