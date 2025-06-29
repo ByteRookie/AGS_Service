@@ -14,6 +14,9 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 # Setup platform function
 from homeassistant.helpers.event import async_track_state_change_event
 
+# Import helper to refresh AGS sensors
+from .ags_service import update_ags_sensors
+
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
     ags_config = hass.data['ags_service']
