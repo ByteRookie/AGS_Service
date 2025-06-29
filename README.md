@@ -233,6 +233,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Reworked join and unjoin calls to fix failures
 - Actions now run sequentially without a queue
 
+### v1.3.9
+- Rejoin active speakers with the preferred primary before resetting TVs
+
 ### v1.3.5
 - Removed the pre-action sensor refresh for join/unjoin
 

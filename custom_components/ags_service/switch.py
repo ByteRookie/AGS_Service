@@ -136,8 +136,38 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
         if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
             await asyncio.sleep(1)
+
+            preferred = self.hass.data.get("preferred_primary_speaker")
+            primary = self.hass.data.get("primary_speaker")
+
+            if (
+                preferred
+                and preferred != "none"
+                and (not primary or primary == "none" or primary != preferred)
+            ):
+                rooms = self.hass.data["ags_service"]["rooms"]
+                active_rooms = get_active_rooms(rooms, self.hass)
+                active_speakers = [
+                    device["device_id"]
+                    for room in rooms
+                    if room["room"] in active_rooms
+                    for device in room["devices"]
+                    if device["device_type"] == "speaker"
+                ]
+
+                if active_speakers:
+                    await _call_media_service(
+                        self.hass,
+                        "join",
+                        {"entity_id": preferred, "group_members": active_speakers},
+                    )
+
             for member in members:
-                await _call_media_service(self.hass, "select_source", {"entity_id": member, "source": "TV"})
+                await _call_media_service(
+                    self.hass,
+                    "select_source",
+                    {"entity_id": member, "source": "TV"},
+                )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
