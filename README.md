@@ -221,6 +221,11 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.3.4
+- Actions recompute the preferred speaker using the latest room states
+- After unjoining a TV room, speakers switch back to the TV source
+- Final-room shutdown now sends `media_stop` instead of pause/clear
+
 ### v1.3.3
 - Ensured playlist clears when the last room turns off
 - Join action now falls back to the preferred primary speaker

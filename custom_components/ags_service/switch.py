@@ -9,7 +9,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .ags_service import get_active_rooms
+from .ags_service import (
+    get_active_rooms,
+    update_ags_sensors,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        update_ags_sensors(self.hass.data["ags_service"], self.hass)
         await self._maybe_join()
 
     async def async_turn_off(self, **kwargs):
@@ -88,6 +92,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        update_ags_sensors(self.hass.data["ags_service"], self.hass)
         await self._maybe_unjoin()
 
     async def async_added_to_hass(self):
@@ -134,11 +139,19 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await _ACTION_QUEUE.put(("unjoin", {"entity_id": members}))
+
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
-            await _ACTION_QUEUE.put(("media_pause", {"entity_id": members}))
-            await _ACTION_QUEUE.put(("clear_playlist", {"entity_id": members}))
+            await _ACTION_QUEUE.put(("media_stop", {"entity_id": members}))
+
+        if any(d.get("device_type") == "tv" for d in self.room.get("devices", [])):
+            await _ACTION_QUEUE.put(
+                (
+                    "select_source",
+                    {"source": "TV", "entity_id": members},
+                )
+            )
 
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
