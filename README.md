@@ -179,13 +179,13 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 
 ## Automation
 
-AGS Service requires an automation to keep speaker groups in sync. The repository provides **AGS Automation Example.yaml** which you can import directly.
+AGS Service previously relied on an automation to keep speaker groups in sync. The repository still includes **AGS Automation Example.yaml** for reference, but the integration now handles these actions internally.
 
 1. Open **Settings → Automations** and create a new automation.
 2. Choose **Edit in YAML** and paste the contents of `AGS Automation Example.yaml`.
 3. Save, enable the automation and reload your automations.
 
-The automation watches the AGS Media Player sensors and calls join, unjoin and source reset services. Without it the integration will not automatically manage your speakers.
+The built-in logic joins and removes speakers and resets TV sources whenever the service status changes. You can still use the example automation if you prefer to keep the behaviour in YAML.
 
 ## Service Logic
 
@@ -199,7 +199,7 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
-`execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
+`execute_ags_logic` and `handle_status_transition` use the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source. When the service turns off all speakers are stopped and TVs are switched back to their input automatically.
 
 ## Sensor Logic
 
