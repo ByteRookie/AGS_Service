@@ -47,8 +47,10 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
 
 def _queue_action(hass: HomeAssistant, service: str, data: dict) -> None:
     """Schedule a media player service call on the shared queue."""
-    asyncio.run_coroutine_threadsafe(
-        enqueue_media_action(hass, service, data), hass.loop
+    hass.loop.call_soon_threadsafe(
+        lambda: hass.async_create_task(
+            enqueue_media_action(hass, service, data)
+        )
     )
 
 
