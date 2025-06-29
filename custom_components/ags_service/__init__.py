@@ -15,7 +15,6 @@ CONF_DEVICE_TYPE = 'device_type'
 CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
 CONF_DISABLE_ZONE = 'disable_zone'
-CONF_PRIMARY_DELAY = 'primary_delay'  
 CONF_HOMEKIT_PLAYER = 'homekit_player'
 CONF_CREATE_SENSORS = 'create_sensors'
 CONF_DEFAULT_ON = 'default_on'
@@ -71,7 +70,6 @@ DEVICE_SCHEMA = vol.Schema({
         ],
     ),
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
-    vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
     vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
     vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
@@ -103,7 +101,6 @@ async def async_setup(hass, config):
         'rooms': ags_config['rooms'],
         'Sources': ags_config['Sources'], 
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5),  # Delay before retrying speaker detection
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),

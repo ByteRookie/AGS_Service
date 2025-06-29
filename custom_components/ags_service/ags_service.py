@@ -270,18 +270,6 @@ def determine_primary_speaker(ags_config, hass):
     # First pass through the logic
     primary_speaker = check_primary_speaker_logic(ags_config, hass)
 
-    if primary_speaker == "none":
-        delay = hass.data['ags_service'].get('primary_delay', 5)
-
-        async def _delayed_check():
-            """Recheck after a short delay using asyncio to avoid blocking."""
-            await asyncio.sleep(delay)
-            hass.data['primary_speaker'] = check_primary_speaker_logic(ags_config, hass)
-
-        # Schedule the re-check from the event loop in a thread safe way
-        hass.loop.call_soon_threadsafe(
-            lambda: hass.async_create_task(_delayed_check())
-        )
 
     # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker

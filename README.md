@@ -109,7 +109,6 @@ ags_service:
 |-----------|---------|-------------|
 | `disable_zone` | `false` | When `true`, AGS ignores `zone.home`. |
 | `override_content` | _None_ | Overrides status when a player's `media_content_id` contains the value. |
-| `primary_delay` | `5` | Seconds before clearing the primary speaker. |
 | `interval_sync` | `30` | Sensor refresh interval in seconds. |
 | `schedule_entity` | _None_ | Optional schedule entity. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`. |
 | `homekit_player` | `none` | Name for an extra HomeKit player that exposes the same static source list. |
@@ -123,7 +122,6 @@ ags_service:
 
 ```yaml
 ags_service:
-#  primary_delay: 5
 #  interval_sync: 30
 #  disable_zone: true
 #  homekit_player: "My HomeKit Player"
@@ -199,7 +197,7 @@ AGS evaluates several conditions to decide when to play and which speaker should
 4. If any active room has a TV that is on, status changes to `ON TV`.
 5. Otherwise the status is simply `ON`.
 
-`determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it checks again after `primary_delay` seconds and falls back to the preferred device.
+`determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
 `execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
 
@@ -223,10 +221,11 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.3.1
+### v1.3.2
 - Added optional `AGS Actions` switch when sensors are enabled
 - Room switches now directly join/unjoin speakers
-- Turning a room switch off also pauses and clears the speaker playlist
+- Turning the final room off also pauses and clears its playlist
+- Removed the primary speaker retry delay
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on

@@ -9,6 +9,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.restore_state import RestoreEntity
 
+from .ags_service import get_active_rooms
+
 _LOGGER = logging.getLogger(__name__)
 
 _ACTION_QUEUE: asyncio.Queue | None = None
@@ -130,8 +132,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await _ACTION_QUEUE.put(("unjoin", {"entity_id": members}))
-        await _ACTION_QUEUE.put(("media_pause", {"entity_id": members}))
-        await _ACTION_QUEUE.put(("clear_playlist", {"entity_id": members}))
+        rooms = self.hass.data["ags_service"]["rooms"]
+        active_rooms = get_active_rooms(rooms, self.hass)
+        if not active_rooms:
+            await _ACTION_QUEUE.put(("media_pause", {"entity_id": members}))
+            await _ACTION_QUEUE.put(("clear_playlist", {"entity_id": members}))
 
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
