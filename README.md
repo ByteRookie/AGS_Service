@@ -221,10 +221,13 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.3.5
-- Removed pre-action sensor refresh for join/unjoin
-- Dropped the TV source reset when a room is unjoined
+### v1.3.6
+- Restored the TV source reset when a room turns off
+- Delay the source change slightly so the unjoin completes without errors
 - Final-room shutdown still uses `media_stop`
+
+### v1.3.5
+- Removed the pre-action sensor refresh for join/unjoin
 
 ### v1.3.3
 - Ensured playlist clears when the last room turns off

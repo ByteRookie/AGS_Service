@@ -23,7 +23,10 @@ async def _action_worker(hass: HomeAssistant) -> None:
     while True:
         service, data = await _ACTION_QUEUE.get()
         try:
-            await hass.services.async_call("media_player", service, data)
+            if service == "delay":
+                await asyncio.sleep(data.get("seconds", 1))
+            else:
+                await hass.services.async_call("media_player", service, data)
         except Exception as exc:  # pragma: no cover - safety net
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
@@ -136,6 +139,12 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await _ACTION_QUEUE.put(("unjoin", {"entity_id": members}))
+
+        has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
+        if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
+            await _ACTION_QUEUE.put(("delay", {"seconds": 1}))
+            for member in members:
+                await _ACTION_QUEUE.put(("select_source", {"entity_id": member, "source": "TV"}))
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
