@@ -107,6 +107,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             return
         primary = self.hass.data.get("primary_speaker")
         if not primary or primary == "none":
+            primary = self.hass.data.get("preferred_primary_speaker")
+        if not primary or primary == "none":
             return
         members = [
             d["device_id"]
