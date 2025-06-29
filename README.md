@@ -226,9 +226,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Delay the source change slightly so the unjoin completes without errors
 - Final-room shutdown still uses `media_stop`
 
-### v1.3.7
-- Queue follow-up actions when AGS status switches to TV or no primary speaker remains
-
 ### v1.3.5
 - Removed the pre-action sensor refresh for join/unjoin
 

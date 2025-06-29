@@ -11,7 +11,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .ags_service import (
     get_active_rooms,
-    update_ags_sensors,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,59 +30,6 @@ async def _action_worker(hass: HomeAssistant) -> None:
         except Exception as exc:  # pragma: no cover - safety net
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
-
-
-async def _queue_status_actions(hass: HomeAssistant) -> None:
-    """Queue follow-up actions when status or primary speaker changes."""
-    if hass.data.get("ags_status") == "OFF":
-        return
-    if not hass.data.get("switch.ags_actions", True):
-        return
-
-    prev_status = hass.data.get("_prev_ags_status")
-    prev_primary = hass.data.get("_prev_primary_speaker")
-
-    status = hass.data.get("ags_status")
-    primary = hass.data.get("primary_speaker")
-    preferred = hass.data.get("preferred_primary_speaker")
-
-    hass.data["_prev_ags_status"] = status
-    hass.data["_prev_primary_speaker"] = primary
-
-    if status == "ON TV" and status != prev_status and preferred and preferred != "none":
-        await _ACTION_QUEUE.put(("select_source", {"entity_id": preferred, "source": "TV"}))
-
-    if primary == "none" and primary != prev_primary and preferred and preferred != "none":
-        source_name = hass.data.get("ags_media_player_source")
-        if source_name is None:
-            sources = hass.data["ags_service"]["Sources"]
-            source_name = next((s["Source"] for s in sources if s.get("source_default")), None)
-            if source_name is None and sources:
-                source_name = sources[0]["Source"]
-            if source_name:
-                hass.data["ags_media_player_source"] = source_name
-        source_entry = next((s for s in hass.data["ags_service"]["Sources"] if s["Source"] == source_name), None)
-        if not source_entry:
-            return
-        media_id = source_entry["Source_Value"]
-        media_type = source_entry.get("media_content_type")
-        if media_type == "favorite_item_id" and not str(media_id).startswith("FV:"):
-            media_id = f"FV:{media_id}"
-        await _ACTION_QUEUE.put((
-            "play_media",
-            {
-                "entity_id": preferred,
-                "media_content_id": media_id,
-                "media_content_type": media_type,
-            },
-        ))
-
-
-async def _post_switch_tasks(hass: HomeAssistant) -> None:
-    """Refresh sensors then queue status-based actions."""
-    await asyncio.sleep(1)
-    await hass.async_add_executor_job(update_ags_sensors, hass.data["ags_service"], hass)
-    await _queue_status_actions(hass)
 
 # Setup platform function
 async def async_setup_platform(
@@ -177,7 +123,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await _ACTION_QUEUE.put(("join", {"entity_id": primary, "group_members": members}))
-        await _post_switch_tasks(self.hass)
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
@@ -205,7 +150,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await _ACTION_QUEUE.put(("media_stop", {"entity_id": members}))
-        await _post_switch_tasks(self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
