@@ -226,6 +226,7 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.3.1
 - Added optional `AGS Actions` switch when sensors are enabled
 - Room switches now directly join/unjoin speakers
+- Turning a room switch off also pauses and clears the speaker playlist
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on

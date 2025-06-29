@@ -130,6 +130,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await _ACTION_QUEUE.put(("unjoin", {"entity_id": members}))
+        await _ACTION_QUEUE.put(("media_pause", {"entity_id": members}))
+        await _ACTION_QUEUE.put(("clear_playlist", {"entity_id": members}))
 
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
