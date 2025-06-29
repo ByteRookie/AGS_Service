@@ -572,6 +572,10 @@ def handle_status_transition(ags_config, hass):
     if prev == curr or AGS_LOGIC_RUNNING:
         return
 
+    # Honour the global AGS Actions switch
+    if not hass.data.get("switch.ags_actions", True):
+        return
+
     AGS_LOGIC_RUNNING = True
     try:
         active = hass.data.get("active_speakers", [])

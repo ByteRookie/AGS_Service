@@ -42,6 +42,7 @@ access their values.
 **Switches**
 
 * `(Room Name) Media` – toggle a room on or off manually. One switch is created for every room in your configuration.
+* `AGS Actions` – globally enable or disable automatic speaker management.
 
 ## File Structure
 
