@@ -62,11 +62,21 @@ def update_ags_sensors(ags_config, hass):
         if 'configured_rooms' not in hass.data:
             get_configured_rooms(rooms, hass)
         get_active_rooms(rooms, hass)
+        prev_status = hass.data.get('ags_status')
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
         determine_primary_speaker(ags_config, hass)
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
+        new_status = hass.data.get('ags_status')
+        if new_status != prev_status:
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    handle_ags_status_change(
+                        hass, ags_config, new_status, prev_status
+                    )
+                )
+            )
         ## Use in Future release ###
         ### Call and execute the Control System for AGS #### 
         #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
@@ -124,7 +134,6 @@ def get_active_rooms(rooms, hass):
 ### Function to Update Status ### 
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
-    prev_status = hass.data.get('ags_status')
     active_rooms = hass.data.get('active_rooms', [])
     default_source_name = None
     sources_list = hass.data['ags_service']['Sources'] 
@@ -141,12 +150,6 @@ def update_ags_status(ags_config, hass):
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
     if not ags_config.get('disable_zone', False) and hass.states.get('zone.home').state == '0':
         ags_status = "OFF"
-        if ags_status != prev_status:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-                )
-            )
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -161,12 +164,6 @@ def update_ags_status(ags_config, hass):
         device_state = device_states.get(device['device_id'])
         if device_state and 'override_content' in device and device['override_content'] in device_state.attributes.get('media_content_id', ''):
             ags_status = "Override"
-            if ags_status != prev_status:
-                hass.loop.call_soon_threadsafe(
-                    lambda: hass.async_create_task(
-                        handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-                    )
-                )
             hass.data['ags_status'] = ags_status
             return ags_status
 
@@ -223,12 +220,6 @@ def update_ags_status(ags_config, hass):
         else:
             if not schedule_on:
                 ags_status = "OFF"
-                if ags_status != prev_status:
-                    hass.loop.call_soon_threadsafe(
-                        lambda: hass.async_create_task(
-                            handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-                        )
-                    )
                 hass.data['ags_status'] = ags_status
                 hass.data['schedule_prev_state'] = schedule_on
                 hass.data['schedule_state'] = schedule_on
@@ -239,12 +230,6 @@ def update_ags_status(ags_config, hass):
 
     if not media_system_state:
         ags_status = "OFF"
-        if ags_status != prev_status:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-                )
-            )
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -256,22 +241,10 @@ def update_ags_status(ags_config, hass):
                 device_state = device_states.get(device['device_id'])
                 if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
                     ags_status = "ON TV"
-                    if ags_status != prev_status:
-                        hass.loop.call_soon_threadsafe(
-                            lambda: hass.async_create_task(
-                                handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-                            )
-                        )
                     hass.data['ags_status'] = ags_status
                     return ags_status
 
     ags_status = "ON"
-    if ags_status != prev_status:
-        hass.loop.call_soon_threadsafe(
-            lambda: hass.async_create_task(
-                handle_ags_status_change(hass, ags_config, ags_status, prev_status)
-            )
-        )
     hass.data['ags_status'] = ags_status
     return ags_status
 
@@ -627,7 +600,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
 
-        elif old_status == "OFF":
+        elif old_status in (None, "OFF"):
             active_speakers = [
                 spk
                 for spk in hass.data.get("active_speakers", [])
