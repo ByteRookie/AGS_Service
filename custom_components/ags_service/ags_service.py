@@ -9,7 +9,6 @@ _LOGGER = logging.getLogger(__name__)
 # Global flag to indicate whether the update_sensors function is currently running
 AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
-ags_select_source_running = False
 
 _ACTION_QUEUE: asyncio.Queue | None = None
 _ACTION_WORKER: asyncio.Task | None = None
@@ -63,11 +62,21 @@ def update_ags_sensors(ags_config, hass):
         if 'configured_rooms' not in hass.data:
             get_configured_rooms(rooms, hass)
         get_active_rooms(rooms, hass)
+        prev_status = hass.data.get('ags_status')
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
         determine_primary_speaker(ags_config, hass)
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
+        new_status = hass.data.get('ags_status')
+        if new_status != prev_status:
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    handle_ags_status_change(
+                        hass, ags_config, new_status, prev_status
+                    )
+                )
+            )
         ## Use in Future release ###
         ### Call and execute the Control System for AGS #### 
         #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
@@ -139,7 +148,7 @@ def update_ags_status(ags_config, hass):
         ags_status = "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
-    if not ags_config.get('disable_zone', False)  and hass.states.get('zone.home').state == '0':
+    if not ags_config.get('disable_zone', False) and hass.states.get('zone.home').state == '0':
         ags_status = "OFF"
         hass.data['ags_status'] = ags_status
         return ags_status
@@ -479,18 +488,7 @@ def execute_ags_logic(hass):
     AGS_LOGIC_RUNNING = False
     return
 
-def ags_select_source(ags_config, hass):
-    global ags_select_source_running
-
-    # Check if the logic is already running
-    if ags_select_source_running:
-
-
-        _LOGGER.warning("ags_select_source is already running!")
-        return
-
-    # Mark the logic as running
-    ags_select_source_running = True
+async def ags_select_source(ags_config, hass):
 
     try:
         source = hass.data.get('ags_media_player_source')
@@ -518,7 +516,10 @@ def ags_select_source(ags_config, hass):
             primary_speaker_entity_id = primary_speaker_entity_id_raw
         
         if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
-            ags_select_source_running = False  # Reset the global flag
+            return
+
+        state = hass.states.get(primary_speaker_entity_id)
+        if state is None or state.state == "unavailable":
             return
 
         # Convert the list of sources to a dictionary for faster lookups
@@ -527,17 +528,10 @@ def ags_select_source(ags_config, hass):
 
 
         if source == "TV":
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass,
-                        'select_source',
-                        {
-                            "source": source,
-                            "entity_id": primary_speaker_entity_id,
-                        },
-                    )
-                )
+            await enqueue_media_action(
+                hass,
+                'select_source',
+                {"source": source, "entity_id": primary_speaker_entity_id},
             )
 
         elif source != "Unknown" and status != "OFF":
@@ -550,26 +544,103 @@ def ags_select_source(ags_config, hass):
                 if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
                     media_id = f"FV:{media_id}"
 
-                hass.loop.call_soon_threadsafe(
-                    lambda: hass.async_create_task(
-                        enqueue_media_action(
-                            hass,
-                            'play_media',
-                            {
-                                'entity_id': primary_speaker_entity_id,
-                                'media_content_id': media_id,
-                                'media_content_type': media_type,
-                            },
-                        )
-                    )
+                await enqueue_media_action(
+                    hass,
+                    'play_media',
+                    {
+                        'entity_id': primary_speaker_entity_id,
+                        'media_content_id': media_id,
+                        'media_content_type': media_type,
+                    },
                 )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
 
-    finally:
-        # Reset the flag to indicate that the logic has finished
-        ags_select_source_running = False
+    return
+
+
+async def handle_ags_status_change(hass, ags_config, new_status, old_status):
+    """Execute speaker actions when AGS status changes."""
+    try:
+        rooms = ags_config["rooms"]
+
+        if new_status == "OFF":
+            all_speakers = [
+                d["device_id"]
+                for r in rooms
+                for d in r["devices"]
+                if d.get("device_type") == "speaker"
+                and (state := hass.states.get(d["device_id"])) is not None
+                and state.state != "unavailable"
+            ]
+
+            if all_speakers:
+                await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+                await enqueue_media_action(hass, "delay", {"seconds": 2})
+
+            for room in rooms:
+                members = [
+                    d["device_id"]
+                    for d in room["devices"]
+                    if d.get("device_type") == "speaker"
+                    and (state := hass.states.get(d["device_id"])) is not None
+                    and state.state != "unavailable"
+                ]
+                if not members:
+                    continue
+                has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
+                if has_tv and not ags_config.get("disable_Tv_Source"):
+                    for member in members:
+                        await enqueue_media_action(
+                            hass,
+                            "select_source",
+                            {"entity_id": member, "source": "TV"},
+                        )
+                else:
+                    await enqueue_media_action(hass, "media_stop", {"entity_id": members})
+
+        elif old_status in (None, "OFF"):
+            active_speakers = [
+                spk
+                for spk in hass.data.get("active_speakers", [])
+                if (state := hass.states.get(spk)) is not None and state.state != "unavailable"
+            ]
+            primary = hass.data.get("primary_speaker")
+            if not primary or primary == "none":
+                primary = hass.data.get("preferred_primary_speaker")
+
+            if (
+                primary
+                and primary != "none"
+                and (state := hass.states.get(primary)) is not None
+                and state.state != "unavailable"
+            ):
+                members = [spk for spk in active_speakers if spk != primary]
+                if members:
+                    await enqueue_media_action(
+                        hass,
+                        "join",
+                        {"entity_id": primary, "group_members": members},
+                    )
+
+            preferred_primary = hass.data.get("preferred_primary_speaker")
+            if new_status == "ON TV":
+                if (
+                    preferred_primary
+                    and preferred_primary != "none"
+                    and (state := hass.states.get(preferred_primary)) is not None
+                    and state.state != "unavailable"
+                ):
+                    await enqueue_media_action(
+                        hass,
+                        "select_source",
+                        {"entity_id": preferred_primary, "source": "TV"},
+                    )
+            else:
+                await ags_select_source(ags_config, hass)
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.warning("Error handling AGS status change: %s", exc)
 
 
 
