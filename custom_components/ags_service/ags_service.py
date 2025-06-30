@@ -125,6 +125,7 @@ def get_active_rooms(rooms, hass):
 ### Function to Update Status ### 
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
+    prev_status = hass.data.get('ags_status')
     active_rooms = hass.data.get('active_rooms', [])
     default_source_name = None
     sources_list = hass.data['ags_service']['Sources'] 
@@ -139,8 +140,14 @@ def update_ags_status(ags_config, hass):
         ags_status = "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
-    if not ags_config.get('disable_zone', False)  and hass.states.get('zone.home').state == '0':
+    if not ags_config.get('disable_zone', False) and hass.states.get('zone.home').state == '0':
         ags_status = "OFF"
+        if ags_status != prev_status:
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+                )
+            )
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -155,6 +162,12 @@ def update_ags_status(ags_config, hass):
         device_state = device_states.get(device['device_id'])
         if device_state and 'override_content' in device and device['override_content'] in device_state.attributes.get('media_content_id', ''):
             ags_status = "Override"
+            if ags_status != prev_status:
+                hass.loop.call_soon_threadsafe(
+                    lambda: hass.async_create_task(
+                        handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+                    )
+                )
             hass.data['ags_status'] = ags_status
             return ags_status
 
@@ -211,6 +224,12 @@ def update_ags_status(ags_config, hass):
         else:
             if not schedule_on:
                 ags_status = "OFF"
+                if ags_status != prev_status:
+                    hass.loop.call_soon_threadsafe(
+                        lambda: hass.async_create_task(
+                            handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+                        )
+                    )
                 hass.data['ags_status'] = ags_status
                 hass.data['schedule_prev_state'] = schedule_on
                 hass.data['schedule_state'] = schedule_on
@@ -221,6 +240,12 @@ def update_ags_status(ags_config, hass):
 
     if not media_system_state:
         ags_status = "OFF"
+        if ags_status != prev_status:
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+                )
+            )
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -232,10 +257,22 @@ def update_ags_status(ags_config, hass):
                 device_state = device_states.get(device['device_id'])
                 if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
                     ags_status = "ON TV"
+                    if ags_status != prev_status:
+                        hass.loop.call_soon_threadsafe(
+                            lambda: hass.async_create_task(
+                                handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+                            )
+                        )
                     hass.data['ags_status'] = ags_status
                     return ags_status
 
     ags_status = "ON"
+    if ags_status != prev_status:
+        hass.loop.call_soon_threadsafe(
+            lambda: hass.async_create_task(
+                handle_ags_status_change(hass, ags_config, ags_status, prev_status)
+            )
+        )
     hass.data['ags_status'] = ags_status
     return ags_status
 
@@ -570,6 +607,67 @@ def ags_select_source(ags_config, hass):
     finally:
         # Reset the flag to indicate that the logic has finished
         ags_select_source_running = False
+
+
+async def handle_ags_status_change(hass, ags_config, new_status, old_status):
+    """Execute speaker actions when AGS status changes."""
+    try:
+        rooms = ags_config["rooms"]
+
+        if new_status == "OFF":
+            all_speakers = [
+                d["device_id"]
+                for r in rooms
+                for d in r["devices"]
+                if d.get("device_type") == "speaker"
+            ]
+            if all_speakers:
+                await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+
+            for room in rooms:
+                members = [
+                    d["device_id"]
+                    for d in room["devices"]
+                    if d.get("device_type") == "speaker"
+                ]
+                if not members:
+                    continue
+                has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
+                if has_tv and not ags_config.get("disable_Tv_Source"):
+                    for member in members:
+                        await enqueue_media_action(
+                            hass,
+                            "select_source",
+                            {"entity_id": member, "source": "TV"},
+                        )
+                else:
+                    await enqueue_media_action(hass, "media_stop", {"entity_id": members})
+
+        elif old_status == "OFF":
+            active_speakers = hass.data.get("active_speakers", [])
+            primary = hass.data.get("primary_speaker")
+            if not primary or primary == "none":
+                primary = hass.data.get("preferred_primary_speaker")
+
+            if primary and primary != "none" and active_speakers:
+                await enqueue_media_action(
+                    hass,
+                    "join",
+                    {"entity_id": primary, "group_members": active_speakers},
+                )
+
+            preferred_primary = hass.data.get("preferred_primary_speaker")
+            if new_status == "ON TV":
+                if preferred_primary and preferred_primary != "none":
+                    await enqueue_media_action(
+                        hass,
+                        "select_source",
+                        {"entity_id": preferred_primary, "source": "TV"},
+                    )
+            else:
+                await hass.async_add_executor_job(ags_select_source, ags_config, hass)
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.warning("Error handling AGS status change: %s", exc)
 
 
 
