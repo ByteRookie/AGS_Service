@@ -5,7 +5,7 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
-from .ags_service import update_ags_sensors, ags_select_source 
+from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
 import logging
 _LOGGER = logging.getLogger(__name__)
 
@@ -164,25 +164,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if found_room:
                 break
 
-
-        if self.ags_status == "ON TV" and self.primary_speaker_room:
-            selected_device_id = None
-
-            # Filter out speaker devices and sort remaining devices by priority
-            sorted_devices = sorted(
-                [device for device in room["devices"] if device["device_type"] != "speaker"],
-                key=lambda x: x['priority']
-            )
-
-            if sorted_devices:
-                first_device = sorted_devices[0]
-                selected_device_id = first_device.get('ott_device', first_device["device_id"])
-            else:
-                selected_device_id = self.hass.data.get('primary_speaker', None)
-
-            self.primary_speaker_entity_id = selected_device_id
-        else:
-            self.primary_speaker_entity_id = self.hass.data.get('primary_speaker', None)
+        self.primary_speaker_entity_id = get_control_device_id(self.ags_config, self.hass)
 
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)

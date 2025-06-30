@@ -364,6 +364,41 @@ def get_inactive_tv_speakers(rooms, hass):
     return inactive_tv_speakers
 
 
+def get_control_device_id(ags_config, hass):
+    """Return the device that should receive control commands."""
+    ags_status = hass.data.get('ags_status')
+    primary_speaker = hass.data.get('primary_speaker')
+
+    if not primary_speaker or primary_speaker == 'none':
+        primary_speaker = hass.data.get('preferred_primary_speaker')
+        hass.data['primary_speaker'] = primary_speaker
+
+    if not primary_speaker or primary_speaker == 'none':
+        return None
+
+    primary_room = None
+    primary_room_devices = None
+    for room in ags_config['rooms']:
+        for device in room['devices']:
+            if device['device_id'] == primary_speaker:
+                primary_room = room
+                primary_room_devices = room['devices']
+                break
+        if primary_room:
+            break
+
+    if ags_status == 'ON TV' and primary_room_devices:
+        sorted_devices = sorted(
+            [d for d in primary_room_devices if d['device_type'] != 'speaker'],
+            key=lambda x: x['priority'],
+        )
+        if sorted_devices:
+            first_device = sorted_devices[0]
+            return first_device.get('ott_device', first_device['device_id'])
+
+    return primary_speaker
+
+
 
 
 
@@ -478,15 +513,9 @@ def ags_select_source(ags_config, hass):
             if source is not None:
                 hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
-        primary_speaker_entity_id_raw = hass.data.get('primary_speaker', "none")
+        primary_speaker_entity_id = get_control_device_id(ags_config, hass)
 
-        if not primary_speaker_entity_id_raw or primary_speaker_entity_id_raw == "none":
-            primary_speaker_entity_id = hass.data.get('preferred_primary_speaker', "")
-            hass.data['primary_speaker'] = primary_speaker_entity_id
-        else:
-            primary_speaker_entity_id = primary_speaker_entity_id_raw
-        
-        if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
+        if not primary_speaker_entity_id:
             ags_select_source_running = False  # Reset the global flag
             return
 
