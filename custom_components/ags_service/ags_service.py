@@ -68,6 +68,13 @@ def update_ags_sensors(ags_config, hass):
         determine_primary_speaker(ags_config, hass)
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
+
+        status = hass.data.get('ags_status')
+        prev_status = hass.data.get('prev_ags_status')
+        if status != prev_status:
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(process_ags_status(hass))
+            )
         ## Use in Future release ###
         ### Call and execute the Control System for AGS #### 
         #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
@@ -570,6 +577,105 @@ def ags_select_source(ags_config, hass):
     finally:
         # Reset the flag to indicate that the logic has finished
         ags_select_source_running = False
+
+
+async def process_ags_status(hass: HomeAssistant) -> None:
+    """React to AGS status transitions and trigger speaker actions."""
+    ags_config = hass.data.get("ags_service")
+    if not ags_config:
+        return
+
+    await ensure_action_queue(hass)
+
+    prev_status = hass.data.get("prev_ags_status")
+    status = hass.data.get("ags_status", "OFF")
+    rooms = ags_config["rooms"]
+
+    all_speakers = [
+        d["device_id"]
+        for room in rooms
+        for d in room["devices"]
+        if d.get("device_type") == "speaker"
+    ]
+
+    if status == "OFF" and prev_status != "OFF":
+        await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+        for room in rooms:
+            speakers = [
+                d["device_id"]
+                for d in room["devices"]
+                if d.get("device_type") == "speaker"
+            ]
+            has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
+            if has_tv:
+                for speaker in speakers:
+                    await enqueue_media_action(
+                        hass,
+                        "select_source",
+                        {"entity_id": speaker, "source": "TV"},
+                    )
+            else:
+                if speakers:
+                    await enqueue_media_action(
+                        hass, "media_stop", {"entity_id": speakers}
+                    )
+
+    elif status != "OFF" and prev_status == "OFF":
+        active_speakers = hass.data.get("active_speakers", [])
+        primary = hass.data.get("primary_speaker")
+        preferred = hass.data.get("preferred_primary_speaker")
+        target = primary if primary and primary != "none" else preferred
+
+        if target and active_speakers:
+            await enqueue_media_action(
+                hass,
+                "join",
+                {"entity_id": target, "group_members": active_speakers},
+            )
+
+        if preferred and preferred != "none":
+            if status == "ON TV":
+                await enqueue_media_action(
+                    hass,
+                    "select_source",
+                    {"entity_id": preferred, "source": "TV"},
+                )
+            else:
+                source_name = hass.data.get("ags_media_player_source")
+                sources = hass.data["ags_service"]["Sources"]
+                if not source_name and sources:
+                    source_name = next(
+                        (
+                            s["Source"]
+                            for s in sources
+                            if s.get("source_default") is True
+                        ),
+                        sources[0]["Source"],
+                    )
+                source_dict = {
+                    s["Source"]: {
+                        "value": s["Source_Value"],
+                        "type": s.get("media_content_type"),
+                    }
+                    for s in sources
+                }
+                info = source_dict.get(source_name)
+                if info:
+                    media_id = info["value"]
+                    m_type = info["type"]
+                    if m_type == "favorite_item_id" and not media_id.startswith("FV:"):
+                        media_id = f"FV:{media_id}"
+                    await enqueue_media_action(
+                        hass,
+                        "play_media",
+                        {
+                            "entity_id": preferred,
+                            "media_content_id": media_id,
+                            "media_content_type": m_type,
+                        },
+                    )
+
+    hass.data["prev_ags_status"] = status
 
 
 

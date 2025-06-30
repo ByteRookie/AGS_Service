@@ -201,6 +201,12 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
 
+When the AGS status value changes these rules run automatically. If the system
+turns `OFF` every speaker is unjoined and either stopped or reset to the TV
+input. When it turns back on the active speakers join the primary device (or the
+preferred device when no primary is set) and playback resumes using the
+configured source.
+
 ## Sensor Logic
 
 Each sensor uses specific logic to report the state of the system:
