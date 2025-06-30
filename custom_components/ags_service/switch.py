@@ -12,6 +12,7 @@ from .ags_service import (
     get_active_rooms,
     ensure_action_queue,
     enqueue_media_action,
+    update_ags_sensors,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -92,6 +93,9 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
             return
+        await self.hass.async_add_executor_job(
+            update_ags_sensors, self.hass.data["ags_service"], self.hass
+        )
         primary = self.hass.data.get("primary_speaker")
         if not primary or primary == "none":
             primary = self.hass.data.get("preferred_primary_speaker")
