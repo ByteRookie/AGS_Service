@@ -112,7 +112,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
         if first_room and (
-            (prev_primary is None or prev_primary == "none")
+            (not prev_primary or prev_primary == "none")
             or prev_status == "ON TV"
         ):
             if prev_status == "ON TV":
