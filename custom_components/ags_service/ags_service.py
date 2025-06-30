@@ -61,7 +61,9 @@ def update_ags_sensors(ags_config, hass):
         # Configured rooms rarely change, only compute once
         if 'configured_rooms' not in hass.data:
             get_configured_rooms(rooms, hass)
+        prev_active_rooms = hass.data.get('active_rooms', [])
         get_active_rooms(rooms, hass)
+        new_active_rooms = hass.data.get('active_rooms', [])
         prev_status = hass.data.get('ags_status')
         update_ags_status(ags_config, hass)
         get_preferred_primary_speaker(rooms, hass)
@@ -69,6 +71,17 @@ def update_ags_sensors(ags_config, hass):
         update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
         new_status = hass.data.get('ags_status')
+        if (
+            len(prev_active_rooms) == 0
+            and len(new_active_rooms) > 0
+            and new_status != "ON TV"
+            and prev_status not in (None, "OFF")
+        ):
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    handle_first_room_on(hass, ags_config)
+                )
+            )
         if new_status != prev_status:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
@@ -639,8 +652,29 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     )
             else:
                 await ags_select_source(ags_config, hass)
+        elif new_status == "ON TV":
+            preferred_primary = hass.data.get("preferred_primary_speaker")
+            if (
+                preferred_primary
+                and preferred_primary != "none"
+                and (state := hass.states.get(preferred_primary)) is not None
+                and state.state != "unavailable"
+            ):
+                await enqueue_media_action(
+                    hass,
+                    "select_source",
+                    {"entity_id": preferred_primary, "source": "TV"},
+                )
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
 
+
+
+async def handle_first_room_on(hass, ags_config):
+    """Run source selection logic when the first room becomes active."""
+    try:
+        await ags_select_source(ags_config, hass)
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.warning("Error handling first room on: %s", exc)
 
 
