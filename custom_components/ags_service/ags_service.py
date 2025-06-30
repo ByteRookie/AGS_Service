@@ -524,8 +524,19 @@ def ags_select_source(ags_config, hass):
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
+        disable_tv_source = ags_config.get('disable_Tv_Source', False)
+
         if source == "TV":
             # Use async service call to avoid blocking the event loop
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        "source": source,
+                        "entity_id": primary_speaker_entity_id
+                    })
+                )
+            )
+        elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
                     hass.services.async_call('media_player', 'select_source', {
