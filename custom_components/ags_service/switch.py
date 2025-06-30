@@ -22,7 +22,7 @@ async def async_setup_platform(
     hass: HomeAssistant,
     config: ConfigType,
     async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None
+    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the switch platform."""
     # Retrieve the room information from the shared data
@@ -37,6 +37,7 @@ async def async_setup_platform(
     async_add_entities(entities)
 
     await ensure_action_queue(hass)
+
 
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
@@ -127,7 +128,9 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         await enqueue_media_action(self.hass, "unjoin", {"entity_id": members})
 
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
-        use_tv_source = has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source")
+        use_tv_source = has_tv and not self.hass.data["ags_service"].get(
+            "disable_Tv_Source"
+        )
         if use_tv_source:
             await enqueue_media_action(self.hass, "delay", {"seconds": 1})
             for member in members:
@@ -136,11 +139,9 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     "select_source",
                     {"entity_id": member, "source": "TV"},
                 )
-
-        rooms = self.hass.data["ags_service"]["rooms"]
-        active_rooms = get_active_rooms(rooms, self.hass)
-        if not active_rooms and not use_tv_source:
+        else:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
+
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
@@ -177,7 +178,3 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
-
-
-
-           
