@@ -14,6 +14,9 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 # Setup platform function
 from homeassistant.helpers.event import async_track_state_change_event
 
+# Import helper to refresh AGS sensors
+from .ags_service import update_ags_sensors
+
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
     ags_config = hass.data['ags_service']
@@ -41,13 +44,14 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         new_state = event.data.get("new_state")
         if new_state is None:
             return
+        update_ags_sensors(ags_config, hass)
         for sensor in sensors:
             await sensor.async_update_ha_state(True)
 
     # Register sensors so other modules can refresh them immediately
     hass.data['ags_sensors'] = sensors
 
-    entities_to_track = ['zone.home']
+    entities_to_track = ['zone.home', 'switch.ags_actions']
     schedule_cfg = ags_config.get('schedule_entity')
     if schedule_cfg and schedule_cfg.get('entity_id'):
         entities_to_track.append(schedule_cfg['entity_id'])
