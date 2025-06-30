@@ -69,10 +69,16 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         """Turn the switch on."""
         rooms = self.hass.data["ags_service"]["rooms"]
         prev_active = get_active_rooms(rooms, self.hass)
+        prev_primary = self.hass.data.get("primary_speaker")
+        prev_status = self.hass.data.get("ags_status")
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        await self._maybe_join(first_room=len(prev_active) == 0)
+        await self._maybe_join(
+            first_room=len(prev_active) == 0,
+            prev_primary=prev_primary,
+            prev_status=prev_status,
+        )
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
@@ -89,7 +95,13 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
-    async def _maybe_join(self, *, first_room: bool = False) -> None:
+    async def _maybe_join(
+        self,
+        *,
+        first_room: bool = False,
+        prev_primary: str | None = None,
+        prev_status: str | None = None,
+    ) -> None:
         """Join this room's speaker to the primary group if allowed."""
         if self.hass.data.get("ags_status") == "OFF":
             return
@@ -99,10 +111,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         await self.hass.async_add_executor_job(
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
-        if first_room:
-            status = self.hass.data.get("ags_status")
-            primary = self.hass.data.get("primary_speaker")
-            if status == "ON TV":
+        if first_room and (
+            (prev_primary is None or prev_primary == "none")
+            or prev_status == "ON TV"
+        ):
+            if prev_status == "ON TV":
                 preferred = self.hass.data.get("preferred_primary_speaker")
                 if preferred and preferred != "none":
                     await enqueue_media_action(
@@ -110,8 +123,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                         "select_source",
                         {"entity_id": preferred, "source": "TV"},
                     )
-            elif not primary or primary == "none":
-                await ags_select_source(self.hass.data["ags_service"], self.hass)
+            else:
+                await ags_select_source(
+                    self.hass.data["ags_service"],
+                    self.hass,
+                )
         primary = self.hass.data.get("primary_speaker")
         if not primary or primary == "none":
             primary = self.hass.data.get("preferred_primary_speaker")
