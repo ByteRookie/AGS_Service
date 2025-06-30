@@ -226,6 +226,10 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Delay the source change slightly so the unjoin completes without errors
 - Final-room shutdown still uses `media_stop`
 
+### v1.3.7
+- Removed the one second delay before resetting TV speakers
+- Skip `media_stop` when the last active room has a TV
+
 ### v1.3.5
 - Removed the pre-action sensor refresh for join/unjoin
 
