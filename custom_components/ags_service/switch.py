@@ -13,6 +13,7 @@ from .ags_service import (
     ensure_action_queue,
     enqueue_media_action,
     update_ags_sensors,
+    ags_select_source,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,10 +67,12 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
+        rooms = self.hass.data["ags_service"]["rooms"]
+        prev_active = get_active_rooms(rooms, self.hass)
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        await self._maybe_join()
+        await self._maybe_join(first_room=len(prev_active) == 0)
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
@@ -86,7 +89,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
-    async def _maybe_join(self) -> None:
+    async def _maybe_join(self, *, first_room: bool = False) -> None:
         """Join this room's speaker to the primary group if allowed."""
         if self.hass.data.get("ags_status") == "OFF":
             return
@@ -96,6 +99,19 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         await self.hass.async_add_executor_job(
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
+        if first_room:
+            status = self.hass.data.get("ags_status")
+            primary = self.hass.data.get("primary_speaker")
+            if status == "ON TV":
+                preferred = self.hass.data.get("preferred_primary_speaker")
+                if preferred and preferred != "none":
+                    await enqueue_media_action(
+                        self.hass,
+                        "select_source",
+                        {"entity_id": preferred, "source": "TV"},
+                    )
+            elif not primary or primary == "none":
+                await ags_select_source(self.hass.data["ags_service"], self.hass)
         primary = self.hass.data.get("primary_speaker")
         if not primary or primary == "none":
             primary = self.hass.data.get("preferred_primary_speaker")
