@@ -9,7 +9,6 @@ _LOGGER = logging.getLogger(__name__)
 # Global flag to indicate whether the update_sensors function is currently running
 AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
-ags_select_source_running = False
 
 _ACTION_QUEUE: asyncio.Queue | None = None
 _ACTION_WORKER: asyncio.Task | None = None
@@ -516,18 +515,7 @@ def execute_ags_logic(hass):
     AGS_LOGIC_RUNNING = False
     return
 
-def ags_select_source(ags_config, hass):
-    global ags_select_source_running
-
-    # Check if the logic is already running
-    if ags_select_source_running:
-
-
-        _LOGGER.warning("ags_select_source is already running!")
-        return
-
-    # Mark the logic as running
-    ags_select_source_running = True
+async def ags_select_source(ags_config, hass):
 
     try:
         source = hass.data.get('ags_media_player_source')
@@ -555,12 +543,10 @@ def ags_select_source(ags_config, hass):
             primary_speaker_entity_id = primary_speaker_entity_id_raw
         
         if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
-            ags_select_source_running = False
             return
 
         state = hass.states.get(primary_speaker_entity_id)
         if state is None or state.state == "unavailable":
-            ags_select_source_running = False
             return
 
         # Convert the list of sources to a dictionary for faster lookups
@@ -569,17 +555,10 @@ def ags_select_source(ags_config, hass):
 
 
         if source == "TV":
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass,
-                        'select_source',
-                        {
-                            "source": source,
-                            "entity_id": primary_speaker_entity_id,
-                        },
-                    )
-                )
+            await enqueue_media_action(
+                hass,
+                'select_source',
+                {"source": source, "entity_id": primary_speaker_entity_id},
             )
 
         elif source != "Unknown" and status != "OFF":
@@ -592,26 +571,20 @@ def ags_select_source(ags_config, hass):
                 if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
                     media_id = f"FV:{media_id}"
 
-                hass.loop.call_soon_threadsafe(
-                    lambda: hass.async_create_task(
-                        enqueue_media_action(
-                            hass,
-                            'play_media',
-                            {
-                                'entity_id': primary_speaker_entity_id,
-                                'media_content_id': media_id,
-                                'media_content_type': media_type,
-                            },
-                        )
-                    )
+                await enqueue_media_action(
+                    hass,
+                    'play_media',
+                    {
+                        'entity_id': primary_speaker_entity_id,
+                        'media_content_id': media_id,
+                        'media_content_type': media_type,
+                    },
                 )
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
 
-    finally:
-        # Reset the flag to indicate that the logic has finished
-        ags_select_source_running = False
+    return
 
 
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
@@ -631,6 +604,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             if all_speakers:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+                await enqueue_media_action(hass, "delay", {"seconds": 2})
 
             for room in rooms:
                 members = [
@@ -668,13 +642,14 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 and primary != "none"
                 and (state := hass.states.get(primary)) is not None
                 and state.state != "unavailable"
-                and active_speakers
             ):
-                await enqueue_media_action(
-                    hass,
-                    "join",
-                    {"entity_id": primary, "group_members": active_speakers},
-                )
+                members = [spk for spk in active_speakers if spk != primary]
+                if members:
+                    await enqueue_media_action(
+                        hass,
+                        "join",
+                        {"entity_id": primary, "group_members": members},
+                    )
 
             preferred_primary = hass.data.get("preferred_primary_speaker")
             if new_status == "ON TV":
@@ -690,7 +665,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         {"entity_id": preferred_primary, "source": "TV"},
                     )
             else:
-                await hass.async_add_executor_job(ags_select_source, ags_config, hass)
+                await ags_select_source(ags_config, hass)
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
 
