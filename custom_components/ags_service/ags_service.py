@@ -560,6 +560,45 @@ async def ags_select_source(ags_config, hass):
     return
 
 
+async def speaker_status_check(hass) -> None:
+    """Ensure speaker grouping matches the active speaker list."""
+    try:
+        active_speakers = [
+            spk
+            for spk in hass.data.get("active_speakers", [])
+            if (state := hass.states.get(spk)) is not None and state.state != "unavailable"
+        ]
+
+        primary = hass.data.get("primary_speaker")
+        if not primary or primary == "none":
+            primary = hass.data.get("preferred_primary_speaker")
+
+        if not primary or primary == "none":
+            return
+
+        state = hass.states.get(primary)
+        if state is None or state.state == "unavailable":
+            return
+
+        group_members = state.attributes.get("group_members") or []
+
+        missing = [spk for spk in active_speakers if spk not in group_members and spk != primary]
+        if missing:
+            await enqueue_media_action(
+                hass,
+                "join",
+                {"entity_id": primary, "group_members": missing},
+            )
+
+        extra = [spk for spk in group_members if spk != primary and spk not in active_speakers]
+        if extra:
+            await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
+
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.warning("Error in speaker_status_check: %s", exc)
+
+
+
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """Execute speaker actions when AGS status changes."""
     try:
@@ -604,38 +643,20 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
 
-        elif old_status in (None, "OFF"):
-            active_speakers = [
-                spk
-                for spk in hass.data.get("active_speakers", [])
-                if (state := hass.states.get(spk)) is not None and state.state != "unavailable"
-            ]
-            primary = hass.data.get("primary_speaker")
-            if not primary or primary == "none":
-                primary = hass.data.get("preferred_primary_speaker")
+        elif new_status in ("ON", "ON TV"):
+            await speaker_status_check(hass)
 
-            if (
-                primary
-                and primary != "none"
-                and (state := hass.states.get(primary)) is not None
-                and state.state != "unavailable"
-            ):
-                members = [spk for spk in active_speakers if spk != primary]
-                if members:
-                    await enqueue_media_action(
-                        hass,
-                        "join",
-                        {"entity_id": primary, "group_members": members},
-                    )
+            preferred_primary = (
+                hass.data.get("primary_speaker")
+                or hass.data.get("preferred_primary_speaker")
+            )
 
-            preferred_primary = hass.data.get("preferred_primary_speaker")
+            if not preferred_primary or preferred_primary == "none":
+                return
+
             if new_status == "ON TV":
-                if (
-                    preferred_primary
-                    and preferred_primary != "none"
-                    and (state := hass.states.get(preferred_primary)) is not None
-                    and state.state != "unavailable"
-                ):
+                state = hass.states.get(preferred_primary)
+                if state is not None and state.state != "unavailable":
                     await enqueue_media_action(
                         hass,
                         "select_source",
