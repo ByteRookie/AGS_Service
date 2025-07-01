@@ -122,6 +122,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
+        if not self.primary_speaker or self.primary_speaker == "none":
+            self.primary_speaker = self.preferred_primary_speaker
         # Determine the currently selected source. Historically the attribute
         # ``ags_source`` was expected to expose the numeric Sonos favorite ID so
         # that automations could directly feed it to ``media_player.play_media``.
@@ -157,7 +159,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         found_room = False
         for room in self.ags_config['rooms']:
             for device in room["devices"]:
-                if device["device_id"] == self.hass.data.get('primary_speaker'):
+                if device["device_id"] == self.primary_speaker:
                     self.primary_speaker_room = room["room"]
                     found_room = True
                     break

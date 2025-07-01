@@ -203,6 +203,8 @@ class PrimarySpeakerSensor(SensorEntity):
     @property
     def state(self):
         primary_speaker = self.hass.data.get('primary_speaker', None)
+        if not primary_speaker or primary_speaker == "none":
+            primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
         return primary_speaker
 
     

@@ -300,6 +300,10 @@ def determine_primary_speaker(ags_config, hass):
             lambda: hass.async_create_task(_delayed_check())
         )
 
+        preferred = hass.data.get('preferred_primary_speaker')
+        if preferred and preferred != "none":
+            primary_speaker = preferred
+
     # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker
 
