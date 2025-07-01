@@ -1,7 +1,5 @@
 """Main module for the AGS Service integration."""
 import voluptuous as vol
-import asyncio
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
@@ -110,20 +108,11 @@ async def async_setup(hass, config):
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
-        'startup_pending': True,
     }
 
     # Initialize shared media action queue
     await ensure_action_queue(hass)
 
-    async def _clear_startup(_event):
-        async def _delayed_clear():
-            await asyncio.sleep(5)
-            hass.data[DOMAIN]['startup_pending'] = False
-
-        hass.async_create_task(_delayed_clear())
-
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _clear_startup)
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)

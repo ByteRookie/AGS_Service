@@ -661,11 +661,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
-        # Ensure Home Assistant startup delay and an initial sensor update have
-        # completed before running any actions
-        while hass.data['ags_service'].get('startup_pending', False):
-            await asyncio.sleep(0.1)
-
+        # Wait for the initial sensor update to complete before running any actions
         while not hass.data.get('ags_first_update_done'):
             await asyncio.sleep(0.1)
 
@@ -769,7 +765,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 await send_notification(
                     hass,
                     f"AGS {new_status}",
-                    "; ".join(message_parts),
+                    "\n".join(message_parts),
                 )
                 return
 
@@ -791,7 +787,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             await send_notification(
                 hass,
                 f"AGS {new_status}",
-                "; ".join(message_parts),
+                "\n".join(message_parts),
             )
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
