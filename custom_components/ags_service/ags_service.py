@@ -598,7 +598,8 @@ def ags_select_source(ags_config, hass):
 async def fetch_sonos_favorites(hass, entity_id):
     """Return favorites for the given Sonos speaker."""
     try:
-        root = await hass.components.media_player.browse_media(entity_id)
+        from homeassistant.components.media_player import async_browse_media
+        root = await async_browse_media(hass, entity_id)
     except Exception as exc:
         _LOGGER.error("Unable to browse media on %s: %s", entity_id, exc)
         return []

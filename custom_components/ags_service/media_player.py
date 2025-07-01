@@ -425,10 +425,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Delegate media browsing to the primary speaker."""
         if not self.primary_speaker_entity_id:
             return None
-        return await self.hass.components.media_player.browse_media(
+        try:
+            from homeassistant.components.media_player import async_browse_media
+        except Exception as exc:
+            _LOGGER.error("Failed importing async_browse_media: %s", exc)
+            return None
+        return await async_browse_media(
+            self.hass,
             self.primary_speaker_entity_id,
-            media_content_id,
-            media_content_type,
+            media_content_type=media_content_type,
+            media_content_id=media_content_id,
         )
            
 
