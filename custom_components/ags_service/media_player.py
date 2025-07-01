@@ -361,6 +361,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Forward the play_media request to the primary speaker."""
+        name = self._get_source_name_from_media(media_type, media_id)
+        if name:
+            self.hass.data['ags_media_player_source'] = name
         self._schedule_media_call(
             'play_media',
             {
@@ -428,6 +431,21 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if source_dict["Source"] == source_name:
                 return source_dict["Source_Value"]
         return None  # if not found
+
+    def _get_source_name_from_media(self, media_type, media_id):
+        """Return the configured source name that matches the media."""
+        if media_id is None:
+            return None
+        id_str = str(media_id)
+        id_plain = id_str[3:] if id_str.startswith("FV:") else id_str
+        for src in self.hass.data['ags_service'].get('Sources', []):
+            if src.get('media_content_type') != media_type:
+                continue
+            val = str(src.get('Source_Value'))
+            val_plain = val[3:] if val.startswith("FV:") else val
+            if id_plain == val_plain:
+                return src.get('Source')
+        return None
 
     def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
