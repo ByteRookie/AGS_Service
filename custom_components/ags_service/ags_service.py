@@ -10,6 +10,16 @@ AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
 ags_select_source_running = False
 
+
+def _handle_status_transition(prev_status, new_status, hass):
+    """Store and restore the AGS source when toggling TV mode."""
+    if new_status == "ON TV" and prev_status != "ON TV":
+        hass.data["ags_source_before_tv"] = hass.data.get("ags_media_player_source")
+    elif new_status == "ON" and prev_status == "ON TV":
+        prev_source = hass.data.pop("ags_source_before_tv", None)
+        if prev_source is not None:
+            hass.data["ags_media_player_source"] = prev_source
+
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
@@ -94,6 +104,7 @@ def get_active_rooms(rooms, hass):
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
     active_rooms = hass.data.get('active_rooms', [])
+    prev_status = hass.data.get('ags_status')
     default_source_name = None
     sources_list = hass.data['ags_service']['Sources'] 
     for src in sources_list:
@@ -109,6 +120,7 @@ def update_ags_status(ags_config, hass):
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
     if not ags_config.get('disable_zone', False)  and hass.states.get('zone.home').state == '0':
         ags_status = "OFF"
+        _handle_status_transition(prev_status, ags_status, hass)
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -123,6 +135,7 @@ def update_ags_status(ags_config, hass):
         device_state = device_states.get(device['device_id'])
         if device_state and 'override_content' in device and device['override_content'] in device_state.attributes.get('media_content_id', ''):
             ags_status = "Override"
+            _handle_status_transition(prev_status, ags_status, hass)
             hass.data['ags_status'] = ags_status
             return ags_status
 
@@ -179,6 +192,7 @@ def update_ags_status(ags_config, hass):
         else:
             if not schedule_on:
                 ags_status = "OFF"
+                _handle_status_transition(prev_status, ags_status, hass)
                 hass.data['ags_status'] = ags_status
                 hass.data['schedule_prev_state'] = schedule_on
                 hass.data['schedule_state'] = schedule_on
@@ -189,6 +203,7 @@ def update_ags_status(ags_config, hass):
 
     if not media_system_state:
         ags_status = "OFF"
+        _handle_status_transition(prev_status, ags_status, hass)
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -200,10 +215,12 @@ def update_ags_status(ags_config, hass):
                 device_state = device_states.get(device['device_id'])
                 if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
                     ags_status = "ON TV"
+                    _handle_status_transition(prev_status, ags_status, hass)
                     hass.data['ags_status'] = ags_status
                     return ags_status
 
     ags_status = "ON"
+    _handle_status_transition(prev_status, ags_status, hass)
     hass.data['ags_status'] = ags_status
     return ags_status
 
