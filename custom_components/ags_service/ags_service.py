@@ -594,9 +594,15 @@ async def speaker_status_check(hass) -> dict:
         if state is None or state.state == "unavailable":
             return result
 
-        group_members = state.attributes.get("group_members") or []
+        group_members = state.attributes.get("group_members")
+        if not isinstance(group_members, list):
+            group_members = [] if group_members is None else [group_members]
 
-        missing = [spk for spk in active_speakers if spk not in group_members and spk != primary]
+        group_set = set(group_members)
+        active_set = set(active_speakers)
+        active_set.discard(primary)
+
+        missing = sorted(active_set - group_set)
         if missing:
             result["joined"] = missing
             await enqueue_media_action(
@@ -605,7 +611,7 @@ async def speaker_status_check(hass) -> dict:
                 {"entity_id": primary, "group_members": missing},
             )
 
-        extra = [spk for spk in group_members if spk != primary and spk not in active_speakers]
+        extra = sorted(group_set - active_set - {primary})
         if extra:
             result["unjoined"] = extra
             await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
