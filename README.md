@@ -180,8 +180,9 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 
 ### Auto-fill sources from Sonos
 
-Run the ``ags_service.load_sonos_favorites`` service to automatically append
-Sonos favorites to the ``Sources`` list. Sources defined in the configuration
+On startup the integration automatically loads Sonos favorites into the
+``Sources`` list. You can also run the ``ags_service.load_sonos_favorites``
+service at any time to refresh the list. Sources defined in the configuration
 are kept and any new favorites are added to the end.
 
 ```
@@ -238,8 +239,8 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 # Changelog
 
 ### v1.4.0
-- New service ``load_sonos_favorites`` to populate sources from Sonos
-  favorites.
+- Sources are automatically populated from Sonos favorites at startup.
+- New service ``load_sonos_favorites`` lets you refresh the list on demand.
 - AGS media player now supports the Home Assistant media browser.
 
 ### v1.3.0

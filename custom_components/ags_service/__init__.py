@@ -119,6 +119,10 @@ async def async_setup(hass, config):
 
     hass.services.async_register(DOMAIN, 'load_sonos_favorites', _service_load_favorites)
 
+    # Populate sources list from Sonos favorites on startup
+    from .ags_service import async_update_sources_from_sonos
+    hass.async_create_task(async_update_sources_from_sonos(hass))
+
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
     if create_sensors:
