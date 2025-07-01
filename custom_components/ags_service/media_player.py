@@ -428,16 +428,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if not self.primary_speaker_entity_id:
             return None
         try:
-            from homeassistant.components.media_player import async_browse_media
+            component = self.hass.data.get("media_player")
+            player = component.get_entity(self.primary_speaker_entity_id) if component else None
+            if player and hasattr(player, "async_browse_media"):
+                return await player.async_browse_media(media_content_type, media_content_id)
         except Exception as exc:
-            _LOGGER.error("Failed importing async_browse_media: %s", exc)
-            return None
-        return await async_browse_media(
-            self.hass,
-            self.primary_speaker_entity_id,
-            media_content_type=media_content_type,
-            media_content_id=media_content_id,
-        )
+            _LOGGER.error("Failed to browse media: %s", exc)
+        return None
            
 
     @property
