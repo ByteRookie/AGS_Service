@@ -15,6 +15,9 @@ from .ags_service import (
     update_ags_sensors,
     ags_select_source,
 )
+from . import ags_service as ags
+
+import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +106,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         prev_status: str | None = None,
     ) -> None:
         """Join this room's speaker to the primary group if allowed."""
+        while ags.AGS_SENSOR_RUNNING:
+            await asyncio.sleep(0.05)
         await self.hass.async_add_executor_job(
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
@@ -148,6 +153,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
+        while ags.AGS_SENSOR_RUNNING:
+            await asyncio.sleep(0.05)
         await self.hass.async_add_executor_job(
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
@@ -167,7 +174,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
         if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
-            await enqueue_media_action(self.hass, "delay", {"seconds": 1})
+            await enqueue_media_action(self.hass, "delay", {"seconds": 0.5})
             for member in members:
                 await enqueue_media_action(
                     self.hass,

@@ -564,6 +564,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """Execute speaker actions when AGS status changes."""
     try:
         rooms = ags_config["rooms"]
+        actions_enabled = hass.data.get("switch.ags_actions", True)
+
+        if new_status == "OFF" and not actions_enabled:
+            return
 
         if new_status == "OFF":
             all_speakers = [
@@ -577,7 +581,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             if all_speakers:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
-                await enqueue_media_action(hass, "delay", {"seconds": 2})
+                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
 
             for room in rooms:
                 members = [
