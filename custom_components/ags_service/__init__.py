@@ -117,8 +117,11 @@ async def async_setup(hass, config):
     await ensure_action_queue(hass)
 
     async def _clear_startup(_event):
-        await asyncio.sleep(5)
-        hass.data[DOMAIN]['startup_pending'] = False
+        async def _delayed_clear():
+            await asyncio.sleep(5)
+            hass.data[DOMAIN]['startup_pending'] = False
+
+        hass.async_create_task(_delayed_clear())
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _clear_startup)
 
