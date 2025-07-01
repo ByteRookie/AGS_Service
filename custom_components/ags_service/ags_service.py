@@ -687,10 +687,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         elif new_status in ("ON", "ON TV"):
             results = await speaker_status_check(hass)
 
-            preferred_primary = (
-                hass.data.get("primary_speaker")
-                or hass.data.get("preferred_primary_speaker")
-            )
+            preferred_primary = hass.data.get("primary_speaker")
+            if not preferred_primary or preferred_primary == "none":
+                preferred_primary = hass.data.get("preferred_primary_speaker")
 
             message_parts = [
                 (
@@ -718,7 +717,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 message_parts.append("no extra speakers")
 
             if not preferred_primary or preferred_primary == "none":
-                message_parts.append("skipped source selection - no primary speaker")
+                message_parts.append("skipped source selection - no primary or preferred speaker")
                 await send_notification(
                     hass,
                     f"AGS {new_status}",
