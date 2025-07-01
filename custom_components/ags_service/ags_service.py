@@ -649,8 +649,15 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         # calculation has not finished which leads to skipped source selection.
         # Wait for the sensor update routine to complete before proceeding so
         # we operate on the final values.
+        while AGS_SENSOR_RUNNING:
+            await asyncio.sleep(0.1)
+
         attempts = 0
-        while AGS_SENSOR_RUNNING and attempts < 50:
+        while (
+            hass.data.get("primary_speaker") in (None, "none")
+            and hass.data.get("preferred_primary_speaker") in (None, "none")
+            and attempts < 20
+        ):
             await asyncio.sleep(0.1)
             attempts += 1
 
@@ -672,7 +679,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             if all_speakers:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
-                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
 
             for room in rooms:
                 members = [
