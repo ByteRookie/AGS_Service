@@ -116,20 +116,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
             return
-        if first_room:
-            if prev_status == "ON TV":
-                preferred = self.hass.data.get("preferred_primary_speaker")
-                if preferred and preferred != "none":
-                    await enqueue_media_action(
-                        self.hass,
-                        "select_source",
-                        {"entity_id": preferred, "source": "TV"},
-                    )
-            elif prev_status == "OFF" or not prev_primary or prev_primary == "none":
-                await ags_select_source(
-                    self.hass.data["ags_service"],
-                    self.hass,
-                )
         primary = self.hass.data.get("primary_speaker")
         if not primary or primary == "none":
             primary = self.hass.data.get("preferred_primary_speaker")
@@ -147,6 +133,20 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             "join",
             {"entity_id": primary, "group_members": members},
         )
+        if first_room:
+            if prev_status == "ON TV":
+                preferred = self.hass.data.get("preferred_primary_speaker")
+                if preferred and preferred != "none":
+                    await enqueue_media_action(
+                        self.hass,
+                        "select_source",
+                        {"entity_id": preferred, "source": "TV"},
+                    )
+            elif not prev_primary or prev_primary == "none":
+                await ags_select_source(
+                    self.hass.data["ags_service"],
+                    self.hass,
+                )
         while ags.AGS_SENSOR_RUNNING:
             await asyncio.sleep(0.05)
         await self.hass.async_add_executor_job(
