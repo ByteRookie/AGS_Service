@@ -560,8 +560,22 @@ async def ags_select_source(ags_config, hass):
     return
 
 
-async def speaker_status_check(hass) -> None:
+async def send_notification(hass: HomeAssistant, title: str, message: str) -> None:
+    """Send a persistent notification and swallow errors."""
+    try:
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {"message": message, "title": title},
+            blocking=True,
+        )
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.warning("Failed to send notification: %s", exc)
+
+
+async def speaker_status_check(hass) -> dict:
     """Ensure speaker grouping matches the active speaker list."""
+    result = {"joined": [], "unjoined": []}
     try:
         active_speakers = [
             spk
@@ -574,16 +588,17 @@ async def speaker_status_check(hass) -> None:
             primary = hass.data.get("preferred_primary_speaker")
 
         if not primary or primary == "none":
-            return
+            return result
 
         state = hass.states.get(primary)
         if state is None or state.state == "unavailable":
-            return
+            return result
 
         group_members = state.attributes.get("group_members") or []
 
         missing = [spk for spk in active_speakers if spk not in group_members and spk != primary]
         if missing:
+            result["joined"] = missing
             await enqueue_media_action(
                 hass,
                 "join",
@@ -592,10 +607,13 @@ async def speaker_status_check(hass) -> None:
 
         extra = [spk for spk in group_members if spk != primary and spk not in active_speakers]
         if extra:
+            result["unjoined"] = extra
             await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error in speaker_status_check: %s", exc)
+
+    return result
 
 
 
@@ -648,14 +666,30 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
 
         elif new_status in ("ON", "ON TV"):
-            await speaker_status_check(hass)
+            results = await speaker_status_check(hass)
 
             preferred_primary = (
                 hass.data.get("primary_speaker")
                 or hass.data.get("preferred_primary_speaker")
             )
 
+            message_parts = []
+            if results["joined"]:
+                message_parts.append("joined " + ", ".join(results["joined"]))
+            else:
+                message_parts.append("no missing speakers")
+
+            if results["unjoined"]:
+                message_parts.append("unjoined " + ", ".join(results["unjoined"]))
+            else:
+                message_parts.append("no extra speakers")
+
             if not preferred_primary or preferred_primary == "none":
+                await send_notification(
+                    hass,
+                    f"AGS {new_status}",
+                    "; ".join(message_parts) + "; no primary speaker",
+                )
                 return
 
             if new_status == "ON TV":
@@ -666,8 +700,18 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         "select_source",
                         {"entity_id": preferred_primary, "source": "TV"},
                     )
+                    message_parts.append(f"TV source on {preferred_primary}")
+                else:
+                    message_parts.append(f"primary {preferred_primary} unavailable")
             else:
                 await ags_select_source(ags_config, hass)
+                message_parts.append("selected music source")
+
+            await send_notification(
+                hass,
+                f"AGS {new_status}",
+                "; ".join(message_parts),
+            )
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
 
