@@ -650,6 +650,20 @@ async def speaker_status_check(
     return result
 
 
+def _find_tv_speaker(rooms: list, primary: str | None, preferred: str | None) -> str | None:
+    """Return a speaker from a TV room prioritizing ``primary`` then ``preferred``."""
+    tv_speakers: list[str] = []
+    for room in rooms:
+        if any(d.get("device_type") == "tv" for d in room.get("devices", [])):
+            for d in room["devices"]:
+                if d.get("device_type") == "speaker":
+                    tv_speakers.append(d["device_id"])
+    for candidate in (primary, preferred):
+        if candidate and candidate != "none" and candidate in tv_speakers:
+            return candidate
+    return tv_speakers[0] if tv_speakers else None
+
+
 
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """React to AGS status updates.
@@ -770,16 +784,22 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                state = hass.states.get(primary_to_use)
-                if state is not None and state.state != "unavailable":
+                tv_target = _find_tv_speaker(rooms, primary_val, preferred_val)
+                state = hass.states.get(tv_target) if tv_target else None
+                if state is not None and state.state != "unavailable" and (
+                    "TV" in (state.attributes.get("source_list") or [])
+                ):
                     await enqueue_media_action(
                         hass,
                         "select_source",
-                        {"entity_id": primary_to_use, "source": "TV"},
+                        {"entity_id": tv_target, "source": "TV"},
                     )
-                    message_parts.append(f"TV source on {primary_to_use}")
+                    message_parts.append(f"TV source on {tv_target}")
                 else:
-                    message_parts.append(f"primary {primary_to_use} unavailable")
+                    msg = (
+                        f"{tv_target} cannot select TV" if tv_target else "no TV speaker"
+                    )
+                    message_parts.append(msg)
             else:
                 await ags_select_source(ags_config, hass)
                 message_parts.append("selected music source")
