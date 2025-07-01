@@ -573,18 +573,26 @@ async def send_notification(hass: HomeAssistant, title: str, message: str) -> No
         _LOGGER.warning("Failed to send notification: %s", exc)
 
 
-async def speaker_status_check(hass) -> dict:
+async def speaker_status_check(
+    hass,
+    primary_speaker: str | None = None,
+    preferred_primary: str | None = None,
+) -> dict:
     """Ensure speaker grouping matches the active speaker list.
 
-    Returns a dictionary describing any speakers that were joined or
-    unjoined as well as the currently detected ``group_members`` and
-    ``active_speakers`` lists used for the comparison.
+    ``primary_speaker`` and ``preferred_primary`` can be supplied to use the
+    most recent values captured after the sensors finish updating.  The
+    function returns a dictionary describing any speakers that were joined or
+    unjoined as well as the detected ``group_members`` and ``active_speakers``
+    lists and the values used for ``primary`` and ``preferred_primary``.
     """
     result = {
         "joined": [],
         "unjoined": [],
         "group_members": [],
         "active_speakers": [],
+        "primary": None,
+        "preferred_primary": None,
     }
     try:
         active_speakers = [
@@ -595,14 +603,18 @@ async def speaker_status_check(hass) -> dict:
         ]
         result["active_speakers"] = active_speakers
 
-        primary = hass.data.get("primary_speaker")
-        if not primary or primary == "none":
-            primary = hass.data.get("preferred_primary_speaker")
+        primary = primary_speaker if primary_speaker is not None else hass.data.get("primary_speaker")
+        preferred = preferred_primary if preferred_primary is not None else hass.data.get("preferred_primary_speaker")
 
-        if not primary or primary == "none":
+        result["primary"] = primary
+        result["preferred_primary"] = preferred
+
+        target_primary = primary
+        if not target_primary or target_primary == "none":
+            target_primary = preferred
+        if not target_primary or target_primary == "none":
             return result
-
-        state = hass.states.get(primary)
+        state = hass.states.get(target_primary)
         if state is None or state.state == "unavailable":
             return result
 
@@ -613,7 +625,7 @@ async def speaker_status_check(hass) -> dict:
 
         group_set = set(group_members)
         active_set = set(active_speakers)
-        active_set.discard(primary)
+        active_set.discard(target_primary)
 
         missing = sorted(active_set - group_set)
         if missing:
@@ -621,10 +633,10 @@ async def speaker_status_check(hass) -> dict:
             await enqueue_media_action(
                 hass,
                 "join",
-                {"entity_id": primary, "group_members": missing},
+                {"entity_id": target_primary, "group_members": missing},
             )
 
-        extra = sorted(group_set - active_set - {primary})
+        extra = sorted(group_set - active_set - {target_primary})
         if extra:
             result["unjoined"] = extra
             await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
@@ -640,7 +652,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """React to AGS status updates.
 
     When the status becomes ``ON`` or ``ON TV`` the active speakers are
-    synchronized and the appropriate source is selected for playback.
+    synchronized and the appropriate source is selected for playback.  The
+    latest ``primary_speaker`` and ``preferred_primary_speaker`` values are
+    captured after any sensor updates complete so the grouping check operates on
+    up‑to‑date information.
     """
     try:
         # The status change can be triggered while the sensors are still
@@ -702,13 +717,18 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
 
         elif new_status in ("ON", "ON TV"):
-            results = await speaker_status_check(hass)
+            primary_val = hass.data.get("primary_speaker")
+            preferred_val = hass.data.get("preferred_primary_speaker")
 
-            preferred_primary = hass.data.get("primary_speaker")
-            if not preferred_primary or preferred_primary == "none":
-                preferred_primary = hass.data.get("preferred_primary_speaker")
+            results = await speaker_status_check(
+                hass, primary_speaker=primary_val, preferred_primary=preferred_val
+            )
+
+            primary_to_use = primary_val if primary_val not in (None, "none") else preferred_val
 
             message_parts = [
+                f"primary: {primary_val or 'none'}",
+                f"preferred primary: {preferred_val or 'none'}",
                 (
                     "group members: "
                     + ", ".join(results["group_members"])
@@ -733,7 +753,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             else:
                 message_parts.append("no extra speakers")
 
-            if not preferred_primary or preferred_primary == "none":
+            if not primary_to_use or primary_to_use == "none":
                 message_parts.append("skipped source selection - no primary or preferred speaker")
                 await send_notification(
                     hass,
@@ -743,16 +763,16 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                state = hass.states.get(preferred_primary)
+                state = hass.states.get(primary_to_use)
                 if state is not None and state.state != "unavailable":
                     await enqueue_media_action(
                         hass,
                         "select_source",
-                        {"entity_id": preferred_primary, "source": "TV"},
+                        {"entity_id": primary_to_use, "source": "TV"},
                     )
-                    message_parts.append(f"TV source on {preferred_primary}")
+                    message_parts.append(f"TV source on {primary_to_use}")
                 else:
-                    message_parts.append(f"primary {preferred_primary} unavailable")
+                    message_parts.append(f"primary {primary_to_use} unavailable")
             else:
                 await ags_select_source(ags_config, hass)
                 message_parts.append("selected music source")
