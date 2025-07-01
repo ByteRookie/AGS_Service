@@ -643,6 +643,17 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     synchronized and the appropriate source is selected for playback.
     """
     try:
+        # The status change can be triggered while the sensors are still
+        # updating.  When that happens ``primary_speaker`` or
+        # ``preferred_primary_speaker`` may still be ``"none"`` because the
+        # calculation has not finished which leads to skipped source selection.
+        # Wait for the sensor update routine to complete before proceeding so
+        # we operate on the final values.
+        attempts = 0
+        while AGS_SENSOR_RUNNING and attempts < 50:
+            await asyncio.sleep(0.1)
+            attempts += 1
+
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)
 
