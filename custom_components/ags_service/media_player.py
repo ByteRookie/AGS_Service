@@ -335,6 +335,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
             | MPFeature.BROWSE_MEDIA
+            | MPFeature.PLAY_MEDIA
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -356,6 +357,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Forward the play_media request to the primary speaker."""
+        self._schedule_media_call(
+            'play_media',
+            {
+                'entity_id': self.primary_speaker_entity_id,
+                'media_content_id': media_id,
+                'media_content_type': media_type,
+            },
+        )
         self._schedule_ags_update()
 
     def media_next_track(self):
@@ -509,6 +522,7 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
             | MPFeature.TURN_OFF
             | MPFeature.VOLUME_SET
             | MPFeature.BROWSE_MEDIA
+            | MPFeature.PLAY_MEDIA
         )
 
     @property
@@ -562,6 +576,9 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     def media_pause(self):
         """Pause the media."""
         self._primary_player.media_pause()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        await self._primary_player.async_play_media(media_type, media_id, **kwargs)
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         return await self._primary_player.async_browse_media(media_content_type, media_content_id)
