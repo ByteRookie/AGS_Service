@@ -64,9 +64,9 @@ def update_ags_sensors(ags_config, hass):
         get_active_rooms(rooms, hass)
         prev_status = hass.data.get('ags_status')
         update_ags_status(ags_config, hass)
+        update_speaker_states(rooms, hass)
         get_preferred_primary_speaker(rooms, hass)
         determine_primary_speaker(ags_config, hass)
-        update_speaker_states(rooms, hass)
         get_inactive_tv_speakers(rooms, hass)
         new_status = hass.data.get('ags_status')
         if new_status != prev_status:
