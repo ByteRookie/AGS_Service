@@ -98,6 +98,9 @@ def update_ags_sensors(ags_config, hass):
             except Exception as exc:
                 _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
 
+        if not hass.data.get('ags_first_update_done'):
+            hass.data['ags_first_update_done'] = True
+
 ## Get Configured Rooms ##
 def get_configured_rooms(rooms, hass):
     """Get the list of configured rooms and store it in hass.data."""
@@ -658,6 +661,14 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
+        # Ensure Home Assistant startup delay and an initial sensor update have
+        # completed before running any actions
+        while hass.data['ags_service'].get('startup_pending', False):
+            await asyncio.sleep(0.1)
+
+        while not hass.data.get('ags_first_update_done'):
+            await asyncio.sleep(0.1)
+
         # The status change can be triggered while the sensors are still
         # updating.  When that happens ``primary_speaker`` or
         # ``preferred_primary_speaker`` may still be ``"none"`` because the
