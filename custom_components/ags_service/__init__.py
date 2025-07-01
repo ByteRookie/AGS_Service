@@ -100,18 +100,19 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'], 
+        'Sources': ags_config['Sources'],
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
-   }
+        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+    }
 
     # Initialize shared media action queue
     await ensure_action_queue(hass)
+
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
