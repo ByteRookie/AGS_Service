@@ -574,14 +574,26 @@ async def send_notification(hass: HomeAssistant, title: str, message: str) -> No
 
 
 async def speaker_status_check(hass) -> dict:
-    """Ensure speaker grouping matches the active speaker list."""
-    result = {"joined": [], "unjoined": []}
+    """Ensure speaker grouping matches the active speaker list.
+
+    Returns a dictionary describing any speakers that were joined or
+    unjoined as well as the currently detected ``group_members`` and
+    ``active_speakers`` lists used for the comparison.
+    """
+    result = {
+        "joined": [],
+        "unjoined": [],
+        "group_members": [],
+        "active_speakers": [],
+    }
     try:
         active_speakers = [
             spk
             for spk in hass.data.get("active_speakers", [])
-            if (state := hass.states.get(spk)) is not None and state.state != "unavailable"
+            if (state := hass.states.get(spk)) is not None
+            and state.state != "unavailable"
         ]
+        result["active_speakers"] = active_speakers
 
         primary = hass.data.get("primary_speaker")
         if not primary or primary == "none":
@@ -597,6 +609,7 @@ async def speaker_status_check(hass) -> dict:
         group_members = state.attributes.get("group_members")
         if not isinstance(group_members, list):
             group_members = [] if group_members is None else [group_members]
+        result["group_members"] = group_members
 
         group_set = set(group_members)
         active_set = set(active_speakers)
@@ -679,7 +692,21 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 or hass.data.get("preferred_primary_speaker")
             )
 
-            message_parts = []
+            message_parts = [
+                (
+                    "group members: "
+                    + ", ".join(results["group_members"])
+                    if results["group_members"]
+                    else "group members: none"
+                ),
+                (
+                    "active speakers: "
+                    + ", ".join(results["active_speakers"])
+                    if results["active_speakers"]
+                    else "active speakers: none"
+                ),
+            ]
+
             if results["joined"]:
                 message_parts.append("joined " + ", ".join(results["joined"]))
             else:
@@ -691,10 +718,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 message_parts.append("no extra speakers")
 
             if not preferred_primary or preferred_primary == "none":
+                message_parts.append("skipped source selection - no primary speaker")
                 await send_notification(
                     hass,
                     f"AGS {new_status}",
-                    "; ".join(message_parts) + "; no primary speaker",
+                    "; ".join(message_parts),
                 )
                 return
 
