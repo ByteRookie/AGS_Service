@@ -332,6 +332,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MPFeature.VOLUME_SET
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
+            | MPFeature.BROWSE_MEDIA
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -419,6 +420,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Delegate media browsing to the primary speaker."""
+        if not self.primary_speaker_entity_id:
+            return None
+        return await self.hass.components.media_player.browse_media(
+            self.primary_speaker_entity_id,
+            media_content_id,
+            media_content_type,
+        )
            
 
     @property
@@ -492,6 +503,7 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
             | MPFeature.VOLUME_SET
+            | MPFeature.BROWSE_MEDIA
         )
 
     @property
@@ -545,6 +557,9 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     def media_pause(self):
         """Pause the media."""
         self._primary_player.media_pause()
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        return await self._primary_player.async_browse_media(media_content_type, media_content_id)
 
     @property
     def device_class(self):

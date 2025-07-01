@@ -595,4 +595,76 @@ def ags_select_source(ags_config, hass):
         ags_select_source_running = False
 
 
+async def fetch_sonos_favorites(hass, entity_id):
+    """Return favorites for the given Sonos speaker."""
+    try:
+        root = await hass.components.media_player.browse_media(entity_id)
+    except Exception as exc:
+        _LOGGER.error("Unable to browse media on %s: %s", entity_id, exc)
+        return []
+
+    def get_val(obj, name):
+        if hasattr(obj, name):
+            return getattr(obj, name)
+        if isinstance(obj, dict):
+            return obj.get(name)
+        return None
+
+    favorites_dir = None
+    for child in get_val(root, "children") or []:
+        if get_val(child, "title") == "Favorites":
+            favorites_dir = child
+            break
+
+    if not favorites_dir:
+        return []
+
+    favorites = []
+
+    def walk(item):
+        for child in get_val(item, "children") or []:
+            if get_val(child, "children"):
+                walk(child)
+            else:
+                favorites.append(
+                    {
+                        "Source": get_val(child, "title"),
+                        "Source_Value": get_val(child, "media_content_id"),
+                        "media_content_type": get_val(child, "media_content_type"),
+                    }
+                )
+
+    walk(favorites_dir)
+    return favorites
+
+
+async def async_update_sources_from_sonos(hass, entity_id=None):
+    """Fetch favorites from Sonos and merge into the configured source list."""
+    if not entity_id:
+        for room in hass.data["ags_service"]["rooms"]:
+            for device in room["devices"]:
+                if device["device_type"] == "speaker":
+                    entity_id = device["device_id"]
+                    break
+            if entity_id:
+                break
+
+    if not entity_id:
+        _LOGGER.error("No speaker found to fetch favorites")
+        return
+
+    favorites = await fetch_sonos_favorites(hass, entity_id)
+    if not favorites:
+        return
+
+    sources = hass.data["ags_service"].get("Sources", [])
+    existing = {src["Source"] for src in sources}
+    for fav in favorites:
+        if fav["Source"] not in existing:
+            fav.setdefault("media_content_type", "favorite_item_id")
+            sources.append(fav)
+    hass.data["ags_service"]["Sources"] = sources
+
+
+
 
