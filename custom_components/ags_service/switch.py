@@ -73,14 +73,12 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         rooms = self.hass.data["ags_service"]["rooms"]
         prev_active = get_active_rooms(rooms, self.hass)
         prev_primary = self.hass.data.get("primary_speaker")
-        prev_status = self.hass.data.get("ags_status")
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
         await self._maybe_join(
             first_room=len(prev_active) == 0,
             prev_primary=prev_primary,
-            prev_status=prev_status,
         )
 
     async def async_turn_off(self, **kwargs):
@@ -103,7 +101,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         *,
         first_room: bool = False,
         prev_primary: str | None = None,
-        prev_status: str | None = None,
     ) -> None:
         """Join this room's speaker to the primary group if allowed."""
         while ags.AGS_SENSOR_RUNNING:
@@ -111,7 +108,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         await self.hass.async_add_executor_job(
             update_ags_sensors, self.hass.data["ags_service"], self.hass
         )
-        if self.hass.data.get("ags_status") == "OFF":
+        current_status = self.hass.data.get("ags_status")
+        if current_status == "OFF":
             return
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
@@ -134,7 +132,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             {"entity_id": primary, "group_members": members},
         )
         if first_room:
-            if prev_status == "ON TV":
+            if current_status == "ON TV":
                 preferred = self.hass.data.get("preferred_primary_speaker")
                 if preferred and preferred != "none":
                     await enqueue_media_action(
