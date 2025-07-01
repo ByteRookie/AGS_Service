@@ -600,7 +600,11 @@ async def speaker_status_check(hass) -> None:
 
 
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
-    """Execute speaker actions when AGS status changes."""
+    """React to AGS status updates.
+
+    When the status becomes ``ON`` or ``ON TV`` the active speakers are
+    synchronized and the appropriate source is selected for playback.
+    """
     try:
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)
