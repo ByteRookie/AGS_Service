@@ -104,7 +104,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         prev_primary: str | None = None,
     ) -> None:
         """Join this room's speaker to the primary group if allowed."""
-        await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
         current_status = self.hass.data.get("ags_status")
         if current_status == "OFF":
@@ -143,11 +142,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     self.hass.data["ags_service"],
                     self.hass,
                 )
+        await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
-        await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
@@ -179,6 +178,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
+        await wait_for_actions(self.hass)
 
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
