@@ -160,7 +160,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
         if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
-            await enqueue_media_action(self.hass, "delay", {"seconds": 0.1})
+            await enqueue_media_action(
+                self.hass,
+                "wait_ungrouped",
+                {"entity_id": members, "timeout": 3},
+            )
             for member in members:
                 await enqueue_media_action(
                     self.hass,

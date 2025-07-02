@@ -19,6 +19,12 @@ async def _action_worker(hass: HomeAssistant) -> None:
         try:
             if service == "delay":
                 await asyncio.sleep(data.get("seconds", 1))
+            elif service == "wait_ungrouped":
+                await _wait_until_ungrouped(
+                    hass,
+                    data.get("entity_id"),
+                    data.get("timeout", 3),
+                )
             else:
                 await hass.services.async_call("media_player", service, data)
         except Exception as exc:  # pragma: no cover - safety net
@@ -38,6 +44,31 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
     """Add a media_player service call to the action queue."""
     await ensure_action_queue(hass)
     await _ACTION_QUEUE.put((service, data))
+
+
+async def _wait_until_ungrouped(
+    hass: HomeAssistant, entity_ids: list[str] | str, timeout: float = 3.0
+) -> None:
+    """Pause until the given speakers report no grouping."""
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
+
+    end = hass.loop.time() + timeout
+    while hass.loop.time() < end:
+        all_clear = True
+        for ent in entity_ids:
+            state = hass.states.get(ent)
+            if state is None:
+                continue
+            members = state.attributes.get("group_members")
+            if not isinstance(members, list):
+                members = [] if members is None else [members]
+            if members not in ([], [ent]):
+                all_clear = False
+                break
+        if all_clear:
+            return
+        await asyncio.sleep(0.1)
 
 ### Sensor Functions ###
 
@@ -692,12 +723,14 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             ]
 
             if all_speakers:
-                await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
-                # Give the speakers a moment to process the unjoin before
-                # selecting the TV source. Without this delay the subsequent
-                # call can fail with ``Invalid Args`` because the device still
-                # thinks it belongs to a group.
-                await enqueue_media_action(hass, "delay", {"seconds": 0.1})
+                await enqueue_media_action(
+                    hass, "unjoin", {"entity_id": all_speakers}
+                )
+                await enqueue_media_action(
+                    hass,
+                    "wait_ungrouped",
+                    {"entity_id": all_speakers, "timeout": 3},
+                )
 
             for room in rooms:
                 members = [
