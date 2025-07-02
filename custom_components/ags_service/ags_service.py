@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 AGS_LOGIC_RUNNING = False
+_POST_QUEUE_TASK: asyncio.Task | None = None
 
 _ACTION_QUEUE: asyncio.Queue | None = None
 _ACTION_WORKER: asyncio.Task | None = None
@@ -30,6 +31,10 @@ async def _action_worker(hass: HomeAssistant) -> None:
         except Exception as exc:  # pragma: no cover - safety net
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
+        if _ACTION_QUEUE.empty():
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(_trigger_queue_empty_service(hass))
+            )
 
 
 async def ensure_action_queue(hass: HomeAssistant) -> None:
@@ -744,6 +749,125 @@ async def speaker_status_check(
         _LOGGER.warning("Error in speaker_status_check: %s", exc)
 
     return result
+
+
+async def _select_music_source(hass: HomeAssistant, entity_id: str) -> bool:
+    """Play the configured AGS music source on ``entity_id``."""
+    actions_enabled = hass.data.get("switch.ags_actions", True)
+    if not actions_enabled:
+        return False
+    source = hass.data.get("ags_media_player_source")
+    if source is None:
+        sources_list = hass.data["ags_service"]["Sources"]
+        source = next(
+            (src["Source"] for src in sources_list if src.get("source_default") is True),
+            None,
+        )
+        if source is None and sources_list:
+            source = sources_list[0]["Source"]
+        if source is not None:
+            hass.data["ags_media_player_source"] = source
+
+    state = hass.states.get(entity_id)
+    if state is None or state.state == "unavailable":
+        return False
+
+    sources_list = hass.data["ags_service"]["Sources"]
+    source_dict = {
+        src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")}
+        for src in sources_list
+    }
+
+    if source == "TV":
+        await enqueue_media_action(
+            hass, "select_source", {"entity_id": entity_id, "source": "TV"}
+        )
+        return True
+
+    source_info = source_dict.get(source)
+    if not source_info:
+        return False
+
+    if state.state == "playing" and state.attributes.get("source") != "TV":
+        return False
+
+    media_id = source_info["value"]
+    media_type = source_info["type"]
+    if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
+        media_id = f"FV:{media_id}"
+
+    await enqueue_media_action(
+        hass,
+        "play_media",
+        {
+            "entity_id": entity_id,
+            "media_content_id": media_id,
+            "media_content_type": media_type,
+        },
+    )
+    return True
+
+
+async def _queue_empty_step(hass: HomeAssistant) -> bool:
+    """Run one iteration of the post-queue synchronization service."""
+    await update_ags_sensors(hass.data["ags_service"], hass)
+
+    results = await speaker_status_check(hass)
+    changed = bool(results["joined"] or results["unjoined"])
+
+    await wait_for_actions(hass)
+
+    status = hass.data.get("ags_status")
+    primary = hass.data.get("primary_speaker")
+    preferred = hass.data.get("preferred_primary_speaker")
+    members = results.get("group_members", [])
+    first = members[0] if members else None
+    state = hass.states.get(first) if first else None
+    playing = state is not None and state.state == "playing"
+    source = state.attributes.get("source") if state else None
+
+    if status == "ON" and first:
+        if (not primary or primary == "none") or (not playing) or source == "TV":
+            if await _select_music_source(hass, first):
+                changed = True
+
+    elif status == "ON TV" and first:
+        if (not primary or primary == "none") or not (playing and source == "TV"):
+            target = first
+            if preferred and preferred != "none" and preferred != first:
+                await enqueue_media_action(
+                    hass, "join", {"entity_id": preferred, "group_members": members}
+                )
+                await wait_for_actions(hass)
+                target = preferred
+                changed = True
+            await enqueue_media_action(
+                hass, "select_source", {"entity_id": target, "source": "TV"}
+            )
+            changed = True
+
+    if changed:
+        await wait_for_actions(hass)
+        await update_ags_sensors(hass.data["ags_service"], hass)
+
+    return changed
+
+
+async def _queue_empty_runner(hass: HomeAssistant) -> None:
+    """Repeatedly run ``_queue_empty_step`` until no changes occur."""
+    global _POST_QUEUE_TASK
+    try:
+        while await _queue_empty_step(hass):
+            await asyncio.sleep(5)
+    finally:
+        _POST_QUEUE_TASK = None
+
+
+async def _trigger_queue_empty_service(hass: HomeAssistant) -> None:
+    """Start the post-queue service if not already running."""
+    global _POST_QUEUE_TASK
+    if _POST_QUEUE_TASK is None:
+        _POST_QUEUE_TASK = hass.loop.create_task(_queue_empty_runner(hass))
 
 
 def _find_tv_speaker(rooms: list, primary: str | None, preferred: str | None) -> str | None:
