@@ -178,6 +178,25 @@ ags_service:
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
+### Auto-fill sources from Sonos
+
+On startup the integration automatically loads Sonos favorites into the
+``Sources`` list—no extra configuration is needed. You can run the
+``ags_service.load_sonos_favorites`` service at any time to refresh the list.
+Any sources defined in ``configuration.yaml`` remain intact and any new
+favorites are appended to the end.
+
+```
+service: ags_service.load_sonos_favorites
+data:
+  entity_id: media_player.living_room  # optional
+```
+
+If no ``entity_id`` is provided the highest priority speaker is used.
+
+Whenever you select an item from the media browser or the player's source list,
+the ``AGS Service Source`` sensor updates to reflect the chosen favorite.
+
 
 ## Automation
 
@@ -222,6 +241,17 @@ Each sensor uses specific logic to report the state of the system:
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.4.2
+- Sonos favorites now load from the highest priority speaker when no ``entity_id`` is provided.
+
+### v1.4.1
+- ``AGS Service Source`` updates when you play a favorite via the media browser.
+
+### v1.4.0
+- Sources are automatically populated from Sonos favorites at startup.
+- New service ``load_sonos_favorites`` lets you refresh the list on demand.
+- AGS media player now supports the Home Assistant media browser.
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on

@@ -122,6 +122,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
+        if not self.primary_speaker or self.primary_speaker == "none":
+            self.primary_speaker = self.preferred_primary_speaker
         # Determine the currently selected source. Historically the attribute
         # ``ags_source`` was expected to expose the numeric Sonos favorite ID so
         # that automations could directly feed it to ``media_player.play_media``.
@@ -157,7 +159,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         found_room = False
         for room in self.ags_config['rooms']:
             for device in room["devices"]:
-                if device["device_id"] == self.hass.data.get('primary_speaker'):
+                if device["device_id"] == self.primary_speaker:
                     self.primary_speaker_room = room["room"]
                     found_room = True
                     break
@@ -332,6 +334,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MPFeature.VOLUME_SET
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
+            | MPFeature.BROWSE_MEDIA
+            | MPFeature.PLAY_MEDIA
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -353,6 +357,21 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_ags_update()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Forward the play_media request to the primary speaker."""
+        name = self._get_source_name_from_media(media_type, media_id)
+        if name:
+            self.hass.data['ags_media_player_source'] = name
+        self._schedule_media_call(
+            'play_media',
+            {
+                'entity_id': self.primary_speaker_entity_id,
+                'media_content_id': media_id,
+                'media_content_type': media_type,
+            },
+        )
         self._schedule_ags_update()
 
     def media_next_track(self):
@@ -413,12 +432,40 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 return source_dict["Source_Value"]
         return None  # if not found
 
+    def _get_source_name_from_media(self, media_type, media_id):
+        """Return the configured source name that matches the media."""
+        if media_id is None:
+            return None
+        id_str = str(media_id)
+        id_plain = id_str[3:] if id_str.startswith("FV:") else id_str
+        for src in self.hass.data['ags_service'].get('Sources', []):
+            if src.get('media_content_type') != media_type:
+                continue
+            val = str(src.get('Source_Value'))
+            val_plain = val[3:] if val.startswith("FV:") else val
+            if id_plain == val_plain:
+                return src.get('Source')
+        return None
+
     def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
         ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Delegate media browsing to the primary speaker."""
+        if not self.primary_speaker_entity_id:
+            return None
+        try:
+            component = self.hass.data.get("media_player")
+            player = component.get_entity(self.primary_speaker_entity_id) if component else None
+            if player and hasattr(player, "async_browse_media"):
+                return await player.async_browse_media(media_content_type, media_content_id)
+        except Exception as exc:
+            _LOGGER.error("Failed to browse media: %s", exc)
+        return None
            
 
     @property
@@ -492,6 +539,8 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
             | MPFeature.VOLUME_SET
+            | MPFeature.BROWSE_MEDIA
+            | MPFeature.PLAY_MEDIA
         )
 
     @property
@@ -545,6 +594,12 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     def media_pause(self):
         """Pause the media."""
         self._primary_player.media_pause()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        await self._primary_player.async_play_media(media_type, media_id, **kwargs)
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        return await self._primary_player.async_browse_media(media_content_type, media_content_id)
 
     @property
     def device_class(self):

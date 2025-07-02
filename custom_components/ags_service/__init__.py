@@ -101,7 +101,7 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'], 
+        'Sources': ags_config['Sources'],
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
         'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5),  # Delay before retrying speaker detection
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
@@ -111,6 +111,22 @@ async def async_setup(hass, config):
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
    }
+
+    async def _service_load_favorites(call):
+        entity = call.data.get('entity_id')
+        from .ags_service import async_update_sources_from_sonos
+        await async_update_sources_from_sonos(hass, entity)
+
+    hass.services.async_register(DOMAIN, 'load_sonos_favorites', _service_load_favorites)
+
+    # Populate sources list from Sonos favorites on startup
+    from .ags_service import async_update_sources_from_sonos
+    from homeassistant.core import EVENT_HOMEASSISTANT_STARTED
+
+    async def _delayed_load(_: object) -> None:
+        await async_update_sources_from_sonos(hass)
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_load)
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)

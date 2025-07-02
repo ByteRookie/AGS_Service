@@ -300,6 +300,10 @@ def determine_primary_speaker(ags_config, hass):
             lambda: hass.async_create_task(_delayed_check())
         )
 
+        preferred = hass.data.get('preferred_primary_speaker')
+        if preferred and preferred != "none":
+            primary_speaker = preferred
+
     # Store the immediate result
     hass.data['primary_speaker'] = primary_speaker
 
@@ -593,6 +597,95 @@ def ags_select_source(ags_config, hass):
     finally:
         # Reset the flag to indicate that the logic has finished
         ags_select_source_running = False
+
+
+async def fetch_sonos_favorites(hass, entity_id):
+    """Return favorites for the given Sonos speaker."""
+    component = hass.data.get("media_player")
+    player = component.get_entity(entity_id) if component else None
+    if not player or not hasattr(player, "async_browse_media"):
+        _LOGGER.error("Unable to browse media - invalid player %s", entity_id)
+        return []
+
+    try:
+        root = await player.async_browse_media()
+    except Exception as exc:
+        _LOGGER.error("Unable to browse media on %s: %s", entity_id, exc)
+        return []
+
+    def get_val(obj, name):
+        if hasattr(obj, name):
+            return getattr(obj, name)
+        if isinstance(obj, dict):
+            return obj.get(name)
+        return None
+
+    favorites_dir = None
+    for child in get_val(root, "children") or []:
+        if get_val(child, "title") == "Favorites":
+            favorites_dir = child
+            break
+
+    if not favorites_dir:
+        return []
+
+    favorites = []
+
+    def walk(item):
+        for child in get_val(item, "children") or []:
+            if get_val(child, "children"):
+                walk(child)
+            else:
+                favorites.append(
+                    {
+                        "Source": get_val(child, "title"),
+                        "Source_Value": get_val(child, "media_content_id"),
+                        "media_content_type": get_val(child, "media_content_type"),
+                    }
+                )
+
+    walk(favorites_dir)
+    return favorites
+
+
+async def async_update_sources_from_sonos(hass, entity_id=None):
+    """Fetch favorites from Sonos and merge into the configured source list."""
+    if not entity_id:
+        speakers = [
+            device
+            for room in hass.data["ags_service"]["rooms"]
+            for device in room["devices"]
+            if device["device_type"] == "speaker"
+        ]
+        if speakers:
+            speakers.sort(key=lambda x: x.get("priority", 0))
+            entity_id = speakers[0]["device_id"]
+
+    if not entity_id:
+        _LOGGER.error("No speaker found to fetch favorites")
+        return
+
+    favorites = await fetch_sonos_favorites(hass, entity_id)
+    if not favorites:
+        return
+
+    sources = hass.data["ags_service"].get("Sources", [])
+    existing = {src["Source"] for src in sources}
+    for fav in favorites:
+        if fav["Source"] not in existing:
+            fav.setdefault("media_content_type", "favorite_item_id")
+            sources.append(fav)
+    hass.data["ags_service"]["Sources"] = sources
+
+    # Refresh sensors and media players so the new sources appear immediately
+    update_ags_sensors(hass.data["ags_service"], hass)
+    component = hass.data.get("media_player")
+    if component:
+        for ent_id in ["media_player.ags_media_player", "media_player.ags_homekit_media_system"]:
+            player = component.get_entity(ent_id)
+            if player:
+                player.async_schedule_update_ha_state(True)
+
 
 
 
