@@ -166,16 +166,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                 {"entity_id": members, "timeout": 3},
             )
             for member in members:
-                state = self.hass.states.get(member)
-                group_members = state.attributes.get("group_members") if state else None
-                if not isinstance(group_members, list):
-                    group_members = [] if group_members is None else [group_members]
-                if group_members == [member]:
-                    await enqueue_media_action(
-                        self.hass,
-                        "select_source",
-                        {"entity_id": member, "source": "TV"},
-                    )
+                await enqueue_media_action(
+                    self.hass,
+                    "select_source",
+                    {"entity_id": member, "source": "TV"},
+                )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)

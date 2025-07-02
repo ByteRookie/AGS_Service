@@ -745,16 +745,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
                 if has_tv and not ags_config.get("disable_Tv_Source"):
                     for member in members:
-                        state = hass.states.get(member)
-                        group_members = state.attributes.get("group_members") if state else None
-                        if not isinstance(group_members, list):
-                            group_members = [] if group_members is None else [group_members]
-                        if group_members == [member]:
-                            await enqueue_media_action(
-                                hass,
-                                "select_source",
-                                {"entity_id": member, "source": "TV"},
-                            )
+                        await enqueue_media_action(
+                            hass,
+                            "select_source",
+                            {"entity_id": member, "source": "TV"},
+                        )
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
 
