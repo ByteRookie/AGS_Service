@@ -5,7 +5,8 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
-from .ags_service import update_ags_sensors, ags_select_source 
+import asyncio
+from .ags_service import update_ags_sensors, ags_select_source
 import logging
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,11 +101,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def _schedule_ags_update(self) -> None:
         """Refresh AGS sensor data without waiting for polling."""
-        def _update() -> None:
-            update_ags_sensors(self.ags_config, self.hass)
+        async def _update() -> None:
+            await update_ags_sensors(self.ags_config, self.hass)
+            self._refresh_from_data()
             self.async_schedule_update_ha_state(True)
 
-        self.hass.loop.call_soon_threadsafe(_update)
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(_update())
+        )
 
 
 
@@ -114,25 +118,21 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Fetch latest state."""
         ### Move logic here for sensor to remove sensor.py ##
 
-        update_ags_sensors(self.ags_config, self._hass)
-       
+        asyncio.run_coroutine_threadsafe(
+            update_ags_sensors(self.ags_config, self._hass), self.hass.loop
+        ).result()
+
+        self._refresh_from_data()
+
+    def _refresh_from_data(self) -> None:
+        """Update cached attributes from ``hass.data`` after sensors refresh."""
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
         self.active_speakers = self.hass.data.get('active_speakers', None)
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
-        # Determine the currently selected source. Historically the attribute
-        # ``ags_source`` was expected to expose the numeric Sonos favorite ID so
-        # that automations could directly feed it to ``media_player.play_media``.
-        # The integration however only stored the human readable source name in
-        # ``ags_media_player_source`` and never populated ``ags_source``.  As a
-        # result the attribute constantly returned ``Not available`` which led to
-        # errors like ``Missing favorite for media_id`` when the automation tried
-        # to use the value.  Compute the source ID from the selected name so the
-        # attribute is always valid. If no source has been picked yet fall back
-        # to the first configured entry so automations still have something
-        # usable.
+
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
             sources = self.hass.data['ags_service']['Sources']
@@ -164,11 +164,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if found_room:
                 break
 
-
         if self.ags_status == "ON TV" and self.primary_speaker_room:
             selected_device_id = None
 
-            # Filter out speaker devices and sort remaining devices by priority
             sorted_devices = sorted(
                 [device for device in room["devices"] if device["device_type"] != "speaker"],
                 key=lambda x: x['priority']
@@ -191,7 +189,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_primary_speaker_changed(self, event):
         """Handle state change events for tracked entities."""
-        self.update()
+        await update_ags_sensors(self.ags_config, self.hass)
+        self._refresh_from_data()
         self.async_schedule_update_ha_state(True)
 
     
