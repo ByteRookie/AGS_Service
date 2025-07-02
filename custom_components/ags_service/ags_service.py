@@ -76,6 +76,54 @@ async def _wait_until_ungrouped(
             return
         await asyncio.sleep(0.1)
 
+
+async def _wait_until_grouped(
+    hass: HomeAssistant,
+    entity_id: str,
+    members: list[str] | str,
+    timeout: float = 3.0,
+) -> None:
+    """Pause until ``entity_id`` shows the expected grouping."""
+    if isinstance(members, str):
+        members = [members]
+    expected = set(members)
+    end = hass.loop.time() + timeout
+    while hass.loop.time() < end:
+        state = hass.states.get(entity_id)
+        if state is not None:
+            group_members = state.attributes.get("group_members")
+            if not isinstance(group_members, list):
+                group_members = [] if group_members is None else [group_members]
+            if (
+                group_members
+                and group_members[0] == entity_id
+                and set(group_members) == expected
+            ):
+                return
+        await asyncio.sleep(0.1)
+
+
+async def ensure_preferred_primary_tv(hass: HomeAssistant) -> str | None:
+    """Make the preferred primary lead the group for TV playback."""
+    preferred = hass.data.get("preferred_primary_speaker")
+    primary = hass.data.get("primary_speaker")
+    if not preferred or preferred == "none":
+        return None
+
+    if primary != preferred:
+        actions_enabled = hass.data.get("switch.ags_actions", True)
+        members = [spk for spk in hass.data.get("active_speakers", []) if spk != preferred]
+        if actions_enabled and members:
+            await enqueue_media_action(
+                hass,
+                "join",
+                {"entity_id": preferred, "group_members": members},
+            )
+            await wait_for_actions(hass)
+            await _wait_until_grouped(hass, preferred, [preferred] + members)
+
+    return preferred
+
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
@@ -824,7 +872,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                tv_target = _find_tv_speaker(rooms, primary_val, preferred_val)
+                tv_target = await ensure_preferred_primary_tv(hass)
                 state = hass.states.get(tv_target) if tv_target else None
                 if state is not None and state.state != "unavailable" and (
                     "TV" in (state.attributes.get("source_list") or [])
