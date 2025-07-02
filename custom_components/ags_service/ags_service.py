@@ -46,6 +46,12 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
     await _ACTION_QUEUE.put((service, data))
 
 
+async def wait_for_actions(hass: HomeAssistant) -> None:
+    """Block until all queued actions have completed."""
+    await ensure_action_queue(hass)
+    await _ACTION_QUEUE.join()
+
+
 async def _wait_until_ungrouped(
     hass: HomeAssistant, entity_ids: list[str] | str, timeout: float = 3.0
 ) -> None:
@@ -763,6 +769,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         )
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
+            await wait_for_actions(hass)
 
         elif new_status in ("ON", "ON TV"):
             primary_val = hass.data.get("primary_speaker")
@@ -832,6 +839,8 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if actions_enabled:
                     await ags_select_source(ags_config, hass)
                     message_parts.append("selected music source")
+
+            await wait_for_actions(hass)
 
             await send_notification(
                 hass,

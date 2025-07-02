@@ -12,6 +12,7 @@ from .ags_service import (
     get_active_rooms,
     ensure_action_queue,
     enqueue_media_action,
+    wait_for_actions,
     update_ags_sensors,
     ags_select_source,
 )
@@ -141,6 +142,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     self.hass.data["ags_service"],
                     self.hass,
                 )
+        await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
     async def _maybe_unjoin(self) -> None:
@@ -176,7 +178,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
-
+        await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):

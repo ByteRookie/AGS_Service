@@ -13,6 +13,7 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * [Configuration](#configuration)
 * [Automation](#automation)
 * [Service Logic](#service-logic)
+* [Action Queue](#action-queue)
 * [Sensor Logic](#sensor-logic)
 * [License](#license)
 * [Changelog](#changelog)
@@ -191,6 +192,10 @@ AGS evaluates several conditions to decide when to play and which speaker should
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
 `execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
+
+## Action Queue
+
+Media actions are executed through a dedicated queue so speakers are joined and unjoined in order.  The new `wait_for_actions` helper blocks until all queued calls have finished.  Room switches and status changes now call this function before refreshing sensors or sending notifications so the system state always reflects the completed actions.
 
 ## Sensor Logic
 
