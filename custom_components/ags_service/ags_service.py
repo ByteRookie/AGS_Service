@@ -601,11 +601,13 @@ def ags_select_source(ags_config, hass):
 
 async def fetch_sonos_favorites(hass, entity_id):
     """Return favorites for the given Sonos speaker."""
+    component = hass.data.get("media_player")
+    player = component.get_entity(entity_id) if component else None
+    if not player or not hasattr(player, "async_browse_media"):
+        _LOGGER.error("Unable to browse media - invalid player %s", entity_id)
+        return []
+
     try:
-        component = hass.data.get("media_player")
-        player = component.get_entity(entity_id) if component else None
-        if not player or not hasattr(player, "async_browse_media"):
-            raise ValueError("Invalid player: %s" % entity_id)
         root = await player.async_browse_media()
     except Exception as exc:
         _LOGGER.error("Unable to browse media on %s: %s", entity_id, exc)

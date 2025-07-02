@@ -121,7 +121,12 @@ async def async_setup(hass, config):
 
     # Populate sources list from Sonos favorites on startup
     from .ags_service import async_update_sources_from_sonos
-    hass.async_create_task(async_update_sources_from_sonos(hass))
+    from homeassistant.core import EVENT_HOMEASSISTANT_STARTED
+
+    async def _delayed_load(_: object) -> None:
+        await async_update_sources_from_sonos(hass)
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_load)
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
