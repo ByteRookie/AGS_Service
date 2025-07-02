@@ -132,11 +132,12 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             if current_status == "ON TV":
                 preferred = self.hass.data.get("preferred_primary_speaker")
                 if preferred and preferred != "none":
-                    await enqueue_media_action(
-                        self.hass,
-                        "select_source",
-                        {"entity_id": preferred, "source": "TV"},
-                    )
+                    if ags.speaker_supports_source(self.hass, preferred, "TV"):
+                        await enqueue_media_action(
+                            self.hass,
+                            "select_source",
+                            {"entity_id": preferred, "source": "TV"},
+                        )
             elif not prev_primary or prev_primary == "none":
                 await ags_select_source(
                     self.hass.data["ags_service"],
@@ -168,11 +169,12 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                 {"entity_id": members, "timeout": 3},
             )
             for member in members:
-                await enqueue_media_action(
-                    self.hass,
-                    "select_source",
-                    {"entity_id": member, "source": "TV"},
-                )
+                if ags.speaker_supports_source(self.hass, member, "TV"):
+                    await enqueue_media_action(
+                        self.hass,
+                        "select_source",
+                        {"entity_id": member, "source": "TV"},
+                    )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)

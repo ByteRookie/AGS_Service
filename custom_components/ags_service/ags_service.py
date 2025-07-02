@@ -26,7 +26,9 @@ async def _action_worker(hass: HomeAssistant) -> None:
                     data.get("timeout", 3),
                 )
             else:
-                await hass.services.async_call("media_player", service, data)
+                await hass.services.async_call(
+                    "media_player", service, data, blocking=True
+                )
         except Exception as exc:  # pragma: no cover - safety net
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
@@ -75,6 +77,15 @@ async def _wait_until_ungrouped(
         if all_clear:
             return
         await asyncio.sleep(0.1)
+
+
+def speaker_supports_source(hass: HomeAssistant, entity_id: str, source: str) -> bool:
+    """Return ``True`` if the speaker's ``source_list`` includes ``source``."""
+    state = hass.states.get(entity_id)
+    if state is None or state.state == "unavailable":
+        return False
+    sources = state.attributes.get("source_list") or []
+    return source in sources
 
 ### Sensor Functions ###
 
@@ -762,11 +773,12 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
                 if has_tv and not ags_config.get("disable_Tv_Source"):
                     for member in members:
-                        await enqueue_media_action(
-                            hass,
-                            "select_source",
-                            {"entity_id": member, "source": "TV"},
-                        )
+                        if speaker_supports_source(hass, member, "TV"):
+                            await enqueue_media_action(
+                                hass,
+                                "select_source",
+                                {"entity_id": member, "source": "TV"},
+                            )
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
             await wait_for_actions(hass)
