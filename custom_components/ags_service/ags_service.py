@@ -6,7 +6,6 @@ from homeassistant.core import HomeAssistant
 
 
 _LOGGER = logging.getLogger(__name__)
-AGS_LOGIC_RUNNING = False
 
 _ACTION_QUEUE: asyncio.Queue | None = None
 _ACTION_WORKER: asyncio.Task | None = None
@@ -154,12 +153,9 @@ async def update_ags_sensors(ags_config, hass):
                     )
                 )
             ## Use in Future release ###
-            ### Call and execute the Control System for AGS ####
             #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
-            #   _LOGGER.error("ags source change has been called")
-            #   ags_select_source(ags_config, hass)
-            # if  hass.data.get('active_speakers') != "OFF" and ( hass.data.get('active_speakers') != [] or hass.data.get('inactive_tv_speakers') != [] or hass.data.get('inactive_speakers') != []):
-            #    execute_ags_logic(hass)
+            #    _LOGGER.error("ags source change has been called")
+            #    ags_select_source(ags_config, hass)
         finally:
             sensors = hass.data.get('ags_sensors', [])
             for sensor in sensors:
@@ -489,95 +485,6 @@ def get_inactive_tv_speakers(rooms, hass):
 
 
 
-### Controls from this point ###
-def execute_ags_logic(hass):
-    import logging
-    global AGS_LOGIC_RUNNING
-
-    # If the logic is already running, exit the function
-    if AGS_LOGIC_RUNNING:
-        return
-
-    # Set the flag to indicate that the logic is running
-    AGS_LOGIC_RUNNING = True
-
-    # Fetch data from hass.data
-    actions_enabled = hass.data.get("switch.ags_actions", True)
-    active_speakers = hass.data.get('active_speakers', [])
-    status = hass.data.get('ags_status', "OFF")
-    inactive_speakers = hass.data.get('inactive_speakers', [])
-    primary_speaker = hass.data.get('primary_speaker', "None")
-    inactive_tv_speakers = hass.data.get('ags_inactive_tv_speakers', [])
-    
-    # Logic for join action
-    if active_speakers != [] and status != 'off' and primary_speaker != 'none' and actions_enabled:
-        try:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass,
-                        'join',
-                        {
-                            'entity_id': primary_speaker,
-                            'group_members': active_speakers,
-                        },
-                    )
-                )
-            )
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Logic for remove action
-    if inactive_speakers != [] and actions_enabled:
-        try:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass, 'unjoin', {'entity_id': inactive_speakers}
-                    )
-                )
-            )
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass, 'media_pause', {'entity_id': inactive_speakers}
-                    )
-                )
-            )
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass, 'clear_playlist', {'entity_id': inactive_speakers}
-                    )
-                )
-            )
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Logic for resetting TV speakers
-    if inactive_tv_speakers != [] and actions_enabled:
-        try:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    enqueue_media_action(
-                        hass,
-                        'select_source',
-                        {
-                            'source': 'TV',
-                            'entity_id': inactive_tv_speakers,
-                        },
-                    )
-                )
-            )
-        except Exception as e:
-            # Log the exception for diagnosis
-            _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
-
-    # Reset the flag to indicate that the logic has finished
-    AGS_LOGIC_RUNNING = False
-    return
 
 async def ags_select_source(ags_config, hass):
 
