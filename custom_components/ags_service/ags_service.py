@@ -6,8 +6,6 @@ from homeassistant.core import HomeAssistant
 
 
 _LOGGER = logging.getLogger(__name__)
-# Global flag to indicate whether the update_sensors function is currently running
-AGS_SENSOR_RUNNING = False
 AGS_LOGIC_RUNNING = False
 
 _ACTION_QUEUE: asyncio.Queue | None = None
@@ -44,62 +42,49 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
-def update_ags_sensors(ags_config, hass):
-    # Use the global flag
-    global AGS_SENSOR_RUNNING
+async def update_ags_sensors(ags_config, hass):
+    """Refresh AGS related sensor values."""
     rooms = ags_config['rooms']
-    # If the function is already running, exit immediately to prevent concurrent runs
-    if AGS_SENSOR_RUNNING:
-        return
+    lock = hass.data.setdefault('ags_sensor_lock', asyncio.Lock())
+    event = hass.data.setdefault('ags_first_update_event', asyncio.Event())
 
-    # Set the flag to True to indicate that the update_sensors function has started its execution
-    AGS_SENSOR_RUNNING = True
-    
-    try:
-    
-        # Call and execute the functions to set sensor values for all of AGS
-        # Configured rooms rarely change, only compute once
-        if 'configured_rooms' not in hass.data:
-            get_configured_rooms(rooms, hass)
-        get_active_rooms(rooms, hass)
-        prev_status = hass.data.get('ags_status')
-        update_ags_status(ags_config, hass)
-        update_speaker_states(rooms, hass)
-        get_preferred_primary_speaker(rooms, hass)
-        determine_primary_speaker(ags_config, hass)
-        get_inactive_tv_speakers(rooms, hass)
-        new_status = hass.data.get('ags_status')
-        if new_status != prev_status:
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
+    async with lock:
+        try:
+            # Call and execute the functions to set sensor values for all of AGS
+            # Configured rooms rarely change, only compute once
+            if 'configured_rooms' not in hass.data:
+                get_configured_rooms(rooms, hass)
+            get_active_rooms(rooms, hass)
+            prev_status = hass.data.get('ags_status')
+            update_ags_status(ags_config, hass)
+            update_speaker_states(rooms, hass)
+            get_preferred_primary_speaker(rooms, hass)
+            determine_primary_speaker(ags_config, hass)
+            get_inactive_tv_speakers(rooms, hass)
+            new_status = hass.data.get('ags_status')
+            if new_status != prev_status:
+                hass.async_create_task(
                     handle_ags_status_change(
                         hass, ags_config, new_status, prev_status
                     )
                 )
-            )
-        ## Use in Future release ###
-        ### Call and execute the Control System for AGS #### 
-        #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
-         #   _LOGGER.error("ags source change has been called")
-          #  ags_select_source(ags_config, hass)    
-       # if  hass.data.get('active_speakers') != "OFF" and ( hass.data.get('active_speakers') != [] or hass.data.get('inactive_tv_speakers') != [] or hass.data.get('inactive_speakers') != []):
-        #    execute_ags_logic(hass)
+            ## Use in Future release ###
+            ### Call and execute the Control System for AGS ####
+            #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
+            #   _LOGGER.error("ags source change has been called")
+            #   ags_select_source(ags_config, hass)
+            # if  hass.data.get('active_speakers') != "OFF" and ( hass.data.get('active_speakers') != [] or hass.data.get('inactive_tv_speakers') != [] or hass.data.get('inactive_speakers') != []):
+            #    execute_ags_logic(hass)
+        finally:
+            sensors = hass.data.get('ags_sensors', [])
+            for sensor in sensors:
+                try:
+                    hass.loop.call_soon_threadsafe(sensor.async_schedule_update_ha_state, True)
+                except Exception as exc:
+                    _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
 
-    finally:
-        # Ensure that the AGS_SENSOR_RUNNING flag is reset to False once the function completes,
-        # regardless of whether it completes successfully or due to an error
-        AGS_SENSOR_RUNNING = False
-
-        # Immediately refresh any registered sensors so new values appear without delay
-        sensors = hass.data.get('ags_sensors', [])
-        for sensor in sensors:
-            try:
-                hass.loop.call_soon_threadsafe(sensor.async_schedule_update_ha_state, True)
-            except Exception as exc:
-                _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
-
-        if not hass.data.get('ags_first_update_done'):
-            hass.data['ags_first_update_done'] = True
+            if not event.is_set():
+                event.set()
 
 ## Get Configured Rooms ##
 def get_configured_rooms(rooms, hass):
@@ -675,27 +660,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
-        # Wait for the initial sensor update to complete before running any actions
-        while not hass.data.get('ags_first_update_done'):
-            await asyncio.sleep(0.1)
-
-        # The status change can be triggered while the sensors are still
-        # updating.  When that happens ``primary_speaker`` or
-        # ``preferred_primary_speaker`` may still be ``"none"`` because the
-        # calculation has not finished which leads to skipped source selection.
-        # Wait for the sensor update routine to complete before proceeding so
-        # we operate on the final values.
-        while AGS_SENSOR_RUNNING:
-            await asyncio.sleep(0.1)
-
-        attempts = 0
-        while (
-            hass.data.get("primary_speaker") in (None, "none")
-            and hass.data.get("preferred_primary_speaker") in (None, "none")
-            and attempts < 20
-        ):
-            await asyncio.sleep(0.1)
-            attempts += 1
+        await hass.data["ags_first_update_event"].wait()
+        async with hass.data["ags_sensor_lock"]:
+            pass
 
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)

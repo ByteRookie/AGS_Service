@@ -1,4 +1,5 @@
 """Main module for the AGS Service integration."""
+import asyncio
 import voluptuous as vol
 
 from homeassistant.helpers import config_validation as cv
@@ -112,6 +113,10 @@ async def async_setup(hass, config):
 
     # Initialize shared media action queue
     await ensure_action_queue(hass)
+
+    # Initialize synchronization primitives used for sensor updates
+    hass.data[DOMAIN]["ags_sensor_lock"] = asyncio.Lock()
+    hass.data[DOMAIN]["ags_first_update_event"] = asyncio.Event()
 
 
     # Load the sensor and switch platforms and pass the configuration to them

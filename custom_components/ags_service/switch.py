@@ -103,11 +103,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         prev_primary: str | None = None,
     ) -> None:
         """Join this room's speaker to the primary group if allowed."""
-        while ags.AGS_SENSOR_RUNNING:
-            await asyncio.sleep(0.05)
-        await self.hass.async_add_executor_job(
-            update_ags_sensors, self.hass.data["ags_service"], self.hass
-        )
+        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
         current_status = self.hass.data.get("ags_status")
         if current_status == "OFF":
             return
@@ -145,19 +141,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     self.hass.data["ags_service"],
                     self.hass,
                 )
-        while ags.AGS_SENSOR_RUNNING:
-            await asyncio.sleep(0.05)
-        await self.hass.async_add_executor_job(
-            update_ags_sensors, self.hass.data["ags_service"], self.hass
-        )
+        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
-        while ags.AGS_SENSOR_RUNNING:
-            await asyncio.sleep(0.05)
-        await self.hass.async_add_executor_job(
-            update_ags_sensors, self.hass.data["ags_service"], self.hass
-        )
+        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
         if self.hass.data.get("ags_status") == "OFF":
             return
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
@@ -187,11 +175,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
 
-        while ags.AGS_SENSOR_RUNNING:
-            await asyncio.sleep(0.05)
-        await self.hass.async_add_executor_job(
-            update_ags_sensors, self.hass.data["ags_service"], self.hass
-        )
+        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""

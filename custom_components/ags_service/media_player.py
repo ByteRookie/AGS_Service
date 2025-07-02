@@ -5,7 +5,8 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
-from .ags_service import update_ags_sensors, ags_select_source 
+import asyncio
+from .ags_service import update_ags_sensors, ags_select_source
 import logging
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,11 +101,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def _schedule_ags_update(self) -> None:
         """Refresh AGS sensor data without waiting for polling."""
-        def _update() -> None:
-            update_ags_sensors(self.ags_config, self.hass)
+        async def _update() -> None:
+            await update_ags_sensors(self.ags_config, self.hass)
             self.async_schedule_update_ha_state(True)
 
-        self.hass.loop.call_soon_threadsafe(_update)
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(_update())
+        )
 
 
 
@@ -114,7 +117,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Fetch latest state."""
         ### Move logic here for sensor to remove sensor.py ##
 
-        update_ags_sensors(self.ags_config, self._hass)
+        asyncio.run_coroutine_threadsafe(
+            update_ags_sensors(self.ags_config, self._hass), self.hass.loop
+        ).result()
        
         self.configured_rooms = self.hass.data.get('configured_rooms', None)
         self.active_rooms = self.hass.data.get('active_rooms', None)
