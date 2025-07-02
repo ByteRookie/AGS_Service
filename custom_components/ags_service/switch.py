@@ -15,6 +15,7 @@ from .ags_service import (
     wait_for_actions,
     update_ags_sensors,
     ags_select_source,
+    ensure_preferred_primary_tv,
 )
 from . import ags_service as ags
 
@@ -130,8 +131,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         )
         if first_room:
             if current_status == "ON TV":
-                preferred = self.hass.data.get("preferred_primary_speaker")
-                if preferred and preferred != "none":
+                preferred = await ensure_preferred_primary_tv(self.hass)
+                if preferred:
                     await enqueue_media_action(
                         self.hass,
                         "select_source",
