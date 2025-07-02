@@ -560,7 +560,7 @@ async def ags_select_source(ags_config, hass):
             if source is not None:
                 hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
-        primary_speaker_entity_id = get_control_device_id(ags_config, hass)
+        primary_speaker_entity_id_raw = get_control_device_id(ags_config, hass)
 
 
         if not primary_speaker_entity_id_raw or primary_speaker_entity_id_raw == "none":
