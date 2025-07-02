@@ -45,9 +45,8 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
 async def update_ags_sensors(ags_config, hass):
     """Refresh AGS related sensor values."""
     rooms = ags_config['rooms']
-    data = hass.data.setdefault('ags_service', {})
-    lock = data.setdefault('sensor_lock', asyncio.Lock())
-    event = data.setdefault('first_update_event', asyncio.Event())
+    lock = hass.data['ags_service']['sensor_lock']
+    event = hass.data['ags_service']['update_event']
 
     async with lock:
         try:
@@ -80,9 +79,15 @@ async def update_ags_sensors(ags_config, hass):
             sensors = hass.data.get('ags_sensors', [])
             for sensor in sensors:
                 try:
-                    hass.loop.call_soon_threadsafe(sensor.async_schedule_update_ha_state, True)
+                    hass.loop.call_soon_threadsafe(
+                        sensor.async_schedule_update_ha_state, True
+                    )
                 except Exception as exc:
-                    _LOGGER.debug('Error scheduling update for %s: %s', getattr(sensor, 'entity_id', 'unknown'), exc)
+                    _LOGGER.debug(
+                        'Error scheduling update for %s: %s',
+                        getattr(sensor, 'entity_id', 'unknown'),
+                        exc,
+                    )
 
             if not event.is_set():
                 event.set()
@@ -661,9 +666,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
-        await hass.data['ags_service']['first_update_event'].wait()
-        async with hass.data['ags_service']['sensor_lock']:
-            pass
+        await hass.data['ags_service']['update_event'].wait()
 
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)

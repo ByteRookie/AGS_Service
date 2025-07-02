@@ -116,7 +116,7 @@ async def async_setup(hass, config):
 
     # Initialize synchronization primitives used for sensor updates
     hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
-    hass.data[DOMAIN]["first_update_event"] = asyncio.Event()
+    hass.data[DOMAIN]["update_event"] = asyncio.Event()
 
 
     # Load the sensor and switch platforms and pass the configuration to them
