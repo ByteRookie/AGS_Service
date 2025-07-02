@@ -1,8 +1,10 @@
 """Main module for the AGS Service integration."""
+import asyncio
 import voluptuous as vol
 
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
+from .ags_service import ensure_action_queue
 
 # Define the domain for the integration
 DOMAIN = "ags_service"
@@ -15,7 +17,6 @@ CONF_DEVICE_TYPE = 'device_type'
 CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
 CONF_DISABLE_ZONE = 'disable_zone'
-CONF_PRIMARY_DELAY = 'primary_delay'  
 CONF_HOMEKIT_PLAYER = 'homekit_player'
 CONF_CREATE_SENSORS = 'create_sensors'
 CONF_DEFAULT_ON = 'default_on'
@@ -71,7 +72,6 @@ DEVICE_SCHEMA = vol.Schema({
         ],
     ),
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
-    vol.Optional(CONF_PRIMARY_DELAY, default=5): cv.positive_int,  
     vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
     vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
@@ -101,16 +101,23 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'], 
+        'Sources': ags_config['Sources'],
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'primary_delay': ags_config.get(CONF_PRIMARY_DELAY, 5),  # Delay before retrying speaker detection
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
-   }
+        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+    }
+
+    # Initialize shared media action queue
+    await ensure_action_queue(hass)
+
+    # Initialize synchronization primitives used for sensor updates
+    hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
+    hass.data[DOMAIN]["update_event"] = asyncio.Event()
+
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
