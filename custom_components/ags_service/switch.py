@@ -135,11 +135,19 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                         "select_source",
                         {"entity_id": preferred, "source": "TV"},
                     )
-            elif not prev_primary or prev_primary == "none":
-                await ags_select_source(
-                    self.hass.data["ags_service"],
-                    self.hass,
-                )
+            elif current_status == "ON":
+                start_playback = False
+                if not prev_primary or prev_primary == "none":
+                    start_playback = True
+                else:
+                    state = self.hass.states.get(prev_primary)
+                    if state is None or state.state != "playing" or state.attributes.get("source") == "TV":
+                        start_playback = True
+                if start_playback:
+                    await ags_select_source(
+                        self.hass.data["ags_service"],
+                        self.hass,
+                    )
         await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
