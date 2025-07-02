@@ -115,8 +115,13 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not actions_enabled:
             return
         primary = self.hass.data.get("primary_speaker")
+        preferred = self.hass.data.get("preferred_primary_speaker")
+        if current_status == "ON TV" and preferred and preferred != "none" and preferred != primary:
+            await ags.regroup_with_preferred(self.hass, preferred)
+            self.hass.data["primary_speaker"] = preferred
+            primary = preferred
         if not primary or primary == "none":
-            primary = self.hass.data.get("preferred_primary_speaker")
+            primary = preferred
         if not primary or primary == "none":
             return
         members = [

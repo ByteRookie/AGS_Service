@@ -675,6 +675,26 @@ def _find_tv_speaker(rooms: list, primary: str | None, preferred: str | None) ->
     return tv_speakers[0] if tv_speakers else None
 
 
+async def regroup_with_preferred(hass: HomeAssistant, preferred: str) -> None:
+    """Regroup all active speakers under ``preferred``."""
+    if not preferred or preferred == "none":
+        return
+    actions_enabled = hass.data.get("switch.ags_actions", True)
+    if not actions_enabled:
+        return
+    active_speakers: list[str] = hass.data.get("active_speakers", [])
+    if not active_speakers:
+        return
+    await enqueue_media_action(hass, "unjoin", {"entity_id": active_speakers})
+    remaining_members = [spk for spk in active_speakers if spk != preferred]
+    if remaining_members:
+        await enqueue_media_action(
+            hass,
+            "join",
+            {"entity_id": preferred, "group_members": remaining_members},
+        )
+
+
 
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """React to AGS status updates.
@@ -795,6 +815,14 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
+                if (
+                    preferred_val
+                    and preferred_val != "none"
+                    and preferred_val != primary_val
+                ):
+                    await regroup_with_preferred(hass, preferred_val)
+                    hass.data["primary_speaker"] = preferred_val
+                    primary_val = preferred_val
                 tv_target = _find_tv_speaker(rooms, primary_val, preferred_val)
                 state = hass.states.get(tv_target) if tv_target else None
                 if state is not None and state.state != "unavailable" and (
