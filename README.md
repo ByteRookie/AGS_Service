@@ -222,6 +222,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.3.7
+- Initial status notification waits until a primary speaker is found, retrying after 5 seconds if necessary
+
 ### v1.3.6
 - Restored the TV source reset when a room turns off
 - Delay the source change slightly so the unjoin completes without errors

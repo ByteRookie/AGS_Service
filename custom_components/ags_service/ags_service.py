@@ -772,6 +772,22 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         await wait_for_actions(hass)
         await hass.data['ags_service']['update_event'].wait()
 
+        if (
+            new_status in ("ON", "ON TV")
+            and (
+                not hass.data.get("active_rooms")
+                or hass.data.get("primary_speaker") in (None, "none")
+            )
+        ):
+            hass.helpers.event.async_call_later(
+                hass,
+                5,
+                lambda *_: hass.async_create_task(
+                    handle_ags_status_change(hass, ags_config, new_status, old_status)
+                ),
+            )
+            return
+
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)
 
