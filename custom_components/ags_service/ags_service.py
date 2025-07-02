@@ -686,6 +686,7 @@ async def regroup_with_preferred(hass: HomeAssistant, preferred: str) -> None:
     if not active_speakers:
         return
     await enqueue_media_action(hass, "unjoin", {"entity_id": active_speakers})
+    await enqueue_media_action(hass, "delay", {"seconds": 0.5})
     remaining_members = [spk for spk in active_speakers if spk != preferred]
     if remaining_members:
         await enqueue_media_action(
