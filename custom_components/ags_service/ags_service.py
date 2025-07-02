@@ -656,9 +656,6 @@ async def ags_select_source(ags_config, hass):
     return
 
 
-async def send_notification(hass: HomeAssistant, title: str, message: str) -> None:
-    return
-
 
 async def speaker_status_check(
     hass,
