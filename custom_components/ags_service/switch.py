@@ -104,7 +104,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         first_room: bool = False,
         prev_primary: str | None = None,
     ) -> None:
-        """Join this room's speaker to the primary group if allowed."""
+        """Join all active speakers to the primary group if allowed."""
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
         current_status = self.hass.data.get("ags_status")
         if current_status == "OFF":
@@ -117,11 +117,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             primary = self.hass.data.get("preferred_primary_speaker")
         if not primary or primary == "none":
             return
-        members = [
-            d["device_id"]
-            for d in self.room.get("devices", [])
-            if d.get("device_type") == "speaker"
-        ]
+        active_speakers = self.hass.data.get("active_speakers", [])
+        members = [spk for spk in active_speakers if spk != primary]
         if not members:
             return
         await enqueue_media_action(
