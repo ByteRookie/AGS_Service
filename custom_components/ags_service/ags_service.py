@@ -771,6 +771,12 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             results = await speaker_status_check(
                 hass, primary_speaker=primary_val, preferred_primary=preferred_val
             )
+            if results["unjoined"]:
+                await enqueue_media_action(
+                    hass,
+                    "wait_ungrouped",
+                    {"entity_id": results["unjoined"], "timeout": 3},
+                )
 
             primary_to_use = primary_val if primary_val not in (None, "none") else preferred_val
 

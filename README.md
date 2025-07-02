@@ -192,6 +192,10 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `execute_ags_logic` uses the sensor data to join active speakers, unjoin inactive ones and reset TV speakers back to the TV source when required.
 
+### Action Queue
+
+All media player calls are funneled through a queue so operations happen one at a time. Whenever AGS unjoins a speaker it immediately queues a `wait_ungrouped` action. This pause confirms the speaker has fully left its group before any follow‑up commands, like switching TV inputs, are issued.
+
 ## Sensor Logic
 
 Each sensor uses specific logic to report the state of the system:
