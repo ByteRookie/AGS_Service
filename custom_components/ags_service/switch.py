@@ -119,6 +119,27 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             primary = self.hass.data.get("preferred_primary_speaker")
         if not primary or primary == "none":
             return
+
+        preferred = self.hass.data.get("preferred_primary_speaker")
+        if (
+            current_status == "ON TV"
+            and preferred
+            and preferred != "none"
+            and primary != preferred
+        ):
+            active = self.hass.data.get("active_speakers", [])
+            if active:
+                await enqueue_media_action(self.hass, "unjoin", {"entity_id": active})
+                join_members = [spk for spk in active if spk != preferred]
+                if join_members:
+                    await enqueue_media_action(
+                        self.hass,
+                        "join",
+                        {"entity_id": preferred, "group_members": join_members},
+                    )
+            self.hass.data["primary_speaker"] = preferred
+            primary = preferred
+
         members = [
             d["device_id"]
             for d in self.room.get("devices", [])
@@ -126,6 +147,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         ]
         if not members:
             return
+
         await enqueue_media_action(
             self.hass,
             "join",

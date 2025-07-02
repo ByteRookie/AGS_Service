@@ -756,6 +756,25 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 hass, primary_speaker=primary_val, preferred_primary=preferred_val
             )
 
+            if (
+                new_status == "ON TV"
+                and preferred_val not in (None, "none")
+                and primary_val not in (None, "none")
+                and primary_val != preferred_val
+            ):
+                active = results["active_speakers"]
+                if active:
+                    await enqueue_media_action(hass, "unjoin", {"entity_id": active})
+                    members = [spk for spk in active if spk != preferred_val]
+                    if members:
+                        await enqueue_media_action(
+                            hass,
+                            "join",
+                            {"entity_id": preferred_val, "group_members": members},
+                        )
+                hass.data["primary_speaker"] = preferred_val
+                primary_val = preferred_val
+
             primary_to_use = primary_val if primary_val not in (None, "none") else preferred_val
 
             message_parts = [
