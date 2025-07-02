@@ -435,7 +435,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
-        ags_select_source(self.ags_config, self.hass)
+        actions_enabled = self.hass.data.get("switch.ags_actions", True)
+        if actions_enabled:
+            ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
            
 
