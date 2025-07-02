@@ -46,6 +46,12 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
     await _ACTION_QUEUE.put((service, data))
 
 
+async def wait_for_actions(hass: HomeAssistant) -> None:
+    """Pause until the action queue has been processed."""
+    await ensure_action_queue(hass)
+    await _ACTION_QUEUE.join()
+
+
 async def _wait_until_ungrouped(
     hass: HomeAssistant, entity_ids: list[str] | str, timeout: float = 3.0
 ) -> None:
@@ -715,6 +721,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
+        await wait_for_actions(hass)
         await hass.data['ags_service']['update_event'].wait()
 
         rooms = ags_config["rooms"]

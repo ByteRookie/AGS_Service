@@ -206,6 +206,12 @@ Each sensor uses specific logic to report the state of the system:
 * **AGS Service Source** – numeric media source value for the selected item.
 * **AGS Service Inactive TV Speakers** – speakers attached to TVs that are currently inactive.
 
+## Action Queue
+
+AGS queues all `media_player` service calls to avoid race conditions while grouping speakers.
+All status calculations now wait for queued actions to finish before sensors refresh, ensuring the
+latest group state is used.
+
 ## License
 
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
