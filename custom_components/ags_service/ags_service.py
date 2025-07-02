@@ -251,9 +251,16 @@ def check_primary_speaker_logic(ags_config, hass):
 
     if ags_status == 'Override':
         # Filter devices that also have the override_content in the media_content_id
-        override_devices = [device for room in rooms for device in room['devices']
-                            if 'override_content' in device and 
-                            device['override_content'] in hass.states.get(device['device_id'], {}).attributes.get('media_content_id', '')]
+        override_devices = [
+            device
+            for room in rooms
+            for device in room['devices']
+            if 'override_content' in device
+            and (
+                (state := hass.states.get(device['device_id'])) is not None
+                and device['override_content'] in state.attributes.get('media_content_id', '')
+            )
+        ]
 
         # Sort the list from lowest to highest priority device
         override_devices = sorted(override_devices, key=lambda x: x['priority'])
