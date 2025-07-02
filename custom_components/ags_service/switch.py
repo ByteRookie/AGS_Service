@@ -146,8 +146,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
-        if self.hass.data.get("ags_status") == "OFF":
-            return
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
             return
