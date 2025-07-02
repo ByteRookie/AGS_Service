@@ -179,7 +179,7 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 
 ## Automation
 
-AGS Service handles speaker grouping internally. No extra Home Assistant automations are needed. The old `AGS Automation Example.yaml` file has been removed.
+AGS Service now handles all grouping internally. No Home Assistant automation file is needed.
 
 ## Service Logic
 
@@ -225,23 +225,12 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.3.6
-- Restored the TV source reset when a room turns off
-- Delay the source change slightly so the unjoin completes without errors
-- Final-room shutdown still uses `media_stop`
-
-### v1.3.5
-- Removed the pre-action sensor refresh for join/unjoin
-
-### v1.3.3
-- Ensured playlist clears when the last room turns off
-- Join action now falls back to the preferred primary speaker
-
-### v1.3.2
-- Added optional `AGS Actions` switch when sensors are enabled
-- Room switches now directly join/unjoin speakers
-- Turning the final room off also pauses and clears its playlist
-- Removed the primary speaker retry delay
+### v1.4.0
+- Automation example removed; all grouping logic now lives in the integration
+- Added action queue and `AGS Actions` switch
+- Improved join/unjoin reliability and playlist handling
+- Preserved source around TV mode changes
+- Various bug fixes and performance tweaks
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on
@@ -251,11 +240,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 ### v1.2.7
 - All configuration options now functional
-- Speaker join/leave logic handled in the automation file
 
 ### v1.2.6
 - New options like `homekit_player`, `static_name`, `create_sensors`, `disable_zone`, `default_on`, `disable_Tv_Source` and `primary_delay`
-- Updated automation file and removed obsolete files
 
 ### v1.2.5
 - Began migrating join and reset actions into Python services
@@ -284,7 +271,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.1.0
 - Primary speaker delay option
 - Switches retain state across reboots
-- Added the first automation file
 
 ### v1.0.11
 - Initial public release
