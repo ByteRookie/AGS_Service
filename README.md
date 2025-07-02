@@ -81,6 +81,7 @@ Follow these basic steps to try AGS Service immediately:
 2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
 3. Restart Home Assistant. AGS Service manages speaker groups automatically. Starting with v1.4.0 the old `AGS Automation Example.yaml` file is no longer needed because all automation logic is built into the integration.
 
+
 ## Configuration
 
 Add the integration to `configuration.yaml`.
@@ -188,7 +189,9 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
+
 `handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
+
 
 ### Action Queue
 
@@ -226,7 +229,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Improved join/unjoin reliability and TV source handling
 - Automatic status updates with zone and schedule checks
 - Restricted source selection when speakers are active
-- Internal cleanups and bug fixes
+- Preserved source around TV mode changes
+- Various bug fixes and performance tweaks
+
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on
