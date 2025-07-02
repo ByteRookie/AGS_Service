@@ -53,7 +53,6 @@ The integration consists of several Python modules and support files:
 - `custom_components/ags_service/sensor.py` – defines optional sensor entities.
 - `custom_components/ags_service/switch.py` – defines room switch entities.
 - `custom_components/ags_service/manifest.json` – metadata about the integration.
-- `custom_components/ags_service/AGS Automation Example.yaml` – ready‑to‑use automation example.
 - `custom_components/ags_service/README.md` – this documentation file.
 
 ## Installation
@@ -78,7 +77,7 @@ Follow these basic steps to try AGS Service immediately:
 
 1. Install the integration through HACS using the instructions above.
 2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
-3. Import `AGS Automation Example.yaml` from this repository via **Settings → Automations** and enable it.
+3. Restart Home Assistant. AGS Service manages speaker groups automatically, so no additional automations are required.
 
 ## Configuration
 
@@ -173,19 +172,11 @@ ags_service:
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
 * If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
 
-
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
-
 
 ## Automation
 
-AGS Service requires an automation to keep speaker groups in sync. The repository provides **AGS Automation Example.yaml** which you can import directly.
-
-1. Open **Settings → Automations** and create a new automation.
-2. Choose **Edit in YAML** and paste the contents of `AGS Automation Example.yaml`.
-3. Save, enable the automation and reload your automations.
-
-The automation watches the AGS Media Player sensors and calls join, unjoin and source reset services. Without it the integration will not automatically manage your speakers.
+AGS Service handles speaker grouping internally. No extra Home Assistant automations are needed. The old `AGS Automation Example.yaml` file has been removed.
 
 ## Service Logic
 
