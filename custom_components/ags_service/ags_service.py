@@ -151,10 +151,14 @@ def update_ags_status(ags_config, hass):
         ags_status = "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
-    if not ags_config.get('disable_zone', False) and hass.states.get('zone.home').state == '0':
-        ags_status = "OFF"
-        hass.data['ags_status'] = ags_status
-        return ags_status
+    zone_state = hass.states.get('zone.home')
+    if not ags_config.get('disable_zone', False):
+        if zone_state is None:
+            _LOGGER.warning("zone.home entity not found; skipping zone check")
+        elif zone_state.state == '0':
+            ags_status = "OFF"
+            hass.data['ags_status'] = ags_status
+            return ags_status
 
     # Prepare a dictionary of device states
     device_states = {device['device_id']: hass.states.get(device['device_id']) for room in rooms for device in room['devices']}
