@@ -419,6 +419,7 @@ def execute_ags_logic(hass):
     AGS_LOGIC_RUNNING = True
 
     # Fetch data from hass.data
+    actions_enabled = hass.data.get("switch.ags_actions", True)
     active_speakers = hass.data.get('active_speakers', [])
     status = hass.data.get('ags_status', "OFF")
     inactive_speakers = hass.data.get('inactive_speakers', [])
@@ -426,7 +427,7 @@ def execute_ags_logic(hass):
     inactive_tv_speakers = hass.data.get('ags_inactive_tv_speakers', [])
     
     # Logic for join action
-    if active_speakers != [] and status != 'off' and primary_speaker != 'none':
+    if active_speakers != [] and status != 'off' and primary_speaker != 'none' and actions_enabled:
         try:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
@@ -445,7 +446,7 @@ def execute_ags_logic(hass):
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
 
     # Logic for remove action
-    if inactive_speakers != []:
+    if inactive_speakers != [] and actions_enabled:
         try:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
@@ -473,7 +474,7 @@ def execute_ags_logic(hass):
             _LOGGER.warning(f'Error in execute_ags_logic: {str(e)}')
 
     # Logic for resetting TV speakers
-    if inactive_tv_speakers != []:
+    if inactive_tv_speakers != [] and actions_enabled:
         try:
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
@@ -498,6 +499,9 @@ def execute_ags_logic(hass):
 async def ags_select_source(ags_config, hass):
 
     try:
+        actions_enabled = hass.data.get("switch.ags_actions", True)
+        if not actions_enabled:
+            return
         source = hass.data.get('ags_media_player_source')
         if source is None:
             sources_list = hass.data['ags_service']['Sources']
@@ -602,6 +606,7 @@ async def speaker_status_check(
         "preferred_primary": None,
     }
     try:
+        actions_enabled = hass.data.get("switch.ags_actions", True)
         active_speakers = [
             spk
             for spk in hass.data.get("active_speakers", [])
@@ -637,16 +642,18 @@ async def speaker_status_check(
         missing = sorted(active_set - group_set)
         if missing:
             result["joined"] = missing
-            await enqueue_media_action(
-                hass,
-                "join",
-                {"entity_id": target_primary, "group_members": missing},
-            )
+            if actions_enabled:
+                await enqueue_media_action(
+                    hass,
+                    "join",
+                    {"entity_id": target_primary, "group_members": missing},
+                )
 
         extra = sorted(group_set - active_set - {target_primary})
         if extra:
             result["unjoined"] = extra
-            await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
+            if actions_enabled:
+                await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error in speaker_status_check: %s", exc)
@@ -793,11 +800,12 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if state is not None and state.state != "unavailable" and (
                     "TV" in (state.attributes.get("source_list") or [])
                 ):
-                    await enqueue_media_action(
-                        hass,
-                        "select_source",
-                        {"entity_id": tv_target, "source": "TV"},
-                    )
+                    if actions_enabled:
+                        await enqueue_media_action(
+                            hass,
+                            "select_source",
+                            {"entity_id": tv_target, "source": "TV"},
+                        )
                     message_parts.append(f"TV source on {tv_target}")
                 else:
                     msg = (
@@ -805,8 +813,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     )
                     message_parts.append(msg)
             else:
-                await ags_select_source(ags_config, hass)
-                message_parts.append("selected music source")
+                if actions_enabled:
+                    await ags_select_source(ags_config, hass)
+                    message_parts.append("selected music source")
 
             await send_notification(
                 hass,
