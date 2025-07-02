@@ -127,16 +127,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             and preferred != "none"
             and primary != preferred
         ):
-            active = self.hass.data.get("active_speakers", [])
-            if active:
-                await enqueue_media_action(self.hass, "unjoin", {"entity_id": active})
-                join_members = [spk for spk in active if spk != preferred]
-                if join_members:
-                    await enqueue_media_action(
-                        self.hass,
-                        "join",
-                        {"entity_id": preferred, "group_members": join_members},
-                    )
             self.hass.data["primary_speaker"] = preferred
             primary = preferred
 
