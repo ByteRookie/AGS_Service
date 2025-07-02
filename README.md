@@ -14,7 +14,6 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * [Installation](#installation)
 * [Quick Start](#quick-start)
 * [Configuration](#configuration)
-* [Automation](#automation)
 * [Service Logic](#service-logic)
 * [Sensor Logic](#sensor-logic)
 * [License](#license)
@@ -80,7 +79,7 @@ Follow these basic steps to try AGS Service immediately:
 
 1. Install the integration through HACS using the instructions above.
 2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
-3. Restart Home Assistant. AGS Service manages speaker groups automatically, so no additional automations are required.
+3. Restart Home Assistant. AGS Service manages speaker groups automatically. Starting with v1.4.0 the old `AGS Automation Example.yaml` file is no longer needed because all automation logic is built into the integration.
 
 ## Configuration
 
@@ -177,10 +176,6 @@ ags_service:
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
-## Automation
-
-AGS Service handles speaker grouping internally. No extra Home Assistant automations are needed. The old `AGS Automation Example.yaml` file has been removed.
-
 ## Service Logic
 
 AGS evaluates several conditions to decide when to play and which speaker should be primary:
@@ -225,23 +220,13 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.3.6
-- Restored the TV source reset when a room turns off
-- Delay the source change slightly so the unjoin completes without errors
-- Final-room shutdown still uses `media_stop`
-
-### v1.3.5
-- Removed the pre-action sensor refresh for join/unjoin
-
-### v1.3.3
-- Ensured playlist clears when the last room turns off
-- Join action now falls back to the preferred primary speaker
-
-### v1.3.2
-- Added optional `AGS Actions` switch when sensors are enabled
-- Room switches now directly join/unjoin speakers
-- Turning the final room off also pauses and clears its playlist
-- Removed the primary speaker retry delay
+### v1.4.0
+- Added action queue with optional AGS Actions switch
+- Removed the old `AGS Automation Example.yaml` file; all join/unjoin logic is now part of the integration
+- Improved join/unjoin reliability and TV source handling
+- Automatic status updates with zone and schedule checks
+- Restricted source selection when speakers are active
+- Internal cleanups and bug fixes
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on
@@ -251,11 +236,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 ### v1.2.7
 - All configuration options now functional
-- Speaker join/leave logic handled in the automation file
 
 ### v1.2.6
 - New options like `homekit_player`, `static_name`, `create_sensors`, `disable_zone`, `default_on`, `disable_Tv_Source` and `primary_delay`
-- Updated automation file and removed obsolete files
 
 ### v1.2.5
 - Began migrating join and reset actions into Python services
@@ -264,7 +247,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.2.4
 - Sensor updates tied to the media player
 - Removed dedicated media player switch and old source dropdown
-- Sensor file optional when automation is disabled
 
 ### v1.2.3
 - Initial HomeKit media player support
@@ -284,7 +266,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.1.0
 - Primary speaker delay option
 - Switches retain state across reboots
-- Added the first automation file
 
 ### v1.0.11
 - Initial public release
