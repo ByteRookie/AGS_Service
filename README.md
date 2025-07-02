@@ -4,6 +4,9 @@
 AGS Service is a custom Home Assistant integration that automatically manages speakers across your home.  It creates a virtual **AGS Media Player** that always points to the best speaker for the active rooms and keeps groups in sync as you move around.  Designed around Sonos and LG TVs but compatible with any media player Home Assistant supports, AGS makes whole‑home audio effortless.
 
 The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
+> **Disclaimer**
+> AGS Service controls real hardware. Test carefully and use with caution before relying on it.
+> The authors are not responsible for unintended behavior.
 
 ## Table of Contents
 * [Features](#features)
