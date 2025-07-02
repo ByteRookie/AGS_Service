@@ -776,7 +776,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             new_status in ("ON", "ON TV")
             and (
                 not hass.data.get("active_rooms")
-                or hass.data.get("primary_speaker") in (None, "none")
+                or hass.data.get("preferred_primary_speaker") in (None, "none")
             )
         ):
             hass.helpers.event.async_call_later(
