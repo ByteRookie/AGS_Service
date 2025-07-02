@@ -649,13 +649,15 @@ async def fetch_sonos_favorites(hass, entity_id):
 async def async_update_sources_from_sonos(hass, entity_id=None):
     """Fetch favorites from Sonos and merge into the configured source list."""
     if not entity_id:
-        for room in hass.data["ags_service"]["rooms"]:
-            for device in room["devices"]:
-                if device["device_type"] == "speaker":
-                    entity_id = device["device_id"]
-                    break
-            if entity_id:
-                break
+        speakers = [
+            device
+            for room in hass.data["ags_service"]["rooms"]
+            for device in room["devices"]
+            if device["device_type"] == "speaker"
+        ]
+        if speakers:
+            speakers.sort(key=lambda x: x.get("priority", 0))
+            entity_id = speakers[0]["device_id"]
 
     if not entity_id:
         _LOGGER.error("No speaker found to fetch favorites")

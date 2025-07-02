@@ -192,7 +192,7 @@ data:
   entity_id: media_player.living_room  # optional
 ```
 
-If no ``entity_id`` is provided the first configured speaker is used.
+If no ``entity_id`` is provided the highest priority speaker is used.
 
 Whenever you select an item from the media browser or the player's source list,
 the ``AGS Service Source`` sensor updates to reflect the chosen favorite.
@@ -241,6 +241,9 @@ Each sensor uses specific logic to report the state of the system:
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.4.2
+- Sonos favorites now load from the highest priority speaker when no ``entity_id`` is provided.
 
 ### v1.4.1
 - ``AGS Service Source`` updates when you play a favorite via the media browser.
