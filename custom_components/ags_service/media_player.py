@@ -5,8 +5,10 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
+
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source
+from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+
 import logging
 _LOGGER = logging.getLogger(__name__)
 

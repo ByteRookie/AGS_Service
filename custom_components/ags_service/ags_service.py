@@ -123,6 +123,16 @@ async def ensure_preferred_primary_tv(hass: HomeAssistant) -> str | None:
 
     return preferred
 
+
+def _handle_status_transition(prev_status, new_status, hass):
+    """Store and restore the AGS source when toggling TV mode."""
+    if new_status == "ON TV" and prev_status != "ON TV":
+        hass.data["ags_source_before_tv"] = hass.data.get("ags_media_player_source")
+    elif new_status == "ON" and prev_status == "ON TV":
+        prev_source = hass.data.pop("ags_source_before_tv", None)
+        if prev_source is not None:
+            hass.data["ags_media_player_source"] = prev_source
+
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
@@ -210,6 +220,7 @@ def get_active_rooms(rooms, hass):
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
     active_rooms = hass.data.get('active_rooms', [])
+    prev_status = hass.data.get('ags_status')
     default_source_name = None
     sources_list = hass.data['ags_service']['Sources'] 
     for src in sources_list:
@@ -223,6 +234,7 @@ def update_ags_status(ags_config, hass):
         ags_status = "Unknown"
 
     # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
+
     zone_state = hass.states.get('zone.home')
     if not ags_config.get('disable_zone', False):
         if zone_state is None:
@@ -243,6 +255,7 @@ def update_ags_status(ags_config, hass):
         device_state = device_states.get(device['device_id'])
         if device_state and 'override_content' in device and device['override_content'] in device_state.attributes.get('media_content_id', ''):
             ags_status = "Override"
+            _handle_status_transition(prev_status, ags_status, hass)
             hass.data['ags_status'] = ags_status
             return ags_status
 
@@ -299,6 +312,7 @@ def update_ags_status(ags_config, hass):
         else:
             if not schedule_on:
                 ags_status = "OFF"
+                _handle_status_transition(prev_status, ags_status, hass)
                 hass.data['ags_status'] = ags_status
                 hass.data['schedule_prev_state'] = schedule_on
                 hass.data['schedule_state'] = schedule_on
@@ -309,6 +323,7 @@ def update_ags_status(ags_config, hass):
 
     if not media_system_state:
         ags_status = "OFF"
+        _handle_status_transition(prev_status, ags_status, hass)
         hass.data['ags_status'] = ags_status
         return ags_status
 
@@ -320,10 +335,12 @@ def update_ags_status(ags_config, hass):
                 device_state = device_states.get(device['device_id'])
                 if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
                     ags_status = "ON TV"
+                    _handle_status_transition(prev_status, ags_status, hass)
                     hass.data['ags_status'] = ags_status
                     return ags_status
 
     ags_status = "ON"
+    _handle_status_transition(prev_status, ags_status, hass)
     hass.data['ags_status'] = ags_status
     return ags_status
 
@@ -479,6 +496,41 @@ def get_inactive_tv_speakers(rooms, hass):
     return inactive_tv_speakers
 
 
+def get_control_device_id(ags_config, hass):
+    """Return the device that should receive control commands."""
+    ags_status = hass.data.get('ags_status')
+    primary_speaker = hass.data.get('primary_speaker')
+
+    if not primary_speaker or primary_speaker == 'none':
+        primary_speaker = hass.data.get('preferred_primary_speaker')
+        hass.data['primary_speaker'] = primary_speaker
+
+    if not primary_speaker or primary_speaker == 'none':
+        return None
+
+    primary_room = None
+    primary_room_devices = None
+    for room in ags_config['rooms']:
+        for device in room['devices']:
+            if device['device_id'] == primary_speaker:
+                primary_room = room
+                primary_room_devices = room['devices']
+                break
+        if primary_room:
+            break
+
+    if ags_status == 'ON TV' and primary_room_devices:
+        sorted_devices = sorted(
+            [d for d in primary_room_devices if d['device_type'] != 'speaker'],
+            key=lambda x: x['priority'],
+        )
+        if sorted_devices:
+            first_device = sorted_devices[0]
+            return first_device.get('ott_device', first_device['device_id'])
+
+    return primary_speaker
+
+
 
 
 
@@ -508,7 +560,8 @@ async def ags_select_source(ags_config, hass):
             if source is not None:
                 hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
-        primary_speaker_entity_id_raw = hass.data.get('primary_speaker', "none")
+        primary_speaker_entity_id = get_control_device_id(ags_config, hass)
+
 
         if not primary_speaker_entity_id_raw or primary_speaker_entity_id_raw == "none":
             primary_speaker_entity_id = hass.data.get('preferred_primary_speaker', "")
@@ -521,6 +574,7 @@ async def ags_select_source(ags_config, hass):
 
         state = hass.states.get(primary_speaker_entity_id)
         if state is None or state.state == "unavailable":
+
             return
 
         # Convert the list of sources to a dictionary for faster lookups
@@ -528,11 +582,22 @@ async def ags_select_source(ags_config, hass):
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
+        disable_tv_source = ags_config.get('disable_Tv_Source', False)
+
         if source == "TV":
             await enqueue_media_action(
                 hass,
                 'select_source',
                 {"source": source, "entity_id": primary_speaker_entity_id},
+            )
+        elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        "source": source,
+                        "entity_id": primary_speaker_entity_id
+                    })
+                )
             )
 
         elif source != "Unknown" and status == "ON":
