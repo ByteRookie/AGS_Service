@@ -657,16 +657,7 @@ async def ags_select_source(ags_config, hass):
 
 
 async def send_notification(hass: HomeAssistant, title: str, message: str) -> None:
-    """Send a persistent notification and swallow errors."""
-    try:
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {"message": message, "title": title},
-            blocking=True,
-        )
-    except Exception as exc:  # pragma: no cover - safety net
-        _LOGGER.warning("Failed to send notification: %s", exc)
+    return
 
 
 async def speaker_status_check(
@@ -866,11 +857,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             if not primary_to_use or primary_to_use == "none":
                 message_parts.append("skipped source selection - no primary or preferred speaker")
-                await send_notification(
-                    hass,
-                    f"AGS {new_status}",
-                    "\n".join(message_parts),
-                )
                 return
 
             if new_status == "ON TV":
@@ -896,11 +882,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await ags_select_source(ags_config, hass)
                     message_parts.append("selected music source")
 
-            await send_notification(
-                hass,
-                f"AGS {new_status}",
-                "\n".join(message_parts),
-            )
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
 
