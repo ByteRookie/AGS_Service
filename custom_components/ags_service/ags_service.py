@@ -686,6 +686,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             if all_speakers:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+                # Give the speakers a moment to process the unjoin before
+                # selecting the TV source. Without this delay the subsequent
+                # call can fail with ``Invalid Args`` because the device still
+                # thinks it belongs to a group.
+                await enqueue_media_action(hass, "delay", {"seconds": 2})
 
             for room in rooms:
                 members = [
