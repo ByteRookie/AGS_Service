@@ -697,7 +697,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 # selecting the TV source. Without this delay the subsequent
                 # call can fail with ``Invalid Args`` because the device still
                 # thinks it belongs to a group.
-                await enqueue_media_action(hass, "delay", {"seconds": 2})
+                await enqueue_media_action(hass, "delay", {"seconds": 0.1})
 
             for room in rooms:
                 members = [
