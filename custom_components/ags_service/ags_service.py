@@ -45,8 +45,9 @@ async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) ->
 async def update_ags_sensors(ags_config, hass):
     """Refresh AGS related sensor values."""
     rooms = ags_config['rooms']
-    lock = hass.data.setdefault('ags_sensor_lock', asyncio.Lock())
-    event = hass.data.setdefault('ags_first_update_event', asyncio.Event())
+    data = hass.data.setdefault('ags_service', {})
+    lock = data.setdefault('sensor_lock', asyncio.Lock())
+    event = data.setdefault('first_update_event', asyncio.Event())
 
     async with lock:
         try:
@@ -660,8 +661,8 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     up‑to‑date information.
     """
     try:
-        await hass.data["ags_first_update_event"].wait()
-        async with hass.data["ags_sensor_lock"]:
+        await hass.data['ags_service']['first_update_event'].wait()
+        async with hass.data['ags_service']['sensor_lock']:
             pass
 
         rooms = ags_config["rooms"]
