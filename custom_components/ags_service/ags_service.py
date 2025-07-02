@@ -673,6 +673,15 @@ async def async_update_sources_from_sonos(hass, entity_id=None):
             sources.append(fav)
     hass.data["ags_service"]["Sources"] = sources
 
+    # Refresh sensors and media players so the new sources appear immediately
+    update_ags_sensors(hass.data["ags_service"], hass)
+    component = hass.data.get("media_player")
+    if component:
+        for ent_id in ["media_player.ags_media_player", "media_player.ags_homekit_media_system"]:
+            player = component.get_entity(ent_id)
+            if player:
+                player.async_schedule_update_ha_state(True)
+
 
 
 
