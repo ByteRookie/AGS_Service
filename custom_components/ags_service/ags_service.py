@@ -628,7 +628,9 @@ async def ags_select_source(ags_config, hass):
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
 
-        elif source != "Unknown" and status != "OFF":
+        elif source != "Unknown" and status == "ON":
+            if state.state == "playing" and state.attributes.get("source") != "TV":
+                return
             source_info = source_dict.get(source)
 
             if source_info:
