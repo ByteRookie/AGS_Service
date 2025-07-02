@@ -14,7 +14,6 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * [Installation](#installation)
 * [Quick Start](#quick-start)
 * [Configuration](#configuration)
-* [Automation](#automation)
 * [Service Logic](#service-logic)
 * [Sensor Logic](#sensor-logic)
 * [License](#license)
@@ -80,7 +79,8 @@ Follow these basic steps to try AGS Service immediately:
 
 1. Install the integration through HACS using the instructions above.
 2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
-3. Restart Home Assistant. AGS Service manages speaker groups automatically, so no additional automations are required.
+3. Restart Home Assistant. AGS Service manages speaker groups automatically. Starting with v1.4.0 the old `AGS Automation Example.yaml` file is no longer needed because all automation logic is built into the integration.
+
 
 ## Configuration
 
@@ -177,10 +177,6 @@ ags_service:
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
-## Automation
-
-AGS Service now handles all grouping internally. No Home Assistant automation file is needed.
-
 ## Service Logic
 
 AGS evaluates several conditions to decide when to play and which speaker should be primary:
@@ -193,7 +189,9 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
+
 `handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
+
 
 ### Action Queue
 
@@ -226,11 +224,14 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 # Changelog
 
 ### v1.4.0
-- Automation example removed; all grouping logic now lives in the integration
-- Added action queue and `AGS Actions` switch
-- Improved join/unjoin reliability and playlist handling
+- Added action queue with optional AGS Actions switch
+- Removed the old `AGS Automation Example.yaml` file; all join/unjoin logic is now part of the integration
+- Improved join/unjoin reliability and TV source handling
+- Automatic status updates with zone and schedule checks
+- Restricted source selection when speakers are active
 - Preserved source around TV mode changes
 - Various bug fixes and performance tweaks
+
 
 ### v1.3.0
 - Added schedule entity support and auto-start when the schedule turns on
@@ -251,7 +252,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.2.4
 - Sensor updates tied to the media player
 - Removed dedicated media player switch and old source dropdown
-- Sensor file optional when automation is disabled
 
 ### v1.2.3
 - Initial HomeKit media player support
