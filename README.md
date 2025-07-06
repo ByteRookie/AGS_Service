@@ -177,6 +177,16 @@ ags_service:
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
 * If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
 
+### Logging
+
+When `enable_logging` is `true` a new **AGS Logging** switch is created. Toggle this entity to turn verbose logging on or off without editing YAML. Messages appear in Home Assistant's log at the `INFO` level. To view them, add the following to `configuration.yaml`:
+
+```yaml
+logger:
+  logs:
+    custom_components.ags_service: info
+```
+
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
 ## Service Logic

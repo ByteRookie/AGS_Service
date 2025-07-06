@@ -800,6 +800,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
                     await enqueue_media_action(hass, "clear_playlist", {"entity_id": members})
 
+            log_event(
+                hass,
+                f"status {old_status} -> OFF | unjoined all speakers",
+            )
+
         elif new_status in ("ON", "ON TV"):
             primary_val = hass.data.get("primary_speaker")
             preferred_val = hass.data.get("preferred_primary_speaker")
@@ -869,6 +874,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if actions_enabled:
                     await ags_select_source(ags_config, hass)
                     message_parts.append("selected music source")
+            log_event(
+                hass,
+                f"status {old_status} -> {new_status} | " + " | ".join(message_parts),
+            )
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)

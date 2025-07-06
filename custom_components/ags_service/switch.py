@@ -42,6 +42,8 @@ async def async_setup_platform(
     if ags_config.get("create_sensors"):
         entities.append(AGSActionsSwitch(hass))
 
+    entities.append(AGSLoggingSwitch(hass))
+
     async_add_entities(entities)
 
     await ensure_action_queue(hass)
@@ -245,6 +247,50 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
+
+
+class AGSLoggingSwitch(SwitchEntity, RestoreEntity):
+    """Toggle detailed logging at runtime."""
+
+    _attr_should_poll = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+        self._attr_name = "AGS Logging"
+        self._attr_unique_id = "switch.ags_logging"
+        if self._attr_unique_id in hass.data:
+            self._attr_is_on = hass.data[self._attr_unique_id]
+        else:
+            initial = hass.data.get("ags_service", {}).get("enable_logging", False)
+            self._attr_is_on = initial
+            hass.data[self._attr_unique_id] = self._attr_is_on
+            hass.data["ags_service"]["enable_logging"] = self._attr_is_on
+
+    @property
+    def is_on(self) -> bool:
+        return self._attr_is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self._attr_is_on = True
+        self.hass.data[self._attr_unique_id] = True
+        self.hass.data["ags_service"]["enable_logging"] = True
+        self.async_write_ha_state()
+        log_event(self.hass, "AGS Logging enabled")
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self._attr_is_on = False
+        self.hass.data[self._attr_unique_id] = False
+        self.hass.data["ags_service"]["enable_logging"] = False
+        self.async_write_ha_state()
+        log_event(self.hass, "AGS Logging disabled")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            self._attr_is_on = last_state.state == "on"
+            self.hass.data[self._attr_unique_id] = self._attr_is_on
+            self.hass.data["ags_service"]["enable_logging"] = self._attr_is_on
 
 
 
