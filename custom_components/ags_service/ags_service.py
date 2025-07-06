@@ -600,7 +600,13 @@ def ags_select_source(ags_config, hass):
 
 
 async def fetch_sonos_favorites(hass, entity_id):
-    """Return favorites for the given Sonos speaker."""
+    """Return favorites for the given Sonos speaker.
+
+    The function issues ``async_browse_media`` on the target entity and walks
+    the returned ``Favorites`` directory. Each leaf node is converted to a dict
+    containing ``Source`` (the title), ``Source_Value`` (``media_content_id``)
+    and ``media_content_type`` so it can be merged into the AGS ``Sources`` list.
+    """
     component = hass.data.get("media_player")
     player = component.get_entity(entity_id) if component else None
     if not player or not hasattr(player, "async_browse_media"):
@@ -649,7 +655,14 @@ async def fetch_sonos_favorites(hass, entity_id):
 
 
 async def async_update_sources_from_sonos(hass, entity_id=None):
-    """Fetch favorites from Sonos and merge into the configured source list."""
+    """Fetch favorites from Sonos and merge them into ``hass.data['ags_service']['Sources']``.
+
+    If ``entity_id`` is omitted, the highest priority speaker from the
+    configuration is used. Each favorite returned by
+    :func:`fetch_sonos_favorites` is appended to the list when its ``Source``
+    title isn't already present. ``media_content_type`` defaults to
+    ``favorite_item_id`` so items play correctly through ``play_media``.
+    """
     if not entity_id:
         speakers = [
             device

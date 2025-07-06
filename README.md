@@ -181,10 +181,14 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 ### Auto-fill sources from Sonos
 
 On startup the integration automatically loads Sonos favorites into the
-``Sources`` list—no extra configuration is needed. You can run the
-``ags_service.load_sonos_favorites`` service at any time to refresh the list.
-Any sources defined in ``configuration.yaml`` remain intact and any new
-favorites are appended to the end.
+``Sources`` list—no extra configuration is needed. The favorites are gathered
+by calling the Sonos player's ``media_player.browse_media`` service and reading
+the ``Favorites`` directory. Each favorite's title becomes the ``Source`` name
+while its ``media_content_id`` and ``media_content_type`` populate the
+``Source_Value`` and ``media_content_type`` fields. Duplicate titles are skipped
+so any manually defined sources remain intact. You can run the
+``ags_service.load_sonos_favorites`` service at any time to refresh the list and
+append any new favorites that Sonos reports.
 
 ```
 service: ags_service.load_sonos_favorites
