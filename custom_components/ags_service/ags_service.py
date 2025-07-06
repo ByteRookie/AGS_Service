@@ -117,12 +117,12 @@ def _handle_status_transition(prev_status, new_status, hass):
 
 ## update all Sensors Function ##
 async def update_ags_sensors(ags_config, hass):
-    """Refresh AGS related sensor values and return status changes.
+    """Refresh sensor data and trigger the status handler when needed.
 
-    The function returns a tuple ``(prev_status, new_status)`` so callers can
-    determine if ``ags_status`` was modified. When the status does change the
-    centralized handler is automatically invoked to adjust speaker grouping and
-    playback.
+    The function returns ``(prev_status, new_status)``.  When the status
+    changes ``handle_ags_status_change`` is scheduled automatically so every
+    update path (sensors, schedules and switches) funnels through the same
+    logic.
     """
     rooms = ags_config['rooms']
     lock = hass.data['ags_service']['sensor_lock']
@@ -621,19 +621,23 @@ async def ags_select_source(ags_config, hass):
 
 
 async def handle_ags_status_change(hass, ags_config, new_status, old_status):
-    """Apply AGS state transitions using a single service.
+    """React to status changes and room switch events.
 
-    All triggers (status sensors, schedule updates and room switch toggles)
-    funnel through this routine so the logic is applied consistently.  The
-    ``new_status`` argument is the desired state (``ON``, ``ON TV`` or ``OFF``).
-    Based on this value the method:
+    Every path that changes the AGS state calls this helper so the speaker
+    grouping and source logic executes in one place.  ``new_status`` is the
+    desired service state (``ON``, ``ON TV`` or ``OFF``).  The flow is:
 
-    * Chooses a *calculated primary speaker* derived from the current
-      ``primary_speaker`` and ``preferred_primary_speaker``.
-    * Synchronizes the Sonos speaker group to match ``active_speakers``.
-    * Selects the correct playback source (music or TV) when needed.
-    * Avoids any media commands when the devices are already in the expected
-      state.
+    1. Wait for any previously queued actions to finish so sensor data is
+       accurate.
+    2. Determine the *calculated primary speaker* using the current
+       ``primary_speaker`` and ``preferred_primary_speaker`` values.
+       When ``ON TV`` the preferred device is chosen if it differs from the
+       primary.
+    3. Compare the speaker's group members with ``active_speakers`` and issue
+       join or unjoin commands only when necessary.
+    4. Select the correct playback source (music or TV) based on the final
+       status.  If the devices are already grouped and playing the right
+       source nothing is sent.
     """
     try:
         # Ensure any prior media actions have finished before evaluating the
@@ -661,9 +665,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             ]
 
             if all_speakers:
-                await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+                for spk in all_speakers:
+                    # Unjoin speakers one by one to avoid Sonos race conditions
+                    await enqueue_media_action(hass, "unjoin", {"entity_id": spk})
                 await enqueue_media_action(
-                    hass, "wait_ungrouped", {"entity_id": all_speakers, "timeout": 3}
+                    hass, "wait_ungrouped", {"entity_id": all_speakers, "timeout": 5}
                 )
 
             # Stop music or reset TVs depending on room type

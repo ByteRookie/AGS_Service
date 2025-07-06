@@ -190,7 +190,8 @@ AGS evaluates several conditions to decide when to play and which speaker should
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
 
-`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
+`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.  All
+triggers call this service so the logic only exists in one place.
 
 
 ### Action Queue

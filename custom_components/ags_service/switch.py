@@ -90,14 +90,14 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
     async def _maybe_join(self) -> None:
-        """Refresh sensors then apply the current AGS logic."""
+        """Refresh sensors and enforce the current AGS state."""
         prev_status, new_status = await update_ags_sensors(
             self.hass.data["ags_service"], self.hass
         )
 
-        # ``update_ags_sensors`` already triggers the handler when the status
-        # changes. Only call it directly when the status stayed the same so room
-        # toggles still regroup speakers.
+        # ``update_ags_sensors`` already schedules ``handle_ags_status_change``
+        # whenever the global status flips.  If the status didn't change we
+        # invoke it here so toggling a room still syncs grouping.
         if new_status == prev_status:
             await handle_ags_status_change(
                 self.hass,
@@ -109,7 +109,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         await wait_for_actions(self.hass)
 
     async def _maybe_unjoin(self) -> None:
-        """Refresh sensors then apply the current AGS logic."""
+        """Refresh sensors and enforce the current AGS state."""
         prev_status, new_status = await update_ags_sensors(
             self.hass.data["ags_service"], self.hass
         )
