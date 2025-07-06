@@ -1,5 +1,6 @@
 """Main module for the AGS Service integration."""
 import voluptuous as vol
+import asyncio
 
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
@@ -125,6 +126,8 @@ async def async_setup(hass, config):
     from homeassistant.core import EVENT_HOMEASSISTANT_STARTED
 
     async def _delayed_load(_: object) -> None:
+        # Wait briefly so Sonos speakers are fully initialized
+        await asyncio.sleep(10)
         await async_update_sources_from_sonos(hass)
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_load)

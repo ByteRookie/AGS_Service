@@ -651,6 +651,17 @@ async def fetch_sonos_favorites(hass, entity_id):
                 )
 
     walk(favorites_dir)
+
+    if not favorites:
+        slist = get_val(player, "source_list") or []
+        favorites = [
+            {
+                "Source": title,
+                "Source_Value": title,
+                "media_content_type": "favorite_item_id",
+            }
+            for title in slist
+        ]
     return favorites
 
 
