@@ -780,6 +780,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         )
                 else:
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
+                    await enqueue_media_action(hass, "clear_playlist", {"entity_id": members})
 
         elif new_status in ("ON", "ON TV"):
             primary_val = hass.data.get("primary_speaker")
