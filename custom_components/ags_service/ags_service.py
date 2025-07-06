@@ -481,22 +481,40 @@ def update_speaker_states(rooms, hass):
 
 ### Function for Preferred primary speaker ### 
 def get_preferred_primary_speaker(rooms, hass):
-    active_speakers = hass.data.get('active_speakers')
+    """Return the backup speaker AGS should use."""
+
+    active_speakers = hass.data.get("active_speakers", [])
 
     if not active_speakers:
         preferred_primary_speaker = "none"
     else:
-        # Generate a list of all devices in active speakers
-        all_devices = [device for room in rooms for device in room['devices'] if device['device_id'] in active_speakers]
+        control_device_id = get_control_device_id(hass.data["ags_service"], hass)
 
-        # Sort the devices by priority (lowest number first)
-        sorted_devices = sorted(all_devices, key=lambda x: x['priority'])
+        room_of_control_device = next(
+            (
+                room
+                for room in rooms
+                if any(d["device_id"] == control_device_id for d in room["devices"])
+            ),
+            None,
+        )
 
-        # Return the device_id of the highest priority device
-        preferred_primary_speaker = sorted_devices[0]['device_id'] if sorted_devices else "none"
-    
-    # Write the preferred primary speaker's state to hass.data
-    hass.data['preferred_primary_speaker'] = preferred_primary_speaker
+        if not room_of_control_device:
+            preferred_primary_speaker = "none"
+        else:
+            valid_speakers = [
+                device
+                for device in room_of_control_device["devices"]
+                if device["device_type"] == "speaker"
+                and device["device_id"] in active_speakers
+            ]
+
+            sorted_speakers = sorted(valid_speakers, key=lambda d: d["priority"])
+            preferred_primary_speaker = (
+                sorted_speakers[0]["device_id"] if sorted_speakers else "none"
+            )
+
+    hass.data["preferred_primary_speaker"] = preferred_primary_speaker
 
     return preferred_primary_speaker
 
