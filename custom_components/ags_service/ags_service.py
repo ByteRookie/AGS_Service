@@ -103,11 +103,11 @@ async def _wait_until_grouped(
 
 
 async def ensure_preferred_primary_tv(hass: HomeAssistant, ags_config: dict) -> str | None:
-    """Return a TV capable speaker and make it lead the group."""
+    """Return a TV capable speaker from the active rooms and make it lead the group."""
     preferred = hass.data.get("preferred_primary_speaker")
     primary = hass.data.get("primary_speaker")
 
-    # Build a list of speakers that belong to a TV room
+    # Speakers that belong to any TV room
     tv_speakers = [
         d["device_id"]
         for room in ags_config.get("rooms", [])
@@ -116,21 +116,25 @@ async def ensure_preferred_primary_tv(hass: HomeAssistant, ags_config: dict) -> 
         if d.get("device_type") == "speaker"
     ]
 
-    # Prefer the current preferred or primary speaker if they are TV speakers
+    active_speakers = hass.data.get("active_speakers", [])
+    active_tv_speakers = [spk for spk in active_speakers if spk in tv_speakers]
+
+    # Prefer preferred or primary speaker if it is an active TV speaker
     tv_target = None
     for candidate in (preferred, primary):
-        if candidate and candidate != "none" and candidate in tv_speakers:
+        if candidate and candidate != "none" and candidate in active_tv_speakers:
             tv_target = candidate
             break
-    if tv_target is None and tv_speakers:
-        tv_target = tv_speakers[0]
+
+    if tv_target is None and active_tv_speakers:
+        tv_target = active_tv_speakers[0]
 
     if not tv_target:
         return None
 
     # Ensure ``tv_target`` is the coordinator for the active group
     actions_enabled = hass.data.get("switch.ags_actions", True)
-    members = [spk for spk in hass.data.get("active_speakers", []) if spk != tv_target]
+    members = [spk for spk in active_speakers if spk != tv_target]
     if actions_enabled and members:
         await enqueue_media_action(
             hass,
