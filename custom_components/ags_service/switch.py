@@ -128,7 +128,9 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         )
         if first_room:
             if current_status == "ON TV":
-                preferred = await ensure_preferred_primary_tv(self.hass)
+                preferred = await ensure_preferred_primary_tv(
+                    self.hass, self.hass.data["ags_service"]
+                )
                 if preferred:
                     await enqueue_media_action(
                         self.hass,
