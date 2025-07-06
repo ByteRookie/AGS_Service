@@ -372,6 +372,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_media_call('clear_playlist', {
+            'entity_id': self.primary_speaker_entity_id
+        })
         self._schedule_ags_update()
 
     def media_next_track(self):

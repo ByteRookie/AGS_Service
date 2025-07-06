@@ -176,6 +176,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
+            await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
         await wait_for_actions(self.hass)
 
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
