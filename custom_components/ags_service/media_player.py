@@ -432,18 +432,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 return source_dict["Source_Value"]
         return None  # if not found
 
-    def select_source(self, source):
+    async def async_select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
-            self.hass.loop.call_soon_threadsafe(
-                lambda: self.hass.async_create_task(
-                    ags_select_source(self.ags_config, self.hass)
-                )
+            self.hass.async_create_task(
+                ags_select_source(self.ags_config, self.hass)
             )
         self._schedule_ags_update()
+
+    def select_source(self, source):
+        """Schedule ``async_select_source`` when called from a sync context."""
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(
+                self.async_select_source(source)
+            )
+        )
            
 
     @property
