@@ -53,6 +53,9 @@ DEVICE_SCHEMA = vol.Schema({
                                     vol.Required("priority"): cv.positive_int,
                                     vol.Optional("override_content"): cv.string,
                                     vol.Optional(CONF_OTT_DEVICE): cv.string,
+                                    vol.Optional(CONF_TV_MODE): vol.In(
+                                        [TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]
+                                    ),
                                 }
                             )
                         ],
@@ -80,9 +83,6 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
     vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
-    vol.Optional(CONF_TV_MODE, default=TV_MODE_TV_AUDIO): vol.In(
-        [TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]
-    ),
     vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
     vol.Optional(CONF_SCHEDULE_ENTITY): vol.Schema({
         vol.Required('entity_id'): cv.string,
@@ -97,13 +97,19 @@ async def async_setup(hass, config):
 
     ags_config = config[DOMAIN]
 
-    # Validate ott_device usage
+    # Validate ott_device and tv_mode usage
     for room in ags_config['rooms']:
         for device in room['devices']:
             if CONF_OTT_DEVICE in device and device['device_type'] != 'tv':
                 raise vol.Invalid(
                     "ott_device is only allowed for devices with device_type 'tv'"
                 )
+            if CONF_TV_MODE in device and device['device_type'] != 'tv':
+                raise vol.Invalid(
+                    "tv_mode is only allowed for devices with device_type 'tv'"
+                )
+            if device['device_type'] == 'tv' and CONF_TV_MODE not in device:
+                device[CONF_TV_MODE] = TV_MODE_TV_AUDIO
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],
@@ -114,7 +120,6 @@ async def async_setup(hass, config):
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'tv_mode': ags_config.get(CONF_TV_MODE, TV_MODE_TV_AUDIO),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
     }
 

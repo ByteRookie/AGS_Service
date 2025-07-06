@@ -2,6 +2,7 @@
 import logging
 import asyncio
 from homeassistant.core import HomeAssistant
+from .__init__ import TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC
 
 
 
@@ -204,7 +205,6 @@ def get_active_rooms(rooms, hass):
     """Fetch the list of active rooms based on switches in hass.data."""
 
     active_rooms = []
-    tv_mode = hass.data.get('tv_mode', 'tv_audio')
 
     for room in rooms:
         room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
@@ -212,16 +212,19 @@ def get_active_rooms(rooms, hass):
         if not hass.data.get(room_key):
             continue
 
-        if tv_mode == 'no_music':
-            tv_on = False
-            for device in room['devices']:
-                if device['device_type'] == 'tv':
-                    state = hass.states.get(device['device_id'])
-                    if state and state.state != 'off':
-                        tv_on = True
-                        break
-            if tv_on:
+        skip_room = False
+        for device in room['devices']:
+            if device.get('device_type') != 'tv':
                 continue
+            state = hass.states.get(device['device_id'])
+            if state and state.state != 'off':
+                if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
+                    skip_room = False
+                    break
+                else:
+                    skip_room = True
+        if skip_room:
+            continue
 
         active_rooms.append(room['room'])
     
@@ -342,20 +345,41 @@ def update_ags_status(ags_config, hass):
 
 
     # Check for TV in rooms with the media switch on
+    tv_found = False
+    active_tv_mode = None
     for room in rooms:
         room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
-        if hass.data.get(room_key):
-            for device in room['devices']:
-                device_state = device_states.get(device['device_id'])
-                if (
-                    device['device_type'] == 'tv'
-                    and device_state
-                    and device_state.state != 'off'
-                ):
-                    ags_status = "ON TV"
-                    _handle_status_transition(prev_status, ags_status, hass)
-                    hass.data['ags_status'] = ags_status
-                    return ags_status
+        if not hass.data.get(room_key):
+            continue
+
+        room_tv_on = False
+        room_tv_audio = False
+        for device in room['devices']:
+            device_state = device_states.get(device['device_id'])
+            if (
+                device.get('device_type') == 'tv'
+                and device_state
+                and device_state.state != 'off'
+            ):
+                room_tv_on = True
+                if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
+                    room_tv_audio = True
+
+        if room_tv_on:
+            tv_found = True
+            if room_tv_audio:
+                active_tv_mode = TV_MODE_TV_AUDIO
+            elif active_tv_mode != TV_MODE_TV_AUDIO and active_tv_mode is None:
+                active_tv_mode = TV_MODE_NO_MUSIC
+
+    if tv_found:
+        ags_status = "ON TV"
+        hass.data['current_tv_mode'] = active_tv_mode
+        _handle_status_transition(prev_status, ags_status, hass)
+        hass.data['ags_status'] = ags_status
+        return ags_status
+
+    hass.data['current_tv_mode'] = None
 
     ags_status = "ON"
     _handle_status_transition(prev_status, ags_status, hass)
@@ -847,7 +871,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                if hass.data.get("tv_mode", "tv_audio") != "no_music":
+                if hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO) != TV_MODE_NO_MUSIC:
                     tv_target = await ensure_preferred_primary_tv(hass)
                     state = hass.states.get(tv_target) if tv_target else None
                     if state is not None and state.state != "unavailable" and (
