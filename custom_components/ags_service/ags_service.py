@@ -600,8 +600,12 @@ async def ags_select_source(ags_config, hass):
             )
 
         elif source != "Unknown" and status == "ON":
-            if state.state == "playing" and state.attributes.get("source") != "TV":
+            if (
+                state.state == "playing"
+                and state.attributes.get("source") == source
+            ):
                 return
+
             source_info = source_dict.get(source)
 
             if source_info:
