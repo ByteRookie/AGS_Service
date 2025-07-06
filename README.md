@@ -189,6 +189,8 @@ AGS evaluates several conditions to decide when to play and which speaker should
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
+`get_preferred_primary_speaker` chooses the highest priority active speaker from the same room as the control device (the TV or OTT player when in `ON TV` mode). This keeps audio and video in sync when multiple rooms have televisions.
+
 
 `handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
 
