@@ -1,6 +1,7 @@
 # ags_service .py
 import logging
 import asyncio
+from datetime import datetime, timedelta
 from homeassistant.core import HomeAssistant
 
 
@@ -10,12 +11,32 @@ _LOGGER = logging.getLogger(__name__)
 _ACTION_QUEUE: asyncio.Queue | None = None
 _ACTION_WORKER: asyncio.Task | None = None
 
+EVENT_LOG_MAX_AGE = timedelta(days=1)
+
+
+def log_ags_event(hass: HomeAssistant, action: str, details: dict | None = None) -> None:
+    """Append an event entry to the in-memory log if enabled."""
+    if not hass.data.get("ags_service", {}).get("enable_event_log"):
+        return
+
+    entry = {
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "action": action,
+        "details": details or {},
+    }
+
+    log = hass.data["ags_service"].setdefault("event_log", [])
+    cutoff = datetime.now() - EVENT_LOG_MAX_AGE
+    log[:] = [e for e in log if datetime.fromisoformat(e["time"]) > cutoff]
+    log.append(entry)
+
 
 async def _action_worker(hass: HomeAssistant) -> None:
     """Process queued media_player actions sequentially."""
     while True:
         service, data = await _ACTION_QUEUE.get()
         try:
+            log_ags_event(hass, f"queue_{service}", data)
             if service == "delay":
                 await asyncio.sleep(data.get("seconds", 1))
             elif service == "wait_ungrouped":
@@ -26,8 +47,10 @@ async def _action_worker(hass: HomeAssistant) -> None:
                 )
             else:
                 await hass.services.async_call("media_player", service, data)
+            log_ags_event(hass, f"service_{service}", data)
         except Exception as exc:  # pragma: no cover - safety net
             _LOGGER.warning("Failed media action %s: %s", service, exc)
+            log_ags_event(hass, f"error_{service}", {"error": str(exc), **data})
         _ACTION_QUEUE.task_done()
 
 
@@ -42,6 +65,7 @@ async def ensure_action_queue(hass: HomeAssistant) -> None:
 async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) -> None:
     """Add a media_player service call to the action queue."""
     await ensure_action_queue(hass)
+    log_ags_event(hass, f"enqueue_{service}", data)
     await _ACTION_QUEUE.put((service, data))
 
 
@@ -591,12 +615,14 @@ async def ags_select_source(ags_config, hass):
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
         elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
+            log_ags_event(hass, "media_select_source", {"source": source, "entity_id": primary_speaker_entity_id})
             hass.loop.call_soon_threadsafe(
                 lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'select_source', {
-                        "source": source,
-                        "entity_id": primary_speaker_entity_id
-                    })
+                    hass.services.async_call(
+                        'media_player',
+                        'select_source',
+                        {"source": source, "entity_id": primary_speaker_entity_id},
+                    )
                 )
             )
 

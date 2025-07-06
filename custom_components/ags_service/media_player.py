@@ -7,7 +7,12 @@ from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    get_control_device_id,
+    log_ags_event,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -95,6 +100,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def _schedule_media_call(self, service: str, data: dict) -> None:
         """Safely fire a media_player service from any thread."""
+        log_ags_event(self.hass, f"media_{service}", data)
         self.hass.loop.call_soon_threadsafe(
             lambda: self.hass.async_create_task(
                 self.hass.services.async_call("media_player", service, data)
@@ -216,6 +222,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_source": self.ags_source,
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
         }
+        if self.hass.data['ags_service'].get('enable_event_log'):
+            attributes["event_log"] = self.hass.data['ags_service'].get('event_log', [])
         return attributes
 
 

@@ -30,6 +30,7 @@ CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
 CONF_SOURCE_VALUE = 'Source_Value'
 CONF_SOURCE_DEFAULT = 'source_default'
+CONF_ENABLE_EVENT_LOG = 'enable_event_log'
 
 
 # Define the configuration schema for a device
@@ -74,6 +75,7 @@ DEVICE_SCHEMA = vol.Schema({
     vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
     vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
     vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
+    vol.Optional(CONF_ENABLE_EVENT_LOG, default=False): cv.boolean,
     vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
     vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
     vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
@@ -105,10 +107,12 @@ async def async_setup(hass, config):
         'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
+        'enable_event_log': ags_config.get(CONF_ENABLE_EVENT_LOG, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+        'event_log': [],
     }
 
     # Initialize shared media action queue
@@ -121,7 +125,8 @@ async def async_setup(hass, config):
 
     # Load the sensor and switch platforms and pass the configuration to them
     create_sensors = ags_config.get('create_sensors', False)
-    if create_sensors:
+    enable_event_log = ags_config.get(CONF_ENABLE_EVENT_LOG, False)
+    if create_sensors or enable_event_log:
         await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
     
     await async_load_platform(hass, 'switch', DOMAIN, {}, config)

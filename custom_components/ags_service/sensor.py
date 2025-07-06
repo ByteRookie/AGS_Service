@@ -23,8 +23,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     rooms = ags_config['rooms']
 
     sensors = [
-        ConfiguredRoomsSensor(hass), 
-        ActiveRoomsSensor(hass), 
+        ConfiguredRoomsSensor(hass),
+        ActiveRoomsSensor(hass),
         ActiveSpeakersSensor(hass),
         InactiveSpeakersSensor(hass),
         AGSStatusSensor(hass),
@@ -33,6 +33,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         AGSSourceSensor( hass),
         AGSInactiveTVSpeakersSensor(hass)
     ]
+
+    if ags_config.get('enable_event_log'):
+        sensors.append(AGSEventLogSensor(hass))
 
 
     # Define a function to be called when a tracked entity changes its state
@@ -267,6 +270,32 @@ class AGSInactiveTVSpeakersSensor(SensorEntity):
     def state(self):
         ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         return ags_inactive_tv_speakers
+
+
+# Sensor for event log
+class AGSEventLogSensor(SensorEntity):
+    """Sensor exposing the AGS event log."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @property
+    def unique_id(self) -> str:
+        return "ags_event_log"
+
+    @property
+    def name(self) -> str:
+        return "AGS Event Log"
+
+    @property
+    def state(self):
+        log = self.hass.data.get('ags_service', {}).get('event_log', [])
+        return len(log)
+
+    @property
+    def extra_state_attributes(self):
+        log = self.hass.data.get('ags_service', {}).get('event_log', [])
+        return {"events": log}
    
 
 

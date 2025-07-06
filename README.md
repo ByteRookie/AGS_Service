@@ -36,6 +36,7 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * `AGS Service Preferred Primary Speaker` – backup speaker that will take over if the primary stops playing.
 * `AGS Service Source` – name of the media source that will be played when AGS starts playback.
 * `AGS Service Inactive TV Speakers` – TV‑related speakers that are currently inactive.
+* `AGS Event Log` – optional sensor listing recent AGS actions.
 
 All of the data from these sensors is also available as attributes of the
 `media_player.ags_media_player` entity, so you may disable the sensors and still
@@ -115,6 +116,7 @@ ags_service:
 | `schedule_entity` | _None_ | Optional schedule entity. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`. |
 | `homekit_player` | `none` | Name for an extra HomeKit player that exposes the same static source list. |
 | `create_sensors` | `false` | Expose sensors as entities. |
+| `enable_event_log` | `false` | Keep an in-memory log of AGS actions and expose it as a sensor. |
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
@@ -128,6 +130,7 @@ ags_service:
 #  disable_zone: true
 #  homekit_player: "My HomeKit Player"
 #  create_sensors: true
+#  enable_event_log: true
 #  default_on: false
 #  static_name: "AGS Media Player"
 #  disable_Tv_Source: false

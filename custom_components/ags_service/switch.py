@@ -72,6 +72,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
+        ags.log_ags_event(self.hass, "switch_on", {"switch": self._attr_unique_id})
         rooms = self.hass.data["ags_service"]["rooms"]
         prev_active = get_active_rooms(rooms, self.hass)
         prev_primary = self.hass.data.get("primary_speaker")
@@ -85,6 +86,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
+        ags.log_ags_event(self.hass, "switch_off", {"switch": self._attr_unique_id})
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
@@ -200,11 +202,13 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         return self._attr_is_on
 
     async def async_turn_on(self, **kwargs) -> None:
+        ags.log_ags_event(self.hass, "actions_on", {"switch": self._attr_unique_id})
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
+        ags.log_ags_event(self.hass, "actions_off", {"switch": self._attr_unique_id})
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
