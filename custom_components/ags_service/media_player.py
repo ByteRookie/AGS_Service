@@ -408,12 +408,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
         if self.ags_status == "ON TV" and disable_Tv_Source == False:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
-
+            sources = (
+                self.primary_speaker_state.attributes.get("source_list")
+                if self.primary_speaker_state
+                else None
+            )
         else:
-            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-            # Check if any device has a type of TV and add "TV" to the source list
-            if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+            sources = [
+                source_dict["Source"]
+                for source_dict in self.hass.data["ags_service"]["Sources"]
+            ]
+            rooms = self.hass.data["ags_service"]["rooms"]
+            active_rooms = self.hass.data.get("active_rooms", [])
+            has_active_tv_room = any(
+                room["room"] in active_rooms
+                and any(d.get("device_type") == "tv" for d in room["devices"])
+                for room in rooms
+            )
+            if has_active_tv_room:
                 sources.append("TV")
 
         return sources
@@ -526,9 +538,18 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
 
     @property
     def source_list(self):
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-        # Check if any device has a type of TV and add "TV" to the source list
-        if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+        sources = [
+            source_dict["Source"]
+            for source_dict in self.hass.data["ags_service"]["Sources"]
+        ]
+        rooms = self.hass.data["ags_service"]["rooms"]
+        active_rooms = self.hass.data.get("active_rooms", [])
+        has_active_tv_room = any(
+            room["room"] in active_rooms
+            and any(d.get("device_type") == "tv" for d in room["devices"])
+            for room in rooms
+        )
+        if has_active_tv_room:
             sources.append("TV")
 
         return sources
