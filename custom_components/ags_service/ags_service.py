@@ -202,15 +202,28 @@ def get_configured_rooms(rooms, hass):
 ## Function for Active room ###
 def get_active_rooms(rooms, hass):
     """Fetch the list of active rooms based on switches in hass.data."""
-    
+
     active_rooms = []
-    
+    tv_mode = hass.data.get('tv_mode', 'tv_audio')
+
     for room in rooms:
         room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
-        
-        # If the room switch is found in hass.data, add the room to the active list
-        if hass.data.get(room_key):
-            active_rooms.append(room['room'])
+
+        if not hass.data.get(room_key):
+            continue
+
+        if tv_mode == 'no_music':
+            tv_on = False
+            for device in room['devices']:
+                if device['device_type'] == 'tv':
+                    state = hass.states.get(device['device_id'])
+                    if state and state.state != 'off':
+                        tv_on = True
+                        break
+            if tv_on:
+                continue
+
+        active_rooms.append(room['room'])
     
     # Store the list of active rooms in hass.data
     hass.data['active_rooms'] = active_rooms
@@ -328,12 +341,17 @@ def update_ags_status(ags_config, hass):
         return ags_status
 
 
-    # Check for TV in active rooms
+    # Check for TV in rooms with the media switch on
     for room in rooms:
-        if room['room'] in active_rooms:
+        room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        if hass.data.get(room_key):
             for device in room['devices']:
                 device_state = device_states.get(device['device_id'])
-                if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
+                if (
+                    device['device_type'] == 'tv'
+                    and device_state
+                    and device_state.state != 'off'
+                ):
                     ags_status = "ON TV"
                     _handle_status_transition(prev_status, ags_status, hass)
                     hass.data['ags_status'] = ags_status
@@ -829,23 +847,26 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                tv_target = await ensure_preferred_primary_tv(hass)
-                state = hass.states.get(tv_target) if tv_target else None
-                if state is not None and state.state != "unavailable" and (
-                    "TV" in (state.attributes.get("source_list") or [])
-                ):
-                    if actions_enabled:
-                        await enqueue_media_action(
-                            hass,
-                            "select_source",
-                            {"entity_id": tv_target, "source": "TV"},
+                if hass.data.get("tv_mode", "tv_audio") != "no_music":
+                    tv_target = await ensure_preferred_primary_tv(hass)
+                    state = hass.states.get(tv_target) if tv_target else None
+                    if state is not None and state.state != "unavailable" and (
+                        "TV" in (state.attributes.get("source_list") or [])
+                    ):
+                        if actions_enabled:
+                            await enqueue_media_action(
+                                hass,
+                                "select_source",
+                                {"entity_id": tv_target, "source": "TV"},
+                            )
+                        message_parts.append(f"TV source on {tv_target}")
+                    else:
+                        msg = (
+                            f"{tv_target} cannot select TV" if tv_target else "no TV speaker"
                         )
-                    message_parts.append(f"TV source on {tv_target}")
+                        message_parts.append(msg)
                 else:
-                    msg = (
-                        f"{tv_target} cannot select TV" if tv_target else "no TV speaker"
-                    )
-                    message_parts.append(msg)
+                    message_parts.append("tv_mode set to no_music - skipping TV commands")
             else:
                 if actions_enabled:
                     await ags_select_source(ags_config, hass)
