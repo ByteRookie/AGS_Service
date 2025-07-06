@@ -1,7 +1,6 @@
 # ags_service .py
 import logging
 import asyncio
-from datetime import datetime, timedelta
 from homeassistant.core import HomeAssistant
 
 
@@ -9,26 +8,25 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 _ACTION_QUEUE: asyncio.Queue | None = None
-_ACTION_WORKER: asyncio.Task | None = None
 
-EVENT_LOG_MAX_AGE = timedelta(days=1)
+_ACTION_WORKER: asyncio.Task | None = None
 
 
 def log_ags_event(hass: HomeAssistant, action: str, details: dict | None = None) -> None:
-    """Append an event entry to the in-memory log if enabled."""
-    if not hass.data.get("ags_service", {}).get("enable_event_log"):
-        return
-
-    entry = {
-        "time": datetime.now().isoformat(timespec="seconds"),
-        "action": action,
-        "details": details or {},
-    }
-
-    log = hass.data["ags_service"].setdefault("event_log", [])
-    cutoff = datetime.now() - EVENT_LOG_MAX_AGE
-    log[:] = [e for e in log if datetime.fromisoformat(e["time"]) > cutoff]
-    log.append(entry)
+    """Log an AGS event for debugging and the logbook."""
+    msg = action
+    if details:
+        msg += f" {details}"
+    _LOGGER.debug(msg)
+    hass.loop.call_soon_threadsafe(
+        lambda: hass.async_create_task(
+            hass.services.async_call(
+                "logbook",
+                "log",
+                {"name": "AGS Service", "message": msg},
+            )
+        )
+    )
 
 
 async def _action_worker(hass: HomeAssistant) -> None:

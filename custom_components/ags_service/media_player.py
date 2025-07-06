@@ -222,8 +222,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_source": self.ags_source,
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
         }
-        if self.hass.data['ags_service'].get('enable_event_log'):
-            attributes["event_log"] = self.hass.data['ags_service'].get('event_log', [])
         return attributes
 
 
