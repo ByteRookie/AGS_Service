@@ -223,6 +223,13 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.4.1
+- Schedule source selection runs asynchronously
+- Show TV source only when the TV room is active
+- Clear playlist after stopping media
+- Fix async source selection logic
+- Improve music source handling and TV coordinator selection
+
 ### v1.4.0
 - Added action queue with optional AGS Actions switch
 - Removed the old `AGS Automation Example.yaml` file; all join/unjoin logic is now part of the integration
