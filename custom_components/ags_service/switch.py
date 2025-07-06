@@ -13,6 +13,7 @@ from .ags_service import (
     ensure_action_queue,
     wait_for_actions,
     update_ags_sensors,
+    handle_ags_status_change,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,15 +68,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
         rooms = self.hass.data["ags_service"]["rooms"]
-        prev_active = get_active_rooms(rooms, self.hass)
-        prev_primary = self.hass.data.get("primary_speaker")
+        get_active_rooms(rooms, self.hass)
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        await self._maybe_join(
-            first_room=len(prev_active) == 0,
-            prev_primary=prev_primary,
-        )
+        await self._maybe_join()
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
@@ -92,12 +89,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
-    async def _maybe_join(
-        self,
-        *,
-        first_room: bool = False,
-        prev_primary: str | None = None,
-    ) -> None:
+    async def _maybe_join(self) -> None:
         """Refresh sensors then apply the current AGS logic."""
         prev_status, new_status = await update_ags_sensors(
             self.hass.data["ags_service"], self.hass
