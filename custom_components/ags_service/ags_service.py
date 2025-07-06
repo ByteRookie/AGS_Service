@@ -682,6 +682,9 @@ async def async_update_sources_from_sonos(hass, entity_id=None):
     if not favorites:
         return
 
+    # Store the list of favorite titles so a sensor can expose them
+    hass.data['ags_service']['sonos_favorites'] = [f.get('Source') for f in favorites]
+
     sources = hass.data["ags_service"].get("Sources", [])
     existing = {src["Source"] for src in sources}
     for fav in favorites:

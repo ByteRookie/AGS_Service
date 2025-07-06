@@ -31,7 +31,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         PrimarySpeakerSensor(hass),
         PreferredPrimarySpeakerSensor(hass),
         AGSSourceSensor( hass),
-        AGSInactiveTVSpeakersSensor(hass)
+        AGSInactiveTVSpeakersSensor(hass),
+        AGSSonosFavoritesSensor(hass)
     ]
 
 
@@ -269,6 +270,26 @@ class AGSInactiveTVSpeakersSensor(SensorEntity):
     def state(self):
         ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         return ags_inactive_tv_speakers
+
+
+# Sensor listing the Sonos favorites discovered automatically
+class AGSSonosFavoritesSensor(SensorEntity):
+    """Represent the list of Sonos favorites AGS has loaded."""
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    @property
+    def unique_id(self):
+        return "ags_sonos_favorites"
+
+    @property
+    def name(self):
+        return "AGS Sonos Favorites"
+
+    @property
+    def state(self):
+        return self.hass.data.get('ags_service', {}).get('sonos_favorites')
    
 
 

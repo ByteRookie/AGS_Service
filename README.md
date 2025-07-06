@@ -34,6 +34,7 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 * `AGS Service Preferred Primary Speaker` – backup speaker that will take over if the primary stops playing.
 * `AGS Service Source` – name of the media source that will be played when AGS starts playback.
 * `AGS Service Inactive TV Speakers` – TV‑related speakers that are currently inactive.
+* `AGS Service Sonos Favorites` – titles of favorites retrieved from Sonos.
 
 All of the data from these sensors is also available as attributes of the
 `media_player.ags_media_player` entity, so you may disable the sensors and still
@@ -239,12 +240,16 @@ Each sensor uses specific logic to report the state of the system:
 * **AGS Service Preferred Primary Speaker** – next speaker AGS will use if the primary stops.
 * **AGS Service Source** – numeric media source value for the selected item.
 * **AGS Service Inactive TV Speakers** – speakers attached to TVs that are currently inactive.
+* **AGS Service Sonos Favorites** – list of favorite titles loaded from Sonos.
 
 ## License
 
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.4.3
+- New sensor ``AGS Service Sonos Favorites`` exposes the titles loaded from Sonos.
 
 ### v1.4.2
 - Sonos favorites now load from the highest priority speaker when no ``entity_id`` is provided.

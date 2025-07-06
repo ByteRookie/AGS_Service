@@ -109,7 +109,8 @@ async def async_setup(hass, config):
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY)
+        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+        'sonos_favorites': []
    }
 
     async def _service_load_favorites(call):
