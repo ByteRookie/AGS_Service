@@ -16,6 +16,7 @@ from .ags_service import (
     update_ags_sensors,
     ags_select_source,
     ensure_preferred_primary_tv,
+    log_event,
 )
 from . import ags_service as ags
 
@@ -78,6 +79,10 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        log_event(
+            self.hass,
+            f"{self._attr_name} turned ON (prev active rooms: {len(prev_active)})",
+        )
         await self._maybe_join(
             first_room=len(prev_active) == 0,
             prev_primary=prev_primary,
@@ -88,6 +93,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        log_event(self.hass, f"{self._attr_name} turned OFF")
         await self._maybe_unjoin()
 
     async def async_added_to_hass(self):
@@ -126,6 +132,10 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             "join",
             {"entity_id": primary, "group_members": members},
         )
+        log_event(
+            self.hass,
+            f"Joining {', '.join(members)} to {primary}",
+        )
         if first_room:
             if current_status == "ON TV":
                 preferred = await ensure_preferred_primary_tv(self.hass)
@@ -135,10 +145,18 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                         "select_source",
                         {"entity_id": preferred, "source": "TV"},
                     )
+                    log_event(
+                        self.hass,
+                        f"TV mode: selecting TV source on {preferred}",
+                    )
             elif not prev_primary or prev_primary == "none":
                 await ags_select_source(
                     self.hass.data["ags_service"],
                     self.hass,
+                )
+                log_event(
+                    self.hass,
+                    f"{self.room['room']} starting playback",
                 )
         await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
@@ -157,6 +175,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await enqueue_media_action(self.hass, "unjoin", {"entity_id": members})
+        log_event(self.hass, f"Unjoining {', '.join(members)}")
         await enqueue_media_action(
             self.hass,
             "wait_ungrouped",
@@ -171,12 +190,20 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     "select_source",
                     {"entity_id": member, "source": "TV"},
                 )
+                log_event(
+                    self.hass,
+                    f"Resetting {member} to TV source",
+                )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
             await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
+            log_event(
+                self.hass,
+                f"Stopping playback on {', '.join(members)} as no rooms active",
+            )
         await wait_for_actions(self.hass)
 
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
@@ -204,11 +231,13 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        log_event(self.hass, "AGS Actions enabled")
 
     async def async_turn_off(self, **kwargs) -> None:
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        log_event(self.hass, "AGS Actions disabled")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

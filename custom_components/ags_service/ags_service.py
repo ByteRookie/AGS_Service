@@ -4,6 +4,12 @@ import asyncio
 from homeassistant.core import HomeAssistant
 
 
+def log_event(hass: HomeAssistant, message: str) -> None:
+    """Log a message when detailed logging is enabled."""
+    if hass.data.get("ags_service", {}).get("enable_logging"):
+        _LOGGER.info(message)
+
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,15 +24,28 @@ async def _action_worker(hass: HomeAssistant) -> None:
         try:
             if service == "delay":
                 await asyncio.sleep(data.get("seconds", 1))
+                result = "delay finished"
             elif service == "wait_ungrouped":
                 await _wait_until_ungrouped(
                     hass,
                     data.get("entity_id"),
                     data.get("timeout", 3),
                 )
+                result = "ungrouped"
             else:
-                await hass.services.async_call("media_player", service, data)
+                await hass.services.async_call(
+                    "media_player", service, data, blocking=True
+                )
+                result = "success"
+            log_event(
+                hass,
+                f"Command {service} called with {data} -> {result}",
+            )
         except Exception as exc:  # pragma: no cover - safety net
+            log_event(
+                hass,
+                f"Command {service} with {data} failed: {exc}",
+            )
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
 

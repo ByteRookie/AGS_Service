@@ -7,7 +7,12 @@ from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    get_control_device_id,
+    log_event,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -95,11 +100,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def _schedule_media_call(self, service: str, data: dict) -> None:
         """Safely fire a media_player service from any thread."""
-        self.hass.loop.call_soon_threadsafe(
-            lambda: self.hass.async_create_task(
+        def _call() -> None:
+            log_event(
+                self.hass,
+                f"Media command {service} with {data}",
+            )
+            self.hass.async_create_task(
                 self.hass.services.async_call("media_player", service, data)
             )
-        )
+
+        self.hass.loop.call_soon_threadsafe(_call)
 
     def _schedule_ags_update(self) -> None:
         """Refresh AGS sensor data without waiting for polling."""

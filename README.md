@@ -119,6 +119,7 @@ ags_service:
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
 | `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
+| `enable_logging` | `false` | Log switch events and commands for troubleshooting. |
 
 ### Reference configuration
 
@@ -131,6 +132,7 @@ ags_service:
 #  default_on: false
 #  static_name: "AGS Media Player"
 #  disable_Tv_Source: false
+#  enable_logging: true
 #  schedule_entity:
 #    entity_id: schedule.my_music
 #    on_state: "on"  # optional
