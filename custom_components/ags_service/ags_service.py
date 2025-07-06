@@ -587,17 +587,16 @@ async def ags_select_source(ags_config, hass):
         if source == "TV":
             await enqueue_media_action(
                 hass,
-                'select_source',
+                "select_source",
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
-        elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
-            hass.loop.call_soon_threadsafe(
-                lambda: hass.async_create_task(
-                    hass.services.async_call('media_player', 'select_source', {
-                        "source": source,
-                        "entity_id": primary_speaker_entity_id
-                    })
-                )
+        elif (
+            status == "ON TV" and disable_tv_source is False and source != "Unknown"
+        ):
+            await enqueue_media_action(
+                hass,
+                "select_source",
+                {"source": source, "entity_id": primary_speaker_entity_id},
             )
 
         elif source != "Unknown" and status == "ON":
