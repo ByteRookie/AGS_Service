@@ -102,26 +102,49 @@ async def _wait_until_grouped(
         await asyncio.sleep(0.1)
 
 
-async def ensure_preferred_primary_tv(hass: HomeAssistant) -> str | None:
-    """Make the preferred primary lead the group for TV playback."""
+async def ensure_preferred_primary_tv(hass: HomeAssistant, ags_config: dict) -> str | None:
+    """Return a TV capable speaker from the active rooms and make it lead the group."""
     preferred = hass.data.get("preferred_primary_speaker")
     primary = hass.data.get("primary_speaker")
-    if not preferred or preferred == "none":
+
+    # Speakers that belong to any TV room
+    tv_speakers = [
+        d["device_id"]
+        for room in ags_config.get("rooms", [])
+        if any(dev.get("device_type") == "tv" for dev in room.get("devices", []))
+        for d in room.get("devices", [])
+        if d.get("device_type") == "speaker"
+    ]
+
+    active_speakers = hass.data.get("active_speakers", [])
+    active_tv_speakers = [spk for spk in active_speakers if spk in tv_speakers]
+
+    # Prefer preferred or primary speaker if it is an active TV speaker
+    tv_target = None
+    for candidate in (preferred, primary):
+        if candidate and candidate != "none" and candidate in active_tv_speakers:
+            tv_target = candidate
+            break
+
+    if tv_target is None and active_tv_speakers:
+        tv_target = active_tv_speakers[0]
+
+    if not tv_target:
         return None
 
-    if primary != preferred:
-        actions_enabled = hass.data.get("switch.ags_actions", True)
-        members = [spk for spk in hass.data.get("active_speakers", []) if spk != preferred]
-        if actions_enabled and members:
-            await enqueue_media_action(
-                hass,
-                "join",
-                {"entity_id": preferred, "group_members": members},
-            )
-            await wait_for_actions(hass)
-            await _wait_until_grouped(hass, preferred, [preferred] + members)
+    # Ensure ``tv_target`` is the coordinator for the active group
+    actions_enabled = hass.data.get("switch.ags_actions", True)
+    members = [spk for spk in active_speakers if spk != tv_target]
+    if actions_enabled and members:
+        await enqueue_media_action(
+            hass,
+            "join",
+            {"entity_id": tv_target, "group_members": members},
+        )
+        await wait_for_actions(hass)
+        await _wait_until_grouped(hass, tv_target, [tv_target] + members)
 
-    return preferred
+    return tv_target
 
 
 def _handle_status_transition(prev_status, new_status, hass):
@@ -600,8 +623,12 @@ async def ags_select_source(ags_config, hass):
             )
 
         elif source != "Unknown" and status == "ON":
-            if state.state == "playing" and state.attributes.get("source") != "TV":
+            if (
+                state.state == "playing"
+                and state.attributes.get("source") == source
+            ):
                 return
+
             source_info = source_dict.get(source)
 
             if source_info:
@@ -829,7 +856,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 return
 
             if new_status == "ON TV":
-                tv_target = await ensure_preferred_primary_tv(hass)
+                tv_target = await ensure_preferred_primary_tv(hass, ags_config)
                 state = hass.states.get(tv_target) if tv_target else None
                 if state is not None and state.state != "unavailable" and (
                     "TV" in (state.attributes.get("source_list") or [])
