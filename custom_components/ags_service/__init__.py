@@ -128,7 +128,11 @@ async def async_setup(hass, config):
     async def _delayed_load(_: object) -> None:
         # Wait briefly so Sonos speakers are fully initialized
         await asyncio.sleep(10)
-        await async_update_sources_from_sonos(hass)
+        success = await async_update_sources_from_sonos(hass)
+        if not success:
+            # Retry once more in case the speakers were still starting up
+            await asyncio.sleep(20)
+            await async_update_sources_from_sonos(hass)
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _delayed_load)
 

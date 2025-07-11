@@ -691,7 +691,7 @@ async def async_update_sources_from_sonos(hass, entity_id=None):
 
     favorites = await fetch_sonos_favorites(hass, entity_id)
     if not favorites:
-        return
+        return False
 
     # Store the list of favorite titles so a sensor can expose them
     hass.data['ags_service']['sonos_favorites'] = [f.get('Source') for f in favorites]
@@ -712,6 +712,8 @@ async def async_update_sources_from_sonos(hass, entity_id=None):
             player = component.get_entity(ent_id)
             if player:
                 player.async_schedule_update_ha_state(True)
+
+    return True
 
 
 

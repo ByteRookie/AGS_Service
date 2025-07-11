@@ -252,6 +252,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Delay loading Sonos favorites until Home Assistant is fully started to ensure speakers are ready.
 - New sensor ``AGS Service Sonos Favorites`` now populates once favorites are available.
 
+### v1.4.5
+- Retry loading favorites if the first attempt fails so the Sources list eventually populates
+
 ### v1.4.3
 - New sensor ``AGS Service Sonos Favorites`` exposes the titles loaded from Sonos.
 
