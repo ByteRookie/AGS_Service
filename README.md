@@ -151,6 +151,7 @@ ags_service:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
+          tv_mode: tv_audio
 #          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
         - device_id: "media_player.device_2"
           device_type: "speaker"
@@ -160,6 +161,7 @@ ags_service:
         - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
+          tv_mode: no_music
 #          override_content: "bluetooth"
         - device_id: "media_player.device_4"
           device_type: "speaker"
