@@ -4,6 +4,12 @@ import asyncio
 from homeassistant.core import HomeAssistant
 
 
+def log_event(hass: HomeAssistant, message: str) -> None:
+    """Log a message when detailed logging is enabled."""
+    if hass.data.get("ags_service", {}).get("enable_logging"):
+        _LOGGER.info(message)
+
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,15 +24,28 @@ async def _action_worker(hass: HomeAssistant) -> None:
         try:
             if service == "delay":
                 await asyncio.sleep(data.get("seconds", 1))
+                result = "delay finished"
             elif service == "wait_ungrouped":
                 await _wait_until_ungrouped(
                     hass,
                     data.get("entity_id"),
                     data.get("timeout", 3),
                 )
+                result = "ungrouped"
             else:
-                await hass.services.async_call("media_player", service, data)
+                await hass.services.async_call(
+                    "media_player", service, data, blocking=True
+                )
+                result = "success"
+            log_event(
+                hass,
+                f"Command {service} called with {data} -> {result}",
+            )
         except Exception as exc:  # pragma: no cover - safety net
+            log_event(
+                hass,
+                f"Command {service} with {data} failed: {exc}",
+            )
             _LOGGER.warning("Failed media action %s: %s", service, exc)
         _ACTION_QUEUE.task_done()
 
@@ -826,6 +845,11 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(hass, "media_stop", {"entity_id": members})
                     await enqueue_media_action(hass, "clear_playlist", {"entity_id": members})
 
+            log_event(
+                hass,
+                f"status {old_status} -> OFF | unjoined all speakers",
+            )
+
         elif new_status in ("ON", "ON TV"):
             primary_val = hass.data.get("primary_speaker")
             preferred_val = hass.data.get("preferred_primary_speaker")
@@ -895,6 +919,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if actions_enabled:
                     await ags_select_source(ags_config, hass)
                     message_parts.append("selected music source")
+            log_event(
+                hass,
+                f"status {old_status} -> {new_status} | " + " | ".join(message_parts),
+            )
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)

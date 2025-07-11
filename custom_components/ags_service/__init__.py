@@ -30,6 +30,7 @@ CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
 CONF_SOURCE_VALUE = 'Source_Value'
 CONF_SOURCE_DEFAULT = 'source_default'
+CONF_ENABLE_LOGGING = 'enable_logging'
 
 
 # Define the configuration schema for a device
@@ -84,6 +85,7 @@ DEVICE_SCHEMA = vol.Schema({
         vol.Optional('off_state', default='off'): cv.string,
         vol.Optional('schedule_override', default=False): cv.boolean,
     }),
+    vol.Optional(CONF_ENABLE_LOGGING, default=False): cv.boolean,
 })
 
 async def async_setup(hass, config):
@@ -109,6 +111,7 @@ async def async_setup(hass, config):
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+        'enable_logging': ags_config.get(CONF_ENABLE_LOGGING, False),
     }
 
     # Initialize shared media action queue

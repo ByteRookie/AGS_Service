@@ -16,6 +16,7 @@ from .ags_service import (
     update_ags_sensors,
     ags_select_source,
     ensure_preferred_primary_tv,
+    log_event,
 )
 from . import ags_service as ags
 
@@ -40,6 +41,8 @@ async def async_setup_platform(
 
     if ags_config.get("create_sensors"):
         entities.append(AGSActionsSwitch(hass))
+
+    entities.append(AGSLoggingSwitch(hass))
 
     async_add_entities(entities)
 
@@ -78,6 +81,10 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        log_event(
+            self.hass,
+            f"{self._attr_name} turned ON (prev active rooms: {len(prev_active)})",
+        )
         await self._maybe_join(
             first_room=len(prev_active) == 0,
             prev_primary=prev_primary,
@@ -88,6 +95,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        log_event(self.hass, f"{self._attr_name} turned OFF")
         await self._maybe_unjoin()
 
     async def async_added_to_hass(self):
@@ -126,6 +134,10 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             "join",
             {"entity_id": primary, "group_members": members},
         )
+        log_event(
+            self.hass,
+            f"Joining {', '.join(members)} to {primary}",
+        )
         if first_room:
             if current_status == "ON TV":
                 preferred = await ensure_preferred_primary_tv(
@@ -137,10 +149,18 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                         "select_source",
                         {"entity_id": preferred, "source": "TV"},
                     )
+                    log_event(
+                        self.hass,
+                        f"TV mode: selecting TV source on {preferred}",
+                    )
             elif not prev_primary or prev_primary == "none":
                 await ags_select_source(
                     self.hass.data["ags_service"],
                     self.hass,
+                )
+                log_event(
+                    self.hass,
+                    f"{self.room['room']} starting playback",
                 )
         await wait_for_actions(self.hass)
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
@@ -159,6 +179,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if not members:
             return
         await enqueue_media_action(self.hass, "unjoin", {"entity_id": members})
+        log_event(self.hass, f"Unjoining {', '.join(members)}")
         await enqueue_media_action(
             self.hass,
             "wait_ungrouped",
@@ -173,12 +194,20 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     "select_source",
                     {"entity_id": member, "source": "TV"},
                 )
+                log_event(
+                    self.hass,
+                    f"Resetting {member} to TV source",
+                )
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
             await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
+            log_event(
+                self.hass,
+                f"Stopping playback on {', '.join(members)} as no rooms active",
+            )
         await wait_for_actions(self.hass)
 
         await update_ags_sensors(self.hass.data["ags_service"], self.hass)
@@ -206,11 +235,13 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        log_event(self.hass, "AGS Actions enabled")
 
     async def async_turn_off(self, **kwargs) -> None:
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        log_event(self.hass, "AGS Actions disabled")
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -218,6 +249,50 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
+
+
+class AGSLoggingSwitch(SwitchEntity, RestoreEntity):
+    """Toggle detailed logging at runtime."""
+
+    _attr_should_poll = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+        self._attr_name = "AGS Logging"
+        self._attr_unique_id = "switch.ags_logging"
+        if self._attr_unique_id in hass.data:
+            self._attr_is_on = hass.data[self._attr_unique_id]
+        else:
+            initial = hass.data.get("ags_service", {}).get("enable_logging", False)
+            self._attr_is_on = initial
+            hass.data[self._attr_unique_id] = self._attr_is_on
+            hass.data["ags_service"]["enable_logging"] = self._attr_is_on
+
+    @property
+    def is_on(self) -> bool:
+        return self._attr_is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self._attr_is_on = True
+        self.hass.data[self._attr_unique_id] = True
+        self.hass.data["ags_service"]["enable_logging"] = True
+        self.async_write_ha_state()
+        log_event(self.hass, "AGS Logging enabled")
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self._attr_is_on = False
+        self.hass.data[self._attr_unique_id] = False
+        self.hass.data["ags_service"]["enable_logging"] = False
+        self.async_write_ha_state()
+        log_event(self.hass, "AGS Logging disabled")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state:
+            self._attr_is_on = last_state.state == "on"
+            self.hass.data[self._attr_unique_id] = self._attr_is_on
+            self.hass.data["ags_service"]["enable_logging"] = self._attr_is_on
 
 
 
