@@ -179,7 +179,7 @@ ags_service:
 
 ### Logging
 
-When `enable_logging` is `true` a new **AGS Logging** switch is created. Toggle this entity to turn verbose logging on or off without editing YAML. Messages appear in Home Assistant's log at the `INFO` level. To view them, add the following to `configuration.yaml`:
+When `enable_logging` is `true` a new **AGS Logging** switch is created after reloading the integration. Toggle this entity to turn verbose logging on or off without editing YAML. Messages appear in Home Assistant's log at the `INFO` level. To view them, add the following to `configuration.yaml`:
 
 ```yaml
 logger:
