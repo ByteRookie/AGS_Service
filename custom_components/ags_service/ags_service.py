@@ -299,15 +299,17 @@ def update_ags_status(ags_config, hass):
         else:
             schedule_on = False
 
-    # Automatically enable the media system when the schedule switches
-    # from the off state to the on state
+    # When the schedule transitions from the off state to the on state
+    # restore the media system based on the default setting unless
+    # schedule_override is enabled
     if (
         schedule_cfg
         and prev_schedule_state is not None
         and not prev_schedule_state
         and schedule_on
     ):
-        hass.data['switch_media_system_state'] = True
+        if not schedule_cfg.get('schedule_override'):
+            hass.data['switch_media_system_state'] = ags_config['default_on']
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
