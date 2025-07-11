@@ -5,7 +5,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .ags_service import (
@@ -25,21 +25,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # Setup platform function
-async def async_setup_platform(
-    hass: HomeAssistant,
-    config: ConfigType,
-    async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the switch platform."""
-    # Retrieve the room information from the shared data
-    ags_config = hass.data["ags_service"]
+    """Set up AGS Service switches from a config entry."""
+    ags_config = hass.data["ags_service"][entry.entry_id]
     rooms = ags_config["rooms"]
 
-    entities = [RoomSwitch(hass, room) for room in rooms]
+    entities = [RoomSwitch(hass, room, entry.entry_id) for room in rooms]
 
     if ags_config.get("create_sensors"):
-        entities.append(AGSActionsSwitch(hass))
+        entities.append(AGSActionsSwitch(hass, entry.entry_id))
 
     async_add_entities(entities)
 
@@ -50,10 +46,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     _attr_should_poll = False
 
-    def __init__(self, hass, room):
+    def __init__(self, hass: HomeAssistant, room: dict, entry_id: str):
         """Initialize the switch."""
         self.hass = hass
         self.room = room
+        self.entry_id = entry_id
         self._attr_name = f"{room['room']} Media"
         self._attr_unique_id = f"switch.{room['room'].lower().replace(' ', '_')}_media"
 
@@ -72,7 +69,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
-        rooms = self.hass.data["ags_service"]["rooms"]
+        rooms = self.hass.data["ags_service"][self.entry_id]["rooms"]
         prev_active = get_active_rooms(rooms, self.hass)
         prev_primary = self.hass.data.get("primary_speaker")
         self._attr_is_on = True
@@ -105,7 +102,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         prev_primary: str | None = None,
     ) -> None:
         """Join all active speakers to the primary group if allowed."""
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
+        await update_ags_sensors(self.hass.data["ags_service"][self.entry_id], self.hass)
         current_status = self.hass.data.get("ags_status")
         if current_status == "OFF":
             return
@@ -129,7 +126,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if first_room:
             if current_status == "ON TV":
                 preferred = await ensure_preferred_primary_tv(
-                    self.hass, self.hass.data["ags_service"]
+                    self.hass, self.hass.data["ags_service"][self.entry_id]
                 )
                 if preferred:
                     await enqueue_media_action(
@@ -139,15 +136,15 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     )
             elif not prev_primary or prev_primary == "none":
                 await ags_select_source(
-                    self.hass.data["ags_service"],
+                    self.hass.data["ags_service"][self.entry_id],
                     self.hass,
                 )
         await wait_for_actions(self.hass)
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
+        await update_ags_sensors(self.hass.data["ags_service"][self.entry_id], self.hass)
 
     async def _maybe_unjoin(self) -> None:
         """Unjoin this room's speaker from any group if allowed."""
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
+        await update_ags_sensors(self.hass.data["ags_service"][self.entry_id], self.hass)
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if not actions_enabled:
             return
@@ -166,7 +163,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         )
 
         has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
-        if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
+        if has_tv and not self.hass.data["ags_service"][self.entry_id].get("disable_Tv_Source"):
             for member in members:
                 await enqueue_media_action(
                     self.hass,
@@ -174,22 +171,23 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                     {"entity_id": member, "source": "TV"},
                 )
 
-        rooms = self.hass.data["ags_service"]["rooms"]
+        rooms = self.hass.data["ags_service"][self.entry_id]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
             await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
         await wait_for_actions(self.hass)
 
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
+        await update_ags_sensors(self.hass.data["ags_service"][self.entry_id], self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
 
     _attr_should_poll = False
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self.hass = hass
+        self.entry_id = entry_id
         self._attr_name = "AGS Actions"
         self._attr_unique_id = "switch.ags_actions"
         if self._attr_unique_id in hass.data:

@@ -5,6 +5,7 @@ from homeassistant.components.media_player.const import (
 )
 from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.config_entries import ConfigEntry
 
 import asyncio
 from .ags_service import (
@@ -17,12 +18,14 @@ from .ags_service import (
 import logging
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    ags_config = hass.data['ags_service']
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
+) -> None:
+    ags_config = hass.data['ags_service'][entry.entry_id]
     rooms = ags_config['rooms']
     
 
-    ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
+    ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config, entry.entry_id)
     async_add_entities([ags_media_player])
     
     # Set up a listener to monitor changes to sensor.ags_primary_speaker
@@ -79,10 +82,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if last_state:
             self.hass.data["ags_media_player_source"] = last_state.attributes.get("source")
 
-    def __init__(self, hass, ags_config):
+    def __init__(self, hass: HomeAssistant, ags_config: dict, entry_id: str):
         """Initialize the media player."""
         self._hass = hass
         self.ags_config = ags_config
+        self.entry_id = entry_id
         self._name = "AGS Media Player"
         self._state = STATE_IDLE
         self.primary_speaker_entity_id = None
@@ -142,7 +146,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
-            sources = self.hass.data['ags_service']['Sources']
+            sources = self.hass.data['ags_service'][self.entry_id]['Sources']
             default = next(
                 (
                     src["Source"]
@@ -231,7 +235,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def name(self):
-        ags_config = self.hass.data['ags_service']
+        ags_config = self.hass.data['ags_service'][self.entry_id]
         static_name = ags_config['static_name']
         if static_name: 
             return static_name 
@@ -412,7 +416,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source_list(self):
         """List of available sources."""
-        ags_config = self.hass.data['ags_service']
+        ags_config = self.hass.data['ags_service'][self.entry_id]
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
         if self.ags_status == "ON TV" and disable_Tv_Source == False:
@@ -424,9 +428,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         else:
             sources = [
                 source_dict["Source"]
-                for source_dict in self.hass.data["ags_service"]["Sources"]
+                for source_dict in self.hass.data["ags_service"][self.entry_id]["Sources"]
             ]
-            rooms = self.hass.data["ags_service"]["rooms"]
+            rooms = self.hass.data["ags_service"][self.entry_id]["rooms"]
             active_rooms = self.hass.data.get("active_rooms", [])
             has_active_tv_room = any(
                 room["room"] in active_rooms
@@ -447,7 +451,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             return self.hass.data.get("ags_media_player_source")
 
     def get_source_value_by_name(self, source_name):
-        for source_dict in self.hass.data['ags_service']['Sources']:
+        for source_dict in self.hass.data['ags_service'][self.entry_id]['Sources']:
             if source_dict["Source"] == source_name:
                 return source_dict["Source_Value"]
         return None  # if not found
@@ -523,7 +527,7 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     @property
     def name(self):
         """Return the name of the media system player."""
-        ags_config = self.hass.data['ags_service']
+        ags_config = self.hass.data['ags_service'][self.entry_id]
         return ags_config['homekit_player']
 
     @property
@@ -552,9 +556,9 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
     def source_list(self):
         sources = [
             source_dict["Source"]
-            for source_dict in self.hass.data["ags_service"]["Sources"]
+            for source_dict in self.hass.data["ags_service"][self.entry_id]["Sources"]
         ]
-        rooms = self.hass.data["ags_service"]["rooms"]
+        rooms = self.hass.data["ags_service"][self.entry_id]["rooms"]
         active_rooms = self.hass.data.get("active_rooms", [])
         has_active_tv_room = any(
             room["room"] in active_rooms
