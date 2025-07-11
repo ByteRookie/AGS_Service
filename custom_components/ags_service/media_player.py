@@ -8,6 +8,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
 from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+from .__init__ import TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC
 
 import logging
 _LOGGER = logging.getLogger(__name__)
