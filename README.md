@@ -118,6 +118,7 @@ ags_service:
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
+| `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
 | `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
 
 ### Reference configuration
@@ -131,6 +132,7 @@ ags_service:
 #  default_on: false
 #  static_name: "AGS Media Player"
 #  disable_Tv_Source: false
+#  batch_unjoin: false
 #  schedule_entity:
 #    entity_id: schedule.my_music
 #    on_state: "on"  # optional
@@ -223,6 +225,9 @@ latest group state is used.
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.4.8
+- Faster AGS OFF logic with optional `batch_unjoin` setting.
 
 ### v1.4.7
 - Last playing speakers now stop when the final room turns off, even if the system status stays ON.

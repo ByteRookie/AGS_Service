@@ -648,6 +648,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         await hass.data["ags_service"]["update_event"].wait()
 
         rooms = ags_config["rooms"]
+        device_states = {s.entity_id: s for s in hass.states.async_all()}
         tv_map = {
             d["device_id"]: any(dev.get("device_type") == "tv" for dev in room["devices"])
             for room in rooms
@@ -668,45 +669,45 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 for r in rooms
                 for d in r["devices"]
                 if d.get("device_type") == "speaker"
-                and (state := hass.states.get(d["device_id"])) is not None
+                and (state := device_states.get(d["device_id"])) is not None
                 and state.state != "unavailable"
             ]
 
             if all_speakers:
-                for spk in all_speakers:
-                    # Unjoin speakers one by one to avoid Sonos race conditions
-                    await enqueue_media_action(hass, "unjoin", {"entity_id": spk})
+                if ags_config.get("batch_unjoin"):
+                    await enqueue_media_action(hass, "unjoin", {"entity_id": all_speakers})
+                else:
+                    for spk in all_speakers:
+                        await enqueue_media_action(hass, "unjoin", {"entity_id": spk})
                 await enqueue_media_action(
                     hass, "wait_ungrouped", {"entity_id": all_speakers, "timeout": 5}
                 )
                 await enqueue_media_action(hass, "delay", {"seconds": 0.5})
 
-            # Stop music or reset TVs depending on room type
+            tv_speakers: list[str] = []
+            regular_speakers: list[str] = []
+
             for room in rooms:
-                members = [
-                    d["device_id"]
-                    for d in room["devices"]
-                    if d.get("device_type") == "speaker"
-                ]
-                if not members:
-                    continue
-                has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
-                for member in members:
-                    state = hass.states.get(member)
-                    if not state or state.state == "unavailable":
-                        _LOGGER.debug(
-                            "Skipped media_stop for %s – state unavailable", member
-                        )
-                        continue
-                    if has_tv and not ags_config.get("disable_Tv_Source"):
-                        await enqueue_media_action(
-                            hass, "select_source", {"entity_id": member, "source": "TV"}
-                        )
-                    else:
-                        await enqueue_media_action(
-                            hass, "media_stop", {"entity_id": member}
-                        )
-                    await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                for d in room["devices"]:
+                    if d.get("device_type") == "speaker":
+                        if any(dev.get("device_type") == "tv" for dev in room["devices"]):
+                            tv_speakers.append(d["device_id"])
+                        else:
+                            regular_speakers.append(d["device_id"])
+
+            for spk in tv_speakers:
+                state = device_states.get(spk)
+                if state and state.state != "unavailable" and not ags_config.get("disable_Tv_Source"):
+                    await enqueue_media_action(
+                        hass, "select_source", {"entity_id": spk, "source": "TV"}
+                    )
+
+            for spk in regular_speakers:
+                state = device_states.get(spk)
+                if state and state.state != "unavailable":
+                    await enqueue_media_action(
+                        hass, "media_stop", {"entity_id": spk}
+                    )
 
             return
 
