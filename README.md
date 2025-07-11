@@ -178,7 +178,7 @@ ags_service:
 * **Sources** – static list of available sources for the AGS Media Player. Mark one entry with `source_default: true` to use when no other source is selected.
 * **schedule_entity** – follow another entity's state. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`.
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
-* If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
+* If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but leaves the current state unchanged when the schedule turns back on.
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
@@ -187,7 +187,7 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 AGS evaluates several conditions to decide when to play and which speaker should be primary:
 
 1. **update_ags_status** checks if `zone.home` is empty unless `disable_zone` is enabled. If nobody is home the status becomes `OFF`.
-2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
+2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off and resets to `default_on` when it switches back on.
 3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
 4. If any active room has a TV that is on, status changes to `ON TV`.
 5. Otherwise the status is simply `ON`.
