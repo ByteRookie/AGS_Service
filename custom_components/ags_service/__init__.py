@@ -58,6 +58,7 @@ DEVICE_SCHEMA = vol.Schema({
                                                 {
                                                     vol.Required(CONF_OTT_DEVICE): cv.string,
                                                     vol.Required(CONF_TV_INPUT): cv.string,
+                                                    vol.Optional("default", default=False): cv.boolean,
                                                 }
                                             )
                                         ],

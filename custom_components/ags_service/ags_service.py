@@ -551,7 +551,11 @@ def _select_ott_device(tv_device: dict, hass) -> str:
             if entry.get("tv_input") == current_input:
                 return entry.get("ott_device", tv_device["device_id"])
 
-    return ott_list[0].get("ott_device", tv_device["device_id"])
+    for entry in ott_list:
+        if entry.get("default") is True:
+            return entry.get("ott_device", tv_device["device_id"])
+
+    return tv_device["device_id"]
 
 
 def get_control_device_id(ags_config, hass):
