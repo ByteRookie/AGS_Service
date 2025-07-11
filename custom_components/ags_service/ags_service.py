@@ -543,9 +543,8 @@ def _select_ott_device(tv_device: dict, hass) -> str:
     if not ott_list:
         return tv_device.get("ott_device", tv_device["device_id"])
 
-    primary_speaker = hass.data.get("primary_speaker")
-    speaker_state = hass.states.get(primary_speaker) if primary_speaker else None
-    current_input = speaker_state.attributes.get("source") if speaker_state else None
+    tv_state = hass.states.get(tv_device["device_id"])
+    current_input = tv_state.attributes.get("source") if tv_state else None
 
     if current_input:
         for entry in ott_list:

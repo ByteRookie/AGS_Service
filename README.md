@@ -118,7 +118,7 @@ ags_service:
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
-| `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV speaker source matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. Both `ott_device` and `tv_input` are required for each entry. |
+| `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV's current input matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. Both `ott_device` and `tv_input` are required for each entry. |
 
 ### Reference configuration
 
