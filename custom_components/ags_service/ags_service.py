@@ -134,7 +134,9 @@ async def update_ags_sensors(ags_config, hass):
             # Configured rooms rarely change, only compute once
             if 'configured_rooms' not in hass.data:
                 get_configured_rooms(rooms, hass)
+            prev_rooms = hass.data.get('active_rooms', [])
             get_active_rooms(rooms, hass)
+            new_rooms = hass.data.get('active_rooms', [])
             prev_status = hass.data.get('ags_status')
             update_ags_status(ags_config, hass)
             update_speaker_states(rooms, hass)
@@ -142,7 +144,7 @@ async def update_ags_sensors(ags_config, hass):
             determine_primary_speaker(ags_config, hass)
             get_inactive_tv_speakers(rooms, hass)
             new_status = hass.data.get('ags_status')
-            if new_status != prev_status:
+            if new_status != prev_status or new_rooms != prev_rooms:
                 hass.async_create_task(
                     handle_ags_status_change(
                         hass, ags_config, new_status, prev_status
@@ -725,6 +727,16 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if (spk_state := hass.states.get(spk)) is not None
                 and spk_state.state != "unavailable"
             ]
+            extras.extend(
+                d["device_id"]
+                for room in rooms
+                if room["room"] not in hass.data.get("active_rooms", [])
+                for d in room["devices"]
+                if d.get("device_type") == "speaker"
+                and (state := hass.states.get(d["device_id"])) is not None
+                and state.state not in ["off", "idle", "paused", "standby", "unavailable"]
+                and d["device_id"] not in extras
+            )
             if extras and actions_enabled:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": extras})
                 await enqueue_media_action(

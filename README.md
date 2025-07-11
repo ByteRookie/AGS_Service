@@ -224,7 +224,10 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
--### v1.4.6
+### v1.4.7
+- Last playing speakers now stop when the final room turns off, even if the system status stays ON.
+
+### v1.4.6
 - Speakers outside active rooms are no longer treated as active even if they are playing.
 
 -### v1.4.5
