@@ -11,6 +11,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .ags_service import (
     get_active_rooms,
     ensure_action_queue,
+    enqueue_media_action,
     wait_for_actions,
     update_ags_sensors,
     handle_ags_status_change,
@@ -126,6 +127,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
         rooms = self.hass.data["ags_service"]["rooms"]
         active_rooms = get_active_rooms(rooms, self.hass)
+        members = [
+            d["device_id"]
+            for d in self.room.get("devices", [])
+            if d.get("device_type") == "speaker"
+        ]
         if not active_rooms:
             await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
             await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
