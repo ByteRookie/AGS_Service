@@ -224,6 +224,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+-### v1.4.6
+- Speakers outside active rooms are no longer treated as active even if they are playing.
+
 -### v1.4.5
 - Active speaker list properly clears once rooms are turned off, preventing stale entries.
 

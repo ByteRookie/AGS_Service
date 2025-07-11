@@ -430,14 +430,10 @@ def update_speaker_states(rooms, hass):
         for room in rooms:
             for device in room['devices']:
                 if device['device_type'] == 'speaker':
-                    state = hass.states.get(device['device_id'])
                     if room['room'] in active_rooms:
                         active_speakers.append(device['device_id'])
-                    else:
-                        if state is None or state.state in ['off', 'idle', 'paused', 'standby', 'unavailable']:
-                            inactive_speakers.append(device['device_id'])
-                        else:
-                            active_speakers.append(device['device_id'])
+                    elif not hass.states.get(device['device_id']) or hass.states.get(device['device_id']).state != 'on':
+                        inactive_speakers.append(device['device_id'])
 
     # Store the lists in hass.data
     hass.data['active_speakers'] = active_speakers
