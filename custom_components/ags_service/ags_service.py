@@ -212,9 +212,9 @@ def update_ags_status(ags_config, hass):
     active_rooms = hass.data.get('active_rooms', [])
     prev_status = hass.data.get('ags_status')
     default_source_name = None
-    sources_list = hass.data['ags_service']['Sources'] 
+    sources_list = hass.data['ags_service']['Sources']
     for src in sources_list:
-        if src.get("source_default") == True:
+        if src.get("source_default"):
             default_source_name = src["Source"]
             break
         
