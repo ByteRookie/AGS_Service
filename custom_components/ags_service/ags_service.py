@@ -162,8 +162,8 @@ def _handle_status_transition(prev_status, new_status, hass):
 async def update_ags_sensors(ags_config, hass):
     """Refresh AGS related sensor values."""
     rooms = ags_config['rooms']
-    lock = hass.data['ags_service']['sensor_lock']
-    event = hass.data['ags_service']['update_event']
+    lock = ags_config['sensor_lock']
+    event = ags_config['update_event']
 
     async with lock:
         try:
@@ -245,7 +245,7 @@ def update_ags_status(ags_config, hass):
     active_rooms = hass.data.get('active_rooms', [])
     prev_status = hass.data.get('ags_status')
     default_source_name = None
-    sources_list = hass.data['ags_service']['Sources'] 
+    sources_list = ags_config['Sources']
     for src in sources_list:
         if src.get("source_default") == True:
             default_source_name = src["Source"]
@@ -284,7 +284,7 @@ def update_ags_status(ags_config, hass):
 
 
     # Determine schedule entity state if configured
-    schedule_cfg = hass.data['ags_service'].get('schedule_entity')
+    schedule_cfg = ags_config.get('schedule_entity')
     schedule_on = True
     prev_schedule_state = hass.data.get('schedule_prev_state')
     if schedule_cfg:
@@ -608,7 +608,7 @@ async def ags_select_source(ags_config, hass):
             return
         source = hass.data.get('ags_media_player_source')
         if source is None:
-            sources_list = hass.data['ags_service']['Sources']
+            sources_list = ags_config['Sources']
             source = next(
                 (
                     src["Source"]
@@ -640,7 +640,7 @@ async def ags_select_source(ags_config, hass):
             return
 
         # Convert the list of sources to a dictionary for faster lookups
-        sources_list = hass.data['ags_service']['Sources'] 
+        sources_list = ags_config['Sources']
         source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
 
 
@@ -797,7 +797,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
     """
     try:
         await wait_for_actions(hass)
-        await hass.data['ags_service']['update_event'].wait()
+        await ags_config['update_event'].wait()
 
         rooms = ags_config["rooms"]
         actions_enabled = hass.data.get("switch.ags_actions", True)

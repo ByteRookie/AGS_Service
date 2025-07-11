@@ -10,13 +10,18 @@ SCAN_INTERVAL = timedelta(seconds=30)
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-# Setup platform function
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.event import async_track_state_change_event
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    # Create your sensors
-    ags_config = hass.data['ags_service']
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up sensors from a config entry."""
+
+    ags_config = hass.data["ags_service"][entry.entry_id]
     global SCAN_INTERVAL
     interval = ags_config.get('interval_sync', 30)
     SCAN_INTERVAL = timedelta(seconds=interval)
@@ -45,7 +50,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             await sensor.async_update_ha_state(True)
 
     # Register sensors so other modules can refresh them immediately
-    hass.data['ags_sensors'] = sensors
+    hass.data["ags_service"][entry.entry_id]["sensors"] = sensors
 
     entities_to_track = ['zone.home']
     schedule_cfg = ags_config.get('schedule_entity')

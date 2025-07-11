@@ -2,8 +2,10 @@
 import asyncio
 import voluptuous as vol
 
+from homeassistant import config_entries
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.discovery import async_load_platform
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.config_entries import ConfigEntry
 from .ags_service import ensure_action_queue
 
 # Define the domain for the integration
@@ -99,45 +101,83 @@ DEVICE_SCHEMA = vol.Schema({
     }),
 })
 
-async def async_setup(hass, config):
-    """Set up the custom component."""
+async def async_setup(hass: ConfigType, config: ConfigType) -> bool:
+    """Handle YAML configuration."""
 
-    ags_config = config[DOMAIN]
+    if DOMAIN not in config:
+        return True
 
-    # Validate ott_devices usage
-    for room in ags_config['rooms']:
-        for device in room['devices']:
-            if CONF_OTT_DEVICES in device and device['device_type'] != 'tv':
+    ags_config = DEVICE_SCHEMA(config[DOMAIN])
+
+    for room in ags_config["rooms"]:
+        for device in room["devices"]:
+            if CONF_OTT_DEVICES in device and device["device_type"] != "tv":
                 raise vol.Invalid(
                     "ott_devices is only allowed for devices with device_type 'tv'"
                 )
 
-    hass.data[DOMAIN] = {
-        'rooms': ags_config['rooms'],
-        'Sources': ags_config['Sources'],
-        'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
-        'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
-        'default_on': ags_config.get(CONF_DEFAULT_ON, False),
-        'static_name': ags_config.get(CONF_STATIC_NAME, None),
-        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_IMPORT},
+            data=ags_config,
+        )
+    )
+    return True
+
+
+PLATFORMS = ["switch", "media_player", "sensor"]
+
+
+async def async_setup_entry(hass: ConfigType, entry: ConfigEntry) -> bool:
+    """Set up AGS Service from a config entry."""
+
+    data = DEVICE_SCHEMA(dict(entry.data))
+
+    hass.data.setdefault(DOMAIN, {})
+
+    entry_data = {
+        "rooms": data["rooms"],
+        "Sources": data["Sources"],
+        "disable_zone": data.get(CONF_DISABLE_ZONE, False),
+        "homekit_player": data.get(CONF_HOMEKIT_PLAYER, None),
+        "create_sensors": data.get(CONF_CREATE_SENSORS, False),
+        "default_on": data.get(CONF_DEFAULT_ON, False),
+        "static_name": data.get(CONF_STATIC_NAME, None),
+        "disable_Tv_Source": data.get(CONF_DISABLE_TV_SOURCE, False),
+        "schedule_entity": data.get(CONF_SCHEDULE_ENTITY),
+        "sensor_lock": asyncio.Lock(),
+        "update_event": asyncio.Event(),
     }
 
-    # Initialize shared media action queue
+    hass.data[DOMAIN][entry.entry_id] = entry_data
+
     await ensure_action_queue(hass)
 
-    # Initialize synchronization primitives used for sensor updates
-    hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
-    hass.data[DOMAIN]["update_event"] = asyncio.Event()
+    platforms = ["switch", "media_player"]
+    if entry_data["create_sensors"]:
+        platforms.append("sensor")
+    entry_data["platforms"] = platforms
 
-
-    # Load the sensor and switch platforms and pass the configuration to them
-    create_sensors = ags_config.get('create_sensors', False)
-    if create_sensors:
-        await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
-    
-    await async_load_platform(hass, 'switch', DOMAIN, {}, config)
-    await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     return True
+
+
+async def async_unload_entry(hass: ConfigType, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+
+    entry_data = hass.data[DOMAIN].get(entry.entry_id, {})
+    platforms = entry_data.get("platforms", PLATFORMS)
+
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return unload_ok
+
+
+async def async_reload_entry(hass: ConfigType, entry: ConfigEntry) -> None:
+    """Reload an existing entry."""
+
+    await async_unload_entry(hass, entry)
+    await async_setup_entry(hass, entry)
