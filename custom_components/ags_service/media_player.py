@@ -7,7 +7,12 @@ from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    get_control_device_id,
+    _select_ott_device,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -176,7 +181,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
             if sorted_devices:
                 first_device = sorted_devices[0]
-                selected_device_id = first_device.get('ott_device', first_device["device_id"])
+                selected_device_id = _select_ott_device(first_device, self.hass)
             else:
                 selected_device_id = self.hass.data.get('primary_speaker', None)
 

@@ -118,7 +118,7 @@ ags_service:
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
-| `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
+| `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV's current input matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. Both `ott_device` and `tv_input` are required for each entry. |
 
 ### Reference configuration
 
@@ -142,7 +142,9 @@ ags_service:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-#          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
+#          ott_devices:
+#            - ott_device: "media_player.ott_1"
+#              tv_input: "HDMI 1"
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
@@ -224,6 +226,10 @@ latest group state is used.
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.5.0
+- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list. Each entry must define `ott_device` and `tv_input`.
+- Automatically selects the correct OTT device based on the TV's current input.
 
 ### v1.4.1
 - Schedule source selection runs asynchronously
