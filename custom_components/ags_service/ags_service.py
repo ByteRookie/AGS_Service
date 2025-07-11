@@ -561,7 +561,8 @@ def get_control_device_id(ags_config, hass):
         if primary_room:
             break
 
-    if ags_status == 'ON TV' and primary_room_devices:
+    tv_mode = hass.data.get('current_tv_mode', TV_MODE_TV_AUDIO)
+    if ags_status == 'ON TV' and tv_mode != TV_MODE_NO_MUSIC and primary_room_devices:
         sorted_devices = sorted(
             [d for d in primary_room_devices if d['device_type'] != 'speaker'],
             key=lambda x: x['priority'],

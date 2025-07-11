@@ -166,7 +166,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if found_room:
                 break
 
-        if self.ags_status == "ON TV" and self.primary_speaker_room:
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        if (
+            self.ags_status == "ON TV"
+            and tv_mode != TV_MODE_NO_MUSIC
+            and self.primary_speaker_room
+        ):
             selected_device_id = None
 
             sorted_devices = sorted(
@@ -407,8 +412,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ags_config = self.hass.data['ags_service']
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
-        if self.ags_status == "ON TV" and disable_Tv_Source == False:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        if (
+            self.ags_status == "ON TV"
+            and disable_Tv_Source == False
+            and tv_mode != TV_MODE_NO_MUSIC
+        ):
+            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
 
         else:
             sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
@@ -421,8 +431,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source(self):
         """Return the current input source."""
-        if self.ags_status == "ON TV":
-            return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None 
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        if self.ags_status == "ON TV" and tv_mode != TV_MODE_NO_MUSIC:
+            return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None
         else:
             return self.hass.data.get("ags_media_player_source")
 

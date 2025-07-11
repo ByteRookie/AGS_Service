@@ -127,7 +127,7 @@ Add `tv_mode` to any device with `device_type: "tv"` to control how that TV affe
 | Option | Description |
 |--------|-------------|
 | `tv_audio` | Use the speakers in the room even when this TV is on. |
-| `no_music` | Skip the room entirely while this TV remains on. |
+| `no_music` | Skip the room from all AGS commands while this TV remains on. |
 
 ### Reference configuration
 
@@ -196,7 +196,7 @@ AGS evaluates several conditions to decide when to play and which speaker should
 2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
 3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
 4. If any room with its media switch on has a TV that is on, status changes to `ON TV`.
-5. Rooms where every active TV is set to `tv_mode: no_music` are ignored until those TVs turn off.
+5. Rooms where every active TV is set to `tv_mode: no_music` are ignored until those TVs turn off. Their speakers will not join or receive commands.
 6. Otherwise the status is simply `ON`.
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
@@ -246,6 +246,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 ### v1.4.2
 - Added per-device `tv_mode` to ignore specific TVs during music playback
+
+### v1.4.3
+- Skipped TV rooms no_music for all commands and UI fallbacks
 
 
 ### v1.3.0

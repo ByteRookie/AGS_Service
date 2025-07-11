@@ -16,6 +16,8 @@ from .ags_service import (
     update_ags_sensors,
     ags_select_source,
     ensure_preferred_primary_tv,
+    TV_MODE_TV_AUDIO,
+    TV_MODE_NO_MUSIC,
 )
 from . import ags_service as ags
 
@@ -127,7 +129,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             {"entity_id": primary, "group_members": members},
         )
         if first_room:
-            if current_status == "ON TV":
+            if (
+                current_status == "ON TV"
+                and self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+                != TV_MODE_NO_MUSIC
+            ):
                 preferred = await ensure_preferred_primary_tv(self.hass)
                 if preferred:
                     await enqueue_media_action(
