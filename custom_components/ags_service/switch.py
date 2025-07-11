@@ -106,6 +106,7 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                 prev_status,
             )
 
+
         await wait_for_actions(self.hass)
 
     async def _maybe_unjoin(self) -> None:
@@ -122,7 +123,13 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
                 prev_status,
             )
 
-        await wait_for_actions(self.hass)
+
+        rooms = self.hass.data["ags_service"]["rooms"]
+        active_rooms = get_active_rooms(rooms, self.hass)
+        if not active_rooms:
+            await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
+            await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
+
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""

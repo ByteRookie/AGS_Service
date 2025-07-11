@@ -119,7 +119,8 @@ ags_service:
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
 | `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
-| `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
+| `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV's current input matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. You may set `default: true` on one entry to use that OTT device when no inputs match. If no default is set the TV device itself is used. `ott_device` and `tv_input` are required for each entry. |
+
 
 ### Reference configuration
 
@@ -144,7 +145,12 @@ ags_service:
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-#          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
+#          ott_devices:
+#            - ott_device: "media_player.ott_1"
+#              tv_input: "HDMI 1"
+#            - ott_device: "media_player.apple_tv"
+#              tv_input: "HDMI 2"
+#              default: true
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
@@ -175,7 +181,7 @@ ags_service:
 * **Sources** – static list of available sources for the AGS Media Player. Mark one entry with `source_default: true` to use when no other source is selected.
 * **schedule_entity** – follow another entity's state. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`.
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
-* If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
+* If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but leaves the current state unchanged when the schedule turns back on.
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
 
@@ -184,12 +190,14 @@ HomeKit does not handle the AGS player's dynamically changing name and TV source
 AGS evaluates several conditions to decide when to play and which speaker should be primary:
 
 1. **update_ags_status** checks if `zone.home` is empty unless `disable_zone` is enabled. If nobody is home the status becomes `OFF`.
-2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
+2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off and resets to `default_on` when it switches back on.
 3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
 4. If any active room has a TV that is on, status changes to `ON TV`.
 5. Otherwise the status is simply `ON`.
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
+
+`get_preferred_primary_speaker` chooses the highest priority active speaker from the same room as the control device (the TV or OTT player when in `ON TV` mode). This keeps audio and video in sync when multiple rooms have televisions.
 
 
 `handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.  All
@@ -252,6 +260,21 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 -### v1.4.1
 - Fixed stopping logic when turning the system off so every available speaker
   receives a stop or reset command.
+
+### v1.6.0
+- `ott_devices` entries may include `default: true` to specify the fallback OTT device when no `tv_input` matches. If no default is set AGS uses the TV device.
+
+### v1.5.0
+- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list. Each entry must define `ott_device` and `tv_input`.
+- Automatically selects the correct OTT device based on the TV's current input.
+
+### v1.4.1
+- Schedule source selection runs asynchronously
+- Show TV source only when the TV room is active
+- Clear playlist after stopping media
+- Fix async source selection logic
+- Improve music source handling and TV coordinator selection
+
 
 ### v1.4.0
 - Added action queue with optional AGS Actions switch

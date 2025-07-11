@@ -7,7 +7,9 @@ from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
+
 from .ags_service import update_ags_sensors, ags_select_source
+
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -176,7 +178,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
             if sorted_devices:
                 first_device = sorted_devices[0]
-                selected_device_id = first_device.get('ott_device', first_device["device_id"])
+                selected_device_id = _select_ott_device(first_device, self.hass)
             else:
                 selected_device_id = self.hass.data.get('primary_speaker', None)
 
@@ -372,6 +374,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
+        self._schedule_media_call('clear_playlist', {
+            'entity_id': self.primary_speaker_entity_id
+        })
         self._schedule_ags_update()
 
     def media_next_track(self):
@@ -407,13 +412,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ags_config = self.hass.data['ags_service']
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
+
         if self.ags_status == "ON TV" and not disable_Tv_Source:
             sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
 
+
         else:
-            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-            # Check if any device has a type of TV and add "TV" to the source list
-            if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+            sources = [
+                source_dict["Source"]
+                for source_dict in self.hass.data["ags_service"]["Sources"]
+            ]
+            rooms = self.hass.data["ags_service"]["rooms"]
+            active_rooms = self.hass.data.get("active_rooms", [])
+            has_active_tv_room = any(
+                room["room"] in active_rooms
+                and any(d.get("device_type") == "tv" for d in room["devices"])
+                for room in rooms
+            )
+            if has_active_tv_room:
                 sources.append("TV")
 
         return sources
@@ -432,14 +448,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 return source_dict["Source_Value"]
         return None  # if not found
 
-    def select_source(self, source):
+    async def async_select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
-            ags_select_source(self.ags_config, self.hass)
+            await ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
+
+    def select_source(self, source):
+        """Schedule ``async_select_source`` when called from a sync context."""
+        self.hass.loop.call_soon_threadsafe(
+            lambda: self.hass.async_create_task(
+                self.async_select_source(source)
+            )
+        )
            
 
     @property
@@ -522,9 +546,18 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
 
     @property
     def source_list(self):
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-        # Check if any device has a type of TV and add "TV" to the source list
-        if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
+        sources = [
+            source_dict["Source"]
+            for source_dict in self.hass.data["ags_service"]["Sources"]
+        ]
+        rooms = self.hass.data["ags_service"]["rooms"]
+        active_rooms = self.hass.data.get("active_rooms", [])
+        has_active_tv_room = any(
+            room["room"] in active_rooms
+            and any(d.get("device_type") == "tv" for d in room["devices"])
+            for room in rooms
+        )
+        if has_active_tv_room:
             sources.append("TV")
 
         return sources
