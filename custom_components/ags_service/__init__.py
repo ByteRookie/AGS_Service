@@ -25,6 +25,8 @@ CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SCHEDULE_ENTITY = 'schedule_entity'
 CONF_OTT_DEVICE = 'ott_device'
+CONF_OTT_DEVICES = 'ott_devices'
+CONF_TV_INPUT = 'tv_input'
 CONF_SOURCES = 'Sources'
 CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
@@ -49,7 +51,17 @@ DEVICE_SCHEMA = vol.Schema({
                                     vol.Required("device_type"): cv.string,
                                     vol.Required("priority"): cv.positive_int,
                                     vol.Optional("override_content"): cv.string,
-                                    vol.Optional(CONF_OTT_DEVICE): cv.string,
+                                    vol.Optional(CONF_OTT_DEVICES): vol.All(
+                                        cv.ensure_list,
+                                        [
+                                            vol.Schema(
+                                                {
+                                                    vol.Required(CONF_OTT_DEVICE): cv.string,
+                                                    vol.Required(CONF_TV_INPUT): cv.string,
+                                                }
+                                            )
+                                        ],
+                                    ),
                                 }
                             )
                         ],
@@ -91,12 +103,12 @@ async def async_setup(hass, config):
 
     ags_config = config[DOMAIN]
 
-    # Validate ott_device usage
+    # Validate ott_devices usage
     for room in ags_config['rooms']:
         for device in room['devices']:
-            if CONF_OTT_DEVICE in device and device['device_type'] != 'tv':
+            if CONF_OTT_DEVICES in device and device['device_type'] != 'tv':
                 raise vol.Invalid(
-                    "ott_device is only allowed for devices with device_type 'tv'"
+                    "ott_devices is only allowed for devices with device_type 'tv'"
                 )
 
     hass.data[DOMAIN] = {

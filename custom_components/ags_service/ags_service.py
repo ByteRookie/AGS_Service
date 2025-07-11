@@ -537,6 +537,24 @@ def get_inactive_tv_speakers(rooms, hass):
     return inactive_tv_speakers
 
 
+def _select_ott_device(tv_device: dict, hass) -> str:
+    """Return OTT device ID matching the TV input if configured."""
+    ott_list = tv_device.get("ott_devices")
+    if not ott_list:
+        return tv_device.get("ott_device", tv_device["device_id"])
+
+    primary_speaker = hass.data.get("primary_speaker")
+    speaker_state = hass.states.get(primary_speaker) if primary_speaker else None
+    current_input = speaker_state.attributes.get("source") if speaker_state else None
+
+    if current_input:
+        for entry in ott_list:
+            if entry.get("tv_input") == current_input:
+                return entry.get("ott_device", tv_device["device_id"])
+
+    return ott_list[0].get("ott_device", tv_device["device_id"])
+
+
 def get_control_device_id(ags_config, hass):
     """Return the device that should receive control commands."""
     ags_status = hass.data.get('ags_status')
@@ -567,7 +585,7 @@ def get_control_device_id(ags_config, hass):
         )
         if sorted_devices:
             first_device = sorted_devices[0]
-            return first_device.get('ott_device', first_device['device_id'])
+            return _select_ott_device(first_device, hass)
 
     return primary_speaker
 
