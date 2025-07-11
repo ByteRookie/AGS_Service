@@ -4,7 +4,6 @@ import voluptuous as vol
 
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
-from .ags_service import ensure_action_queue
 
 # Define the domain for the integration
 DOMAIN = "ags_service"
@@ -124,6 +123,7 @@ async def async_setup(hass, config):
     }
 
     # Initialize shared media action queue
+    from .ags_service import ensure_action_queue
     await ensure_action_queue(hass)
 
     # Initialize synchronization primitives used for sensor updates
