@@ -224,6 +224,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+-### v1.4.5
+- Active speaker list properly clears once rooms are turned off, preventing stale entries.
+
 -### v1.4.4
 - Stop commands now fire even if no rooms are active so lingering playback ends.
 

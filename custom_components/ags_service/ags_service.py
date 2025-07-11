@@ -385,7 +385,7 @@ def check_primary_speaker_logic(ags_config, hass):
 
                         if (
                             device['device_type'] == 'speaker' and
-                            device_state.state not in ['off', 'idle'] and
+                            device_state.state not in ['off', 'idle', 'paused', 'standby'] and
                             group_members and  # Check that group_members exists and is not None
                             group_members[0] == device['device_id']  # Now safe to index
                         ):
@@ -434,7 +434,7 @@ def update_speaker_states(rooms, hass):
                     if room['room'] in active_rooms:
                         active_speakers.append(device['device_id'])
                     else:
-                        if state is None or state.state in ['off', 'idle', 'unavailable']:
+                        if state is None or state.state in ['off', 'idle', 'paused', 'standby', 'unavailable']:
                             inactive_speakers.append(device['device_id'])
                         else:
                             active_speakers.append(device['device_id'])
