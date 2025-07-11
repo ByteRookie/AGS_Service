@@ -224,6 +224,10 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+-### v1.4.1
+- Fixed stopping logic when turning the system off so every available speaker
+  receives a stop or reset command.
+
 ### v1.4.0
 - Added action queue with optional AGS Actions switch
 - Removed the old `AGS Automation Example.yaml` file; all join/unjoin logic is now part of the integration

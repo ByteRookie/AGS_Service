@@ -678,19 +678,25 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     d["device_id"]
                     for d in room["devices"]
                     if d.get("device_type") == "speaker"
-                    and (state := hass.states.get(d["device_id"])) is not None
-                    and state.state != "unavailable"
                 ]
                 if not members:
                     continue
                 has_tv = any(d.get("device_type") == "tv" for d in room["devices"])
-                if has_tv and not ags_config.get("disable_Tv_Source"):
-                    for member in members:
+                for member in members:
+                    state = hass.states.get(member)
+                    if not state or state.state == "unavailable":
+                        _LOGGER.debug(
+                            "Skipped media_stop for %s – state unavailable", member
+                        )
+                        continue
+                    if has_tv and not ags_config.get("disable_Tv_Source"):
                         await enqueue_media_action(
                             hass, "select_source", {"entity_id": member, "source": "TV"}
                         )
-                else:
-                    await enqueue_media_action(hass, "media_stop", {"entity_id": members})
+                    else:
+                        await enqueue_media_action(
+                            hass, "media_stop", {"entity_id": member}
+                        )
 
             return
 
