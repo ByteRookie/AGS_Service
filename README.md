@@ -5,7 +5,7 @@ AGS Service is a custom Home Assistant integration that automatically manages sp
 
 The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
 > **Disclaimer**
-> AGS Service controls real hardware. Test carefully and use with caution before relying on it.
+> AGS Service controls real hardware. Test carefully before relying on it.
 > The authors are not responsible for unintended behavior.
 
 ## Table of Contents
@@ -60,7 +60,7 @@ The integration consists of several Python modules and support files:
 - `custom_components/ags_service/sensor.py` – defines optional sensor entities.
 - `custom_components/ags_service/switch.py` – defines room switch entities.
 - `custom_components/ags_service/manifest.json` – metadata about the integration.
-- `custom_components/ags_service/README.md` – this documentation file.
+- `README.md` – this documentation file.
 
 ## Installation
 
@@ -214,7 +214,7 @@ triggers call this service so the logic only exists in one place.
 
 ### Action Queue
 
-All media player calls are funneled through a queue so operations happen one at a time. Whenever AGS unjoins a speaker it immediately queues a `wait_ungrouped` action. This pause confirms the speaker has fully left its group before any follow‑up commands, like switching TV inputs, are issued.
+AGS queues all `media_player` service calls to avoid race conditions while grouping speakers. Whenever a speaker is unjoined it first schedules a `wait_ungrouped` action so the device fully leaves its group before any follow-up commands run. Status updates wait for the queue to finish to ensure sensors always report the latest state.
 
 ## Sensor Logic
 
@@ -236,11 +236,6 @@ Overall, `tv_mode` lets you decide how each TV affects its room:
 * **no_music** – As long as that TV is on, the room is removed from the active room list. Its speakers won't join groups or receive commands, and the integration avoids sending TV source commands.
 * Once the TV turns off, the room becomes active again based on its switch state and priority.
 
-## Action Queue
-
-AGS queues all `media_player` service calls to avoid race conditions while grouping speakers.
-All status calculations now wait for queued actions to finish before sensors refresh, ensuring the
-latest group state is used.
 
 ## License
 
@@ -250,14 +245,14 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 
 ### v1.5.0
-- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
-- New `batch_unjoin` option unjoins all speakers at once for faster shutdown.
-- Last playing speakers now stop when the final room turns off.
-- Speakers outside active rooms are no longer treated as active.
-- Schedule re-enabling restores the default state unless `schedule_override` is on.
-- Centralized status handler manages all join/unjoin and playback commands from one place, ensuring reliable grouping and cleanup.
-- Stop commands always fire with delays to prevent lingering playback.
-- Active speaker list clears properly once rooms are turned off.
+- **Breaking change**: replace `ott_device` with an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
+- Added `batch_unjoin` option to unjoin all speakers at once for faster shutdown.
+- Last playing speakers now stop automatically when the final room turns off.
+- Speakers in rooms that are off no longer count as active.
+- Re-enabling the schedule resets AGS to its default state unless `schedule_override` is active.
+- All join/unjoin and playback commands now run through a centralized status handler for consistent grouping and cleanup.
+- Stop commands always include a short delay to prevent lingering playback.
+- The active speaker list clears correctly once rooms turn off.
 
 
 
