@@ -24,6 +24,7 @@ The integration continuously tracks room occupancy and speaker states, regroupin
 **Virtual AGS Media Player**
 
 * Acts as the master player for the entire system. It automatically points to the best speaker based on room activity and exposes normal media controls (play, pause, volume, source, next/previous). Optionally a second HomeKit‑friendly player can mirror these controls for Apple users.
+* Exposes a **Media Browser** so you can explore favorites and sources from the active control device directly within Home Assistant. Selecting an item automatically calls `play_media` or `select_source` on that device.
 
 **Sensors**
 

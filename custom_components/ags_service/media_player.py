@@ -1,5 +1,6 @@
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.media_player import MediaPlayerEntity
+from homeassistant.components.media_player.browse_media import async_browse_media
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
@@ -440,6 +441,32 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if actions_enabled:
             ags_select_source(self.ags_config, self.hass)
         self._schedule_ags_update()
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Play the given media on the active control device."""
+        if not self.primary_speaker_entity_id:
+            return
+        await self.hass.services.async_call(
+            "media_player",
+            "play_media",
+            {
+                "entity_id": self.primary_speaker_entity_id,
+                "media_content_id": media_id,
+                "media_content_type": media_type,
+            },
+        )
+        self._schedule_ags_update()
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Delegate media browsing to the active control device."""
+        if not self.primary_speaker_entity_id:
+            return None
+        return await async_browse_media(
+            self.hass,
+            self.primary_speaker_entity_id,
+            media_content_id,
+            media_content_type,
+        )
            
 
     @property
@@ -551,12 +578,24 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
         """Set the volume level."""
         self._primary_player.set_volume_level(volume)
 
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Forward play_media to the primary player."""
+        await self._primary_player.async_play_media(media_type, media_id, **kwargs)
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Forward browse requests to the primary player."""
+        return await self._primary_player.async_browse_media(media_content_type, media_content_id)
+
     def mute_volume(self, mute):
         """Mute the volume."""
         self._primary_player.mute_volume(mute)
 
     def select_source(self, source):
         """Select the input source."""
+        self._primary_player.select_source(source)
+
+    async def async_select_source(self, source):
+        """Forward async source selection to the primary player."""
         self._primary_player.select_source(source)
 
     def media_play(self):
