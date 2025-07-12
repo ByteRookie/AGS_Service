@@ -123,9 +123,7 @@ ags_service:
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
-| `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
 | `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV's current input matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. You may set `default: true` on one entry to use that OTT device when no inputs match. If no default is set the TV device itself is used. `ott_device` and `tv_input` are required for each entry. |
-
 
 ### Reference configuration
 
@@ -138,7 +136,6 @@ ags_service:
 #  default_on: false
 #  static_name: "AGS Media Player"
 #  disable_Tv_Source: false
-#  batch_unjoin: false
 #  schedule_entity:
 #    entity_id: schedule.my_music
 #    on_state: "on"  # optional
@@ -205,8 +202,7 @@ AGS evaluates several conditions to decide when to play and which speaker should
 `get_preferred_primary_speaker` chooses the highest priority active speaker from the same room as the control device (the TV or OTT player when in `ON TV` mode). This keeps audio and video in sync when multiple rooms have televisions.
 
 
-`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.  All
-triggers call this service so the logic only exists in one place.
+`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
 
 
 ### Action Queue
@@ -238,6 +234,7 @@ latest group state is used.
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
 ### v1.5.0
 - **Breaking change**: `ott_device` has been replaced by an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
 - New `batch_unjoin` option unjoins all speakers at once for faster shutdown.
@@ -255,7 +252,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Clear playlist after stopping media
 - Fix async source selection logic
 - Improve music source handling and TV coordinator selection
-
 
 ### v1.4.0
 - Added action queue with optional AGS Actions switch
