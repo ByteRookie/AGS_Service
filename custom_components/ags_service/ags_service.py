@@ -365,11 +365,12 @@ def update_ags_status(ags_config, hass):
                 active_tv_mode = TV_MODE_NO_MUSIC
 
     if tv_found:
-        ags_status = "ON TV"
         hass.data['current_tv_mode'] = active_tv_mode
-        _handle_status_transition(prev_status, ags_status, hass)
-        hass.data['ags_status'] = ags_status
-        return ags_status
+        if active_tv_mode != TV_MODE_NO_MUSIC:
+            ags_status = "ON TV"
+            _handle_status_transition(prev_status, ags_status, hass)
+            hass.data['ags_status'] = ags_status
+            return ags_status
 
     ags_status = "ON"
     _handle_status_transition(prev_status, ags_status, hass)

@@ -201,8 +201,8 @@ AGS evaluates several conditions to decide when to play and which speaker should
 1. **update_ags_status** checks if `zone.home` is empty unless `disable_zone` is enabled. If nobody is home the status becomes `OFF`.
 2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
 3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
-4. If any active TV is on, status changes to `ON TV` and the integration records the active `tv_mode`.
-5. Rooms where every active TV is set to `tv_mode: no_music` are ignored until those TVs turn off.
+4. If any active TV is on with `tv_mode: tv_audio`, status changes to `ON TV` and the integration records the active `tv_mode`.
+5. Rooms where every active TV is set to `tv_mode: no_music` are ignored until those TVs turn off. When this is true for all active TVs, the status stays `ON`.
 6. Otherwise the status is simply `ON`.
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
