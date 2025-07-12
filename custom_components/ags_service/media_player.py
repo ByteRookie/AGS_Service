@@ -3,11 +3,16 @@ from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
-from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
+from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source, get_control_device_id
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    TV_MODE_TV_AUDIO,
+    TV_MODE_NO_MUSIC,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -166,7 +171,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if found_room:
                 break
 
-        if self.ags_status == "ON TV" and self.primary_speaker_room:
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+
+        if (
+            self.ags_status == "ON TV"
+            and tv_mode != TV_MODE_NO_MUSIC
+            and self.primary_speaker_room
+        ):
             selected_device_id = None
 
             sorted_devices = sorted(
@@ -372,9 +383,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._schedule_media_call('media_stop', {
             'entity_id': self.primary_speaker_entity_id
         })
-        self._schedule_media_call('clear_playlist', {
-            'entity_id': self.primary_speaker_entity_id
-        })
         self._schedule_ags_update()
 
     def media_next_track(self):
@@ -410,25 +418,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ags_config = self.hass.data['ags_service']
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
-        if self.ags_status == "ON TV" and disable_Tv_Source == False:
-            sources = (
-                self.primary_speaker_state.attributes.get("source_list")
-                if self.primary_speaker_state
-                else None
-            )
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        if (
+            self.ags_status == "ON TV"
+            and disable_Tv_Source == False
+            and tv_mode != TV_MODE_NO_MUSIC
+        ):
+            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
+
         else:
-            sources = [
-                source_dict["Source"]
-                for source_dict in self.hass.data["ags_service"]["Sources"]
-            ]
-            rooms = self.hass.data["ags_service"]["rooms"]
-            active_rooms = self.hass.data.get("active_rooms", [])
-            has_active_tv_room = any(
-                room["room"] in active_rooms
-                and any(d.get("device_type") == "tv" for d in room["devices"])
-                for room in rooms
-            )
-            if has_active_tv_room:
+            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+            # Check if any device has a type of TV and add "TV" to the source list
+            if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
                 sources.append("TV")
 
         return sources
@@ -447,22 +448,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 return source_dict["Source_Value"]
         return None  # if not found
 
-    async def async_select_source(self, source):
+    def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
-            await ags_select_source(self.ags_config, self.hass)
+            ags_select_source(self.ags_config, self.hass, ignore_playing=True)
         self._schedule_ags_update()
-
-    def select_source(self, source):
-        """Schedule ``async_select_source`` when called from a sync context."""
-        self.hass.loop.call_soon_threadsafe(
-            lambda: self.hass.async_create_task(
-                self.async_select_source(source)
-            )
-        )
            
 
     @property
@@ -545,18 +538,9 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
 
     @property
     def source_list(self):
-        sources = [
-            source_dict["Source"]
-            for source_dict in self.hass.data["ags_service"]["Sources"]
-        ]
-        rooms = self.hass.data["ags_service"]["rooms"]
-        active_rooms = self.hass.data.get("active_rooms", [])
-        has_active_tv_room = any(
-            room["room"] in active_rooms
-            and any(d.get("device_type") == "tv" for d in room["devices"])
-            for room in rooms
-        )
-        if has_active_tv_room:
+        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+        # Check if any device has a type of TV and add "TV" to the source list
+        if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
             sources.append("TV")
 
         return sources
