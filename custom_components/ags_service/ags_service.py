@@ -3,6 +3,10 @@ import logging
 import asyncio
 from homeassistant.core import HomeAssistant
 
+CONF_TV_MODE = 'tv_mode'
+TV_MODE_TV_AUDIO = 'tv_audio'
+TV_MODE_NO_MUSIC = 'no_music'
+
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -194,13 +198,27 @@ def get_active_rooms(rooms, hass):
     """Fetch the list of active rooms based on switches in hass.data."""
     
     active_rooms = []
-    
+
     for room in rooms:
         room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
-        
-        # If the room switch is found in hass.data, add the room to the active list
-        if hass.data.get(room_key):
-            active_rooms.append(room['room'])
+        if not hass.data.get(room_key):
+            continue
+
+        skip_room = False
+        for device in room['devices']:
+            if device.get('device_type') != 'tv':
+                continue
+            state = hass.states.get(device['device_id'])
+            if state and state.state != 'off':
+                if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
+                    skip_room = False
+                    break
+                else:
+                    skip_room = True
+        if skip_room:
+            continue
+
+        active_rooms.append(room['room'])
     
     # Store the list of active rooms in hass.data
     hass.data['active_rooms'] = active_rooms
@@ -318,16 +336,41 @@ def update_ags_status(ags_config, hass):
         return ags_status
 
 
-    # Check for TV in active rooms
+    # Check for TV in active rooms and determine global tv_mode
+    tv_found = False
+    active_tv_mode = None
     for room in rooms:
-        if room['room'] in active_rooms:
-            for device in room['devices']:
-                device_state = device_states.get(device['device_id'])
-                if device['device_type'] == 'tv' and device_state and device_state.state != 'off':
-                    ags_status = "ON TV"
-                    _handle_status_transition(prev_status, ags_status, hass)
-                    hass.data['ags_status'] = ags_status
-                    return ags_status
+        room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        if not hass.data.get(room_key):
+            continue
+
+        room_tv_on = False
+        room_tv_audio = False
+        for device in room['devices']:
+            device_state = device_states.get(device['device_id'])
+            if (
+                device.get('device_type') == 'tv'
+                and device_state
+                and device_state.state != 'off'
+            ):
+                room_tv_on = True
+                if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
+                    room_tv_audio = True
+
+        if room_tv_on:
+            tv_found = True
+            if room_tv_audio:
+                active_tv_mode = TV_MODE_TV_AUDIO
+            elif active_tv_mode != TV_MODE_TV_AUDIO and active_tv_mode is None:
+                active_tv_mode = TV_MODE_NO_MUSIC
+
+    if tv_found:
+        hass.data['current_tv_mode'] = active_tv_mode
+        if active_tv_mode != TV_MODE_NO_MUSIC:
+            ags_status = "ON TV"
+            _handle_status_transition(prev_status, ags_status, hass)
+            hass.data['ags_status'] = ags_status
+            return ags_status
 
     ags_status = "ON"
     _handle_status_transition(prev_status, ags_status, hass)
@@ -825,11 +868,14 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
         # Source selection depends on the current status
         if new_status == "ON TV":
-            if "TV" in (state.attributes.get("source_list") or []) and actions_enabled:
-                if state.attributes.get("source") != "TV":
-                    await enqueue_media_action(
-                        hass, "select_source", {"entity_id": calculated, "source": "TV"}
-                    )
+            if hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO) != TV_MODE_NO_MUSIC:
+                if "TV" in (state.attributes.get("source_list") or []) and actions_enabled:
+                    if state.attributes.get("source") != "TV":
+                        await enqueue_media_action(
+                            hass, "select_source", {"entity_id": calculated, "source": "TV"}
+                        )
+            else:
+                _LOGGER.debug("tv_mode set to no_music - skipping TV commands")
         else:
             if actions_enabled and (
                 state.state != "playing" or state.attributes.get("source") == "TV"
