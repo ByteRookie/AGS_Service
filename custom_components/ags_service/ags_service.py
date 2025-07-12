@@ -103,6 +103,7 @@ async def _wait_until_grouped(
 
 
 
+
 def _handle_status_transition(prev_status, new_status, hass):
     """Store and restore the AGS source when toggling TV mode."""
     if new_status == "ON TV" and prev_status != "ON TV":
@@ -265,17 +266,15 @@ def update_ags_status(ags_config, hass):
         else:
             schedule_on = False
 
-    # When the schedule transitions from the off state to the on state
-    # restore the media system based on the default setting unless
-    # schedule_override is enabled
+    # Automatically enable the media system when the schedule switches
+    # from the off state to the on state
     if (
         schedule_cfg
         and prev_schedule_state is not None
         and not prev_schedule_state
         and schedule_on
     ):
-        if not schedule_cfg.get('schedule_override'):
-            hass.data['switch_media_system_state'] = ags_config['default_on']
+        hass.data['switch_media_system_state'] = True
 
     media_system_state = hass.data.get('switch_media_system_state')
     if media_system_state is None:
@@ -449,40 +448,22 @@ def update_speaker_states(rooms, hass):
 
 ### Function for Preferred primary speaker ### 
 def get_preferred_primary_speaker(rooms, hass):
-    """Return the backup speaker AGS should use."""
-
-    active_speakers = hass.data.get("active_speakers", [])
+    active_speakers = hass.data.get('active_speakers')
 
     if not active_speakers:
         preferred_primary_speaker = "none"
     else:
-        control_device_id = get_control_device_id(hass.data["ags_service"], hass)
+        # Generate a list of all devices in active speakers
+        all_devices = [device for room in rooms for device in room['devices'] if device['device_id'] in active_speakers]
 
-        room_of_control_device = next(
-            (
-                room
-                for room in rooms
-                if any(d["device_id"] == control_device_id for d in room["devices"])
-            ),
-            None,
-        )
+        # Sort the devices by priority (lowest number first)
+        sorted_devices = sorted(all_devices, key=lambda x: x['priority'])
 
-        if not room_of_control_device:
-            preferred_primary_speaker = "none"
-        else:
-            valid_speakers = [
-                device
-                for device in room_of_control_device["devices"]
-                if device["device_type"] == "speaker"
-                and device["device_id"] in active_speakers
-            ]
-
-            sorted_speakers = sorted(valid_speakers, key=lambda d: d["priority"])
-            preferred_primary_speaker = (
-                sorted_speakers[0]["device_id"] if sorted_speakers else "none"
-            )
-
-    hass.data["preferred_primary_speaker"] = preferred_primary_speaker
+        # Return the device_id of the highest priority device
+        preferred_primary_speaker = sorted_devices[0]['device_id'] if sorted_devices else "none"
+    
+    # Write the preferred primary speaker's state to hass.data
+    hass.data['preferred_primary_speaker'] = preferred_primary_speaker
 
     return preferred_primary_speaker
 
@@ -503,27 +484,6 @@ def get_inactive_tv_speakers(rooms, hass):
     hass.data['ags_inactive_tv_speakers'] = inactive_tv_speakers
 
     return inactive_tv_speakers
-
-
-def _select_ott_device(tv_device: dict, hass) -> str:
-    """Return OTT device ID matching the TV input if configured."""
-    ott_list = tv_device.get("ott_devices")
-    if not ott_list:
-        return tv_device.get("ott_device", tv_device["device_id"])
-
-    tv_state = hass.states.get(tv_device["device_id"])
-    current_input = tv_state.attributes.get("source") if tv_state else None
-
-    if current_input:
-        for entry in ott_list:
-            if entry.get("tv_input") == current_input:
-                return entry.get("ott_device", tv_device["device_id"])
-
-    for entry in ott_list:
-        if entry.get("default") is True:
-            return entry.get("ott_device", tv_device["device_id"])
-
-    return tv_device["device_id"]
 
 
 def get_control_device_id(ags_config, hass):
@@ -556,7 +516,7 @@ def get_control_device_id(ags_config, hass):
         )
         if sorted_devices:
             first_device = sorted_devices[0]
-            return _select_ott_device(first_device, hass)
+            return first_device.get('ott_device', first_device['device_id'])
 
     return primary_speaker
 
@@ -617,25 +577,22 @@ async def ags_select_source(ags_config, hass):
         if source == "TV":
             await enqueue_media_action(
                 hass,
-                "select_source",
+                'select_source',
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
-        elif (
-            status == "ON TV" and disable_tv_source is False and source != "Unknown"
-        ):
-            await enqueue_media_action(
-                hass,
-                "select_source",
-                {"source": source, "entity_id": primary_speaker_entity_id},
+        elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
+            hass.loop.call_soon_threadsafe(
+                lambda: hass.async_create_task(
+                    hass.services.async_call('media_player', 'select_source', {
+                        "source": source,
+                        "entity_id": primary_speaker_entity_id
+                    })
+                )
             )
 
         elif source != "Unknown" and status == "ON":
-            if (
-                state.state == "playing"
-                and state.attributes.get("source") == source
-            ):
+            if state.state == "playing" and state.attributes.get("source") != "TV":
                 return
-
             source_info = source_dict.get(source)
 
             if source_info:
@@ -731,7 +688,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             regular_speakers: list[str] = []
 
             for room in rooms:
-
                 for d in room["devices"]:
                     if d.get("device_type") == "speaker":
                         if any(dev.get("device_type") == "tv" for dev in room["devices"]):
@@ -745,7 +701,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(
                         hass, "select_source", {"entity_id": spk, "source": "TV"}
                     )
-
 
             for spk in regular_speakers:
                 state = device_states.get(spk)
@@ -854,7 +809,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(
                         hass, "select_source", {"entity_id": spk, "source": "TV"}
                     )
-
                 else:
                     await enqueue_media_action(
                         hass, "media_stop", {"entity_id": spk}
