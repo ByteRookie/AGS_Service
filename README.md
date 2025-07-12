@@ -254,6 +254,10 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Stop commands always include a short delay to prevent lingering playback.
 - The active speaker list clears correctly once rooms turn off.
 
+### v1.5.1
+- Source changes from the AGS media player now ignore the playback check so
+  playlists switch instantly. Automation still waits for idle speakers.
+
 
 
 -### v1.4.1
