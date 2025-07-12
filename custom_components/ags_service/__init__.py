@@ -31,6 +31,10 @@ CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
 CONF_SOURCE_VALUE = 'Source_Value'
 CONF_SOURCE_DEFAULT = 'source_default'
+CONF_TV_MODE = 'tv_mode'
+
+TV_MODE_TV_AUDIO = 'tv_audio'
+TV_MODE_NO_MUSIC = 'no_music'
 
 
 # Define the configuration schema for a device
@@ -51,6 +55,7 @@ DEVICE_SCHEMA = vol.Schema({
                                     vol.Required("priority"): cv.positive_int,
                                     vol.Optional("override_content"): cv.string,
                                     vol.Optional(CONF_OTT_DEVICE): cv.string,
+                                    vol.Optional(CONF_TV_MODE): vol.In([TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]),
                                 }
                             )
                         ],
@@ -93,13 +98,19 @@ async def async_setup(hass, config):
 
     ags_config = config[DOMAIN]
 
-    # Validate ott_device usage
+    # Validate ott_device and tv_mode usage
     for room in ags_config['rooms']:
         for device in room['devices']:
             if CONF_OTT_DEVICE in device and device['device_type'] != 'tv':
                 raise vol.Invalid(
                     "ott_device is only allowed for devices with device_type 'tv'"
                 )
+            if CONF_TV_MODE in device and device['device_type'] != 'tv':
+                raise vol.Invalid(
+                    "tv_mode is only allowed for devices with device_type 'tv'"
+                )
+            if device['device_type'] == 'tv' and CONF_TV_MODE not in device:
+                device[CONF_TV_MODE] = TV_MODE_TV_AUDIO
 
     hass.data[DOMAIN] = {
         'rooms': ags_config['rooms'],

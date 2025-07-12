@@ -126,6 +126,13 @@ ags_service:
 | `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
 | `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
 
+The `tv_mode` option can be set on TV devices to control how they affect their room:
+
+| Option    | Description                                                     |
+|-----------|-----------------------------------------------------------------|
+| tv_audio  | Use the speakers in the room even when this TV is on.           |
+| no_music  | Skip the room from all AGS commands while this TV remains on.   |
+
 ### Reference configuration
 
 ```yaml
@@ -146,19 +153,21 @@ ags_service:
   rooms:
     - room: "Room 1"
       devices:
+#          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
-#          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
+          tv_mode: tv_audio      # uses room speakers when TV is on
         - device_id: "media_player.device_2"
           device_type: "speaker"
           priority: 2
     - room: "Room 2"
       devices:
+#          override_content: "bluetooth"
         - device_id: "media_player.device_3"
           device_type: "tv"
           priority: 3
-#          override_content: "bluetooth"
+          tv_mode: no_music      # skips this room until the TV turns off
         - device_id: "media_player.device_4"
           device_type: "speaker"
           priority: 4
@@ -180,6 +189,7 @@ ags_service:
 * **Sources** – static list of available sources for the AGS Media Player. Mark one entry with `source_default: true` to use when no other source is selected.
 * **schedule_entity** – follow another entity's state. `on_state`/`off_state` default to `on`/`off`; `schedule_override` defaults to `false`.
 * **homekit_player**, **create_sensors**, **default_on**, **static_name**, **disable_Tv_Source**, and **interval_sync** are optional tweaks. See example for placement.
+* **tv_mode** – per-TV setting (`tv_audio` or `no_music`) that controls whether the room stays active when the TV is on.
 * If `schedule_override` is enabled, AGS turns off once whenever the schedule switches to its off state but can be manually re-enabled until the schedule turns back on.
 
 HomeKit does not handle the AGS player's dynamically changing name and TV source list. If you plan to expose the player to HomeKit either specify ``homekit_player`` so a dedicated media player with a static name is created, or enable ``static_name`` and set ``disable_Tv_Source: true`` to keep the main player's name and source list constant.
@@ -191,8 +201,9 @@ AGS evaluates several conditions to decide when to play and which speaker should
 1. **update_ags_status** checks if `zone.home` is empty unless `disable_zone` is enabled. If nobody is home the status becomes `OFF`.
 2. When a `schedule_entity` is defined the status follows its state. With `schedule_override` disabled the system turns `OFF` whenever the schedule is off.
 3. Devices can define `override_content`. When a playing device's `media_content_id` contains this text the service switches to `Override` and that device becomes the primary speaker.
-4. If any active room has a TV that is on, status changes to `ON TV`.
-5. Otherwise the status is simply `ON`.
+4. If any active TV is on, status changes to `ON TV` and the integration records the active `tv_mode`.
+5. Rooms where every active TV is set to `tv_mode: no_music` are ignored until those TVs turn off.
+6. Otherwise the status is simply `ON`.
 
 `determine_primary_speaker` sorts devices in each active room by priority and picks the first playing speaker. If none are found it immediately falls back to the preferred device.
 
@@ -210,7 +221,7 @@ All media player calls are funneled through a queue so operations happen one at 
 Each sensor uses specific logic to report the state of the system:
 
 * **AGS Service Configured Rooms** – list of all room names from `rooms` in the configuration.
-* **AGS Service Active Rooms** – rooms whose media switch is on.
+* **AGS Service Active Rooms** – rooms whose media switch is on. TV rooms are skipped when all of their active TVs use `tv_mode: no_music`.
 * **AGS Service Active Speakers** – entity IDs of speakers located in the active rooms.
 * **AGS Service Inactive Speakers** – speakers that are currently not playing or in inactive rooms.
 * **AGS Service Status** – `ON`, `ON TV`, `Override` or `OFF` based on room activity, schedule and override checks.
@@ -218,6 +229,12 @@ Each sensor uses specific logic to report the state of the system:
 * **AGS Service Preferred Primary Speaker** – next speaker AGS will use if the primary stops.
 * **AGS Service Source** – numeric media source value for the selected item.
 * **AGS Service Inactive TV Speakers** – speakers attached to TVs that are currently inactive.
+
+Overall, `tv_mode` lets you decide how each TV affects its room:
+
+* **tv_audio** – The room behaves normally. If the TV is on, AGS can still group its speaker and control it.
+* **no_music** – As long as that TV is on, the room is removed from the active room list. Its speakers won't join groups or receive commands, and the integration avoids sending TV source commands.
+* Once the TV turns off, the room becomes active again based on its switch state and priority.
 
 ## Action Queue
 

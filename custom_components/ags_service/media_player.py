@@ -7,7 +7,12 @@ from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-from .ags_service import update_ags_sensors, ags_select_source
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    TV_MODE_TV_AUDIO,
+    TV_MODE_NO_MUSIC,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -166,7 +171,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             if found_room:
                 break
 
-        if self.ags_status == "ON TV" and self.primary_speaker_room:
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+
+        if (
+            self.ags_status == "ON TV"
+            and tv_mode != TV_MODE_NO_MUSIC
+            and self.primary_speaker_room
+        ):
             selected_device_id = None
 
             sorted_devices = sorted(
@@ -407,8 +418,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ags_config = self.hass.data['ags_service']
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
-        if self.ags_status == "ON TV" and not disable_Tv_Source:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
+        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        if (
+            self.ags_status == "ON TV"
+            and disable_Tv_Source == False
+            and tv_mode != TV_MODE_NO_MUSIC
+        ):
+            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
 
         else:
             sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
