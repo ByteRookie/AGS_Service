@@ -10,13 +10,13 @@ SCAN_INTERVAL = timedelta(seconds=30)
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.config_entries import ConfigEntry
 # Setup platform function
 from homeassistant.helpers.event import async_track_state_change_event
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    # Create your sensors
-    ags_config = hass.data['ags_service']
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
+    """Set up AGS sensors from a config entry."""
+    ags_config = hass.data['ags_service'][entry.entry_id]
     global SCAN_INTERVAL
     interval = ags_config.get('interval_sync', 30)
     SCAN_INTERVAL = timedelta(seconds=interval)

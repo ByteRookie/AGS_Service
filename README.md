@@ -69,46 +69,24 @@ The integration consists of several Python modules and support files:
 1. Open **HACS → Integrations → ⋮ → Custom repositories**.
 2. Add `https://github.com/ByteRookie/AGS_Service` as a new **Integration** repository.
 3. Search for **AGS Service** in HACS and install it.
-4. Restart Home Assistant.
+4. Reload the UI and add **AGS Service** from **Settings → Devices & Services**.
 
-### Manual Install
-
-1. Download the `ags_service` folder from this repository.
-2. Place it in your `custom_components` directory (create the folder if it does not exist).
-3. Add the configuration details to your `configuration.yaml` file (see below).
-4. Restart Home Assistant.
 
 ## Quick Start
 
 Follow these basic steps to try AGS Service immediately:
 
-1. Install the integration through HACS using the instructions above.
-2. Copy the [minimal configuration](#minimal-configuration) into your `configuration.yaml` file.
-3. Restart Home Assistant. AGS Service manages speaker groups automatically. Starting with v1.4.0 the old `AGS Automation Example.yaml` file is no longer needed because all automation logic is built into the integration.
+1. Install the integration through HACS as described above.
+2. Open **Settings → Devices & Services**, click **Add Integration** and select **AGS Service**.
+3. Enter your rooms and sources in the dialog. Save to create the entry.
+4. Use the integration's **Configure** option later to change rooms or sources. Reload the entry when prompted.
 
 
 ## Configuration
 
-Add the integration to `configuration.yaml`.
+Configure AGS Service entirely from the Integrations UI. When adding the integration you will be prompted for rooms and sources. These values can be edited later via the **Configure** option on the integration card.
 
-### Minimal configuration
-
-Only `rooms` and `Sources` are required:
-
-```yaml
-ags_service:
-  rooms:
-    - room: "Living Room"
-      devices:
-        - device_id: "media_player.living_room"
-          device_type: "speaker"
-          priority: 1
-  Sources:
-    - Source: "Default"
-      Source_Value: "1"
-      media_content_type: "favorite_item_id"
-      source_default: true
-```
+Existing YAML configuration will be imported automatically on first install, but YAML support is now deprecated and should be removed after migration.
 
 ### Optional parameters
 
