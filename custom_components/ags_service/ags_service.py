@@ -571,7 +571,13 @@ def get_control_device_id(ags_config, hass):
 
 
 
-async def ags_select_source(ags_config, hass):
+async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
+    """Select the configured music source on the primary speaker.
+
+    When ``ignore_playing`` is ``True`` the source changes even if the device
+    is already playing.  Otherwise the function returns early whenever a music
+    source is selected while playback is active.
+    """
 
     try:
         actions_enabled = hass.data.get("switch.ags_actions", True)
@@ -634,8 +640,13 @@ async def ags_select_source(ags_config, hass):
             )
 
         elif source != "Unknown" and status == "ON":
-            if state.state == "playing" and state.attributes.get("source") != "TV":
+            if (
+                not ignore_playing
+                and state.state == "playing"
+                and state.attributes.get("source") != "TV"
+            ):
                 return
+
             source_info = source_dict.get(source)
 
             if source_info:

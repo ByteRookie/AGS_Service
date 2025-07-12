@@ -454,7 +454,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
-            ags_select_source(self.ags_config, self.hass)
+            self.hass.loop.call_soon_threadsafe(
+                lambda: self.hass.async_create_task(
+                    ags_select_source(
+                        self.ags_config,
+                        self.hass,
+                        ignore_playing=True,
+                    )
+                )
+            )
         self._schedule_ags_update()
            
 

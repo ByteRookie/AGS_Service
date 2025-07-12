@@ -244,6 +244,10 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 # Changelog
 
 
+### v1.5.1
+- Source changes from the AGS media player now ignore the playback check so
+  playlists switch instantly. Automations still wait for idle speakers.
+
 ### v1.5.0
 - **Breaking change**: replace `ott_device` with an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
 - Added `batch_unjoin` option to unjoin all speakers at once for faster shutdown.
@@ -254,9 +258,7 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Stop commands always include a short delay to prevent lingering playback.
 - The active speaker list clears correctly once rooms turn off.
 
-
-
--### v1.4.1
+### v1.4.1
 - Fixed stopping logic when turning the system off so every available speaker
   receives a stop or reset command.
 
