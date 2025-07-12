@@ -1,6 +1,9 @@
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.media_player import MediaPlayerEntity
-from homeassistant.components.media_player.browse_media import async_browse_media
+try:
+    from homeassistant.components.media_player.browse_media import async_browse_media as hass_async_browse_media
+except Exception:  # pragma: no cover - function may not exist
+    hass_async_browse_media = None
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
@@ -461,12 +464,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Delegate media browsing to the active control device."""
         if not self.primary_speaker_entity_id:
             return None
-        return await async_browse_media(
-            self.hass,
-            self.primary_speaker_entity_id,
-            media_content_id,
-            media_content_type,
+        if hass_async_browse_media:
+            return await hass_async_browse_media(
+                self.hass,
+                self.primary_speaker_entity_id,
+                media_content_id,
+                media_content_type,
+            )
+        await self.hass.services.async_call(
+            "media_player",
+            "browse_media",
+            {
+                "entity_id": self.primary_speaker_entity_id,
+                "media_content_id": media_content_id,
+                "media_content_type": media_content_type,
+            },
+            blocking=True,
         )
+        return None
            
 
     @property
