@@ -2,17 +2,12 @@
 from __future__ import annotations
 from datetime import timedelta
 
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.helpers.event import async_track_state_change_event
+
 # Sensors mostly update via the state change listener below, so heavy polling
 # isn't required. 30 seconds keeps them responsive without excessive work.
 SCAN_INTERVAL = timedelta(seconds=30)
-
-
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-# Setup platform function
-from homeassistant.helpers.event import async_track_state_change_event
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors

@@ -11,15 +11,10 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .ags_service import (
     get_active_rooms,
     ensure_action_queue,
-    enqueue_media_action,
     wait_for_actions,
     update_ags_sensors,
-    ags_select_source,
-    ensure_preferred_primary_tv,
+    handle_ags_status_change,
 )
-from . import ags_service as ags
-
-import asyncio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,15 +68,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
         rooms = self.hass.data["ags_service"]["rooms"]
-        prev_active = get_active_rooms(rooms, self.hass)
-        prev_primary = self.hass.data.get("primary_speaker")
+        get_active_rooms(rooms, self.hass)
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        await self._maybe_join(
-            first_room=len(prev_active) == 0,
-            prev_primary=prev_primary,
-        )
+        await self._maybe_join()
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
@@ -98,90 +89,40 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
 
-    async def _maybe_join(
-        self,
-        *,
-        first_room: bool = False,
-        prev_primary: str | None = None,
-    ) -> None:
-        """Join all active speakers to the primary group if allowed."""
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
-        current_status = self.hass.data.get("ags_status")
-        if current_status == "OFF":
-            return
-        actions_enabled = self.hass.data.get("switch.ags_actions", True)
-        if not actions_enabled:
-            return
-        primary = self.hass.data.get("primary_speaker")
-        if not primary or primary == "none":
-            primary = self.hass.data.get("preferred_primary_speaker")
-        if not primary or primary == "none":
-            return
-        active_speakers = self.hass.data.get("active_speakers", [])
-        members = [spk for spk in active_speakers if spk != primary]
-        if not members:
-            return
-        await enqueue_media_action(
-            self.hass,
-            "join",
-            {"entity_id": primary, "group_members": members},
+    async def _maybe_join(self) -> None:
+        """Refresh sensors and enforce the current AGS state."""
+        prev_status, new_status = await update_ags_sensors(
+            self.hass.data["ags_service"], self.hass
         )
-        if first_room:
-            if current_status == "ON TV":
-                preferred = await ensure_preferred_primary_tv(
-                    self.hass, self.hass.data["ags_service"]
-                )
-                if preferred:
-                    await enqueue_media_action(
-                        self.hass,
-                        "select_source",
-                        {"entity_id": preferred, "source": "TV"},
-                    )
-            elif not prev_primary or prev_primary == "none":
-                await ags_select_source(
-                    self.hass.data["ags_service"],
-                    self.hass,
-                )
+
+        # ``update_ags_sensors`` already schedules ``handle_ags_status_change``
+        # whenever the global status flips.  If the status didn't change we
+        # invoke it here so toggling a room still syncs grouping.
+        if new_status == prev_status:
+            await handle_ags_status_change(
+                self.hass,
+                self.hass.data["ags_service"],
+                new_status,
+                prev_status,
+            )
+
         await wait_for_actions(self.hass)
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
     async def _maybe_unjoin(self) -> None:
-        """Unjoin this room's speaker from any group if allowed."""
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
-        actions_enabled = self.hass.data.get("switch.ags_actions", True)
-        if not actions_enabled:
-            return
-        members = [
-            d["device_id"]
-            for d in self.room.get("devices", [])
-            if d.get("device_type") == "speaker"
-        ]
-        if not members:
-            return
-        await enqueue_media_action(self.hass, "unjoin", {"entity_id": members})
-        await enqueue_media_action(
-            self.hass,
-            "wait_ungrouped",
-            {"entity_id": members, "timeout": 3},
+        """Refresh sensors and enforce the current AGS state."""
+        prev_status, new_status = await update_ags_sensors(
+            self.hass.data["ags_service"], self.hass
         )
 
-        has_tv = any(d.get("device_type") == "tv" for d in self.room.get("devices", []))
-        if has_tv and not self.hass.data["ags_service"].get("disable_Tv_Source"):
-            for member in members:
-                await enqueue_media_action(
-                    self.hass,
-                    "select_source",
-                    {"entity_id": member, "source": "TV"},
-                )
+        if new_status == prev_status:
+            await handle_ags_status_change(
+                self.hass,
+                self.hass.data["ags_service"],
+                new_status,
+                prev_status,
+            )
 
-        rooms = self.hass.data["ags_service"]["rooms"]
-        active_rooms = get_active_rooms(rooms, self.hass)
-        if not active_rooms:
-            await enqueue_media_action(self.hass, "media_stop", {"entity_id": members})
-            await enqueue_media_action(self.hass, "clear_playlist", {"entity_id": members})
         await wait_for_actions(self.hass)
-
-        await update_ags_sensors(self.hass.data["ags_service"], self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
