@@ -44,6 +44,11 @@ access their values.
 **Switches**
 
 * `(Room Name) Media` – toggle a room on or off manually. One switch is created for every room in your configuration.
+**Central Command Handling**
+
+* All join, unjoin and playback commands run through a single status handler.
+* A queue processes commands sequentially to prevent race conditions.
+
 
 ## File Structure
 
@@ -233,40 +238,16 @@ latest group state is used.
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
-
-### v1.4.8
-- Faster AGS OFF logic with optional `batch_unjoin` setting.
-
-### v1.4.7
-- Last playing speakers now stop when the final room turns off, even if the system status stays ON.
-
-### v1.4.6
-- Speakers outside active rooms are no longer treated as active even if they are playing.
-
--### v1.4.5
-- Active speaker list properly clears once rooms are turned off, preventing stale entries.
-
--### v1.4.4
-- Stop commands now fire even if no rooms are active so lingering playback ends.
-
--### v1.4.3
-- Added a short delay after sending stop or reset commands so the last speaker
-  shuts down reliably.
-
--### v1.4.2
-- Fixed lingering playback when rooms were deactivated and added delays after
-  ungrouping so stop/reset commands run reliably.
-
--### v1.4.1
-- Fixed stopping logic when turning the system off so every available speaker
-  receives a stop or reset command.
-
-### v1.6.0
-- `ott_devices` entries may include `default: true` to specify the fallback OTT device when no `tv_input` matches. If no default is set AGS uses the TV device.
-
 ### v1.5.0
-- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list. Each entry must define `ott_device` and `tv_input`.
-- Automatically selects the correct OTT device based on the TV's current input.
+- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
+- New `batch_unjoin` option unjoins all speakers at once for faster shutdown.
+- Last playing speakers now stop when the final room turns off.
+- Speakers outside active rooms are no longer treated as active.
+- Schedule re-enabling restores the default state unless `schedule_override` is on.
+- Centralized status handler manages all join/unjoin and playback commands from one place, ensuring reliable grouping and cleanup.
+- Stop commands always fire with delays to prevent lingering playback.
+- Active speaker list clears properly once rooms are turned off.
+
 
 ### v1.4.1
 - Schedule source selection runs asynchronously
