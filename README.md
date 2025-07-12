@@ -44,6 +44,11 @@ access their values.
 **Switches**
 
 * `(Room Name) Media` – toggle a room on or off manually. One switch is created for every room in your configuration.
+**Central Command Handling**
+
+* All join, unjoin and playback commands run through a single status handler.
+* A queue processes commands sequentially to prevent race conditions.
+
 
 ## File Structure
 
@@ -230,12 +235,16 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.6.0
-- `ott_devices` entries may include `default: true` to specify the fallback OTT device when no `tv_input` matches. If no default is set AGS uses the TV device.
-
 ### v1.5.0
-- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list. Each entry must define `ott_device` and `tv_input`.
-- Automatically selects the correct OTT device based on the TV's current input.
+- **Breaking change**: `ott_device` has been replaced by an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
+- New `batch_unjoin` option unjoins all speakers at once for faster shutdown.
+- Last playing speakers now stop when the final room turns off.
+- Speakers outside active rooms are no longer treated as active.
+- Schedule re-enabling restores the default state unless `schedule_override` is on.
+- Centralized status handler manages all join/unjoin and playback commands from one place, ensuring reliable grouping and cleanup.
+- Stop commands always fire with delays to prevent lingering playback.
+- Active speaker list clears properly once rooms are turned off.
+
 
 ### v1.4.1
 - Schedule source selection runs asynchronously
