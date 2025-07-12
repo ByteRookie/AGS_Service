@@ -3,13 +3,16 @@ from homeassistant.components.media_player import MediaPlayerEntity
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
-from homeassistant.const import STATE_IDLE
+from homeassistant.const import STATE_IDLE, STATE_PLAYING, STATE_PAUSED
 from homeassistant.helpers.event import async_track_state_change_event
 
 import asyncio
-
-from .ags_service import update_ags_sensors, ags_select_source
-
+from .ags_service import (
+    update_ags_sensors,
+    ags_select_source,
+    get_control_device_id,
+    _select_ott_device,
+)
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -412,11 +415,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ags_config = self.hass.data['ags_service']
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
-
-        if self.ags_status == "ON TV" and not disable_Tv_Source:
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None 
-
-
+        if self.ags_status == "ON TV" and disable_Tv_Source == False:
+            sources = (
+                self.primary_speaker_state.attributes.get("source_list")
+                if self.primary_speaker_state
+                else None
+            )
         else:
             sources = [
                 source_dict["Source"]

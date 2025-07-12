@@ -25,7 +25,6 @@ CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
 CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SCHEDULE_ENTITY = 'schedule_entity'
 CONF_OTT_DEVICE = 'ott_device'
-CONF_BATCH_UNJOIN = 'batch_unjoin'
 CONF_OTT_DEVICES = 'ott_devices'
 CONF_TV_INPUT = 'tv_input'
 CONF_SOURCES = 'Sources'
@@ -98,7 +97,6 @@ DEVICE_SCHEMA = vol.Schema({
         vol.Optional('off_state', default='off'): cv.string,
         vol.Optional('schedule_override', default=False): cv.boolean,
     }),
-    vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
 })
 
 async def async_setup(hass, config):
@@ -124,7 +122,6 @@ async def async_setup(hass, config):
         'static_name': ags_config.get(CONF_STATIC_NAME, None),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
-        'batch_unjoin': ags_config.get(CONF_BATCH_UNJOIN, False),
     }
 
     # Initialize shared media action queue

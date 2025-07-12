@@ -118,9 +118,7 @@ ags_service:
 | `default_on` | `false` | Start enabled on boot. |
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
-| `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
 | `ott_devices` | _None_ | List of streaming boxes or consoles with their TV inputs. When the TV's current input matches an entry's `tv_input`, AGS uses the corresponding `ott_device` for control. You may set `default: true` on one entry to use that OTT device when no inputs match. If no default is set the TV device itself is used. `ott_device` and `tv_input` are required for each entry. |
-
 
 ### Reference configuration
 
@@ -133,7 +131,6 @@ ags_service:
 #  default_on: false
 #  static_name: "AGS Media Player"
 #  disable_Tv_Source: false
-#  batch_unjoin: false
 #  schedule_entity:
 #    entity_id: schedule.my_music
 #    on_state: "on"  # optional
@@ -200,8 +197,7 @@ AGS evaluates several conditions to decide when to play and which speaker should
 `get_preferred_primary_speaker` chooses the highest priority active speaker from the same room as the control device (the TV or OTT player when in `ON TV` mode). This keeps audio and video in sync when multiple rooms have televisions.
 
 
-`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.  All
-triggers call this service so the logic only exists in one place.
+`handle_ags_status_change` joins active speakers, unjoins inactive ones and resets TV speakers to their input whenever the status changes.
 
 
 ### Action Queue
@@ -234,33 +230,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
-### v1.4.8
-- Faster AGS OFF logic with optional `batch_unjoin` setting.
-
-### v1.4.7
-- Last playing speakers now stop when the final room turns off, even if the system status stays ON.
-
-### v1.4.6
-- Speakers outside active rooms are no longer treated as active even if they are playing.
-
--### v1.4.5
-- Active speaker list properly clears once rooms are turned off, preventing stale entries.
-
--### v1.4.4
-- Stop commands now fire even if no rooms are active so lingering playback ends.
-
--### v1.4.3
-- Added a short delay after sending stop or reset commands so the last speaker
-  shuts down reliably.
-
--### v1.4.2
-- Fixed lingering playback when rooms were deactivated and added delays after
-  ungrouping so stop/reset commands run reliably.
-
--### v1.4.1
-- Fixed stopping logic when turning the system off so every available speaker
-  receives a stop or reset command.
-
 ### v1.6.0
 - `ott_devices` entries may include `default: true` to specify the fallback OTT device when no `tv_input` matches. If no default is set AGS uses the TV device.
 
@@ -274,7 +243,6 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 - Clear playlist after stopping media
 - Fix async source selection logic
 - Improve music source handling and TV coordinator selection
-
 
 ### v1.4.0
 - Added action queue with optional AGS Actions switch
