@@ -108,6 +108,20 @@ async def _wait_until_grouped(
 
 
 
+def _ensure_valid_source(hass):
+    """Ensure ``ags_media_player_source`` references a configured source."""
+    source = hass.data.get("ags_media_player_source")
+    sources = hass.data.get("ags_service", {}).get("Sources", [])
+    valid_names = [s["Source"] for s in sources]
+
+    if source not in valid_names:
+        default = next((s["Source"] for s in sources if s.get("source_default")), None)
+        if default is None and sources:
+            default = sources[0]["Source"]
+        if default is not None:
+            hass.data["ags_media_player_source"] = default
+
+
 def _handle_status_transition(prev_status, new_status, hass):
     """Store and restore the AGS source when toggling TV mode."""
     if new_status == "ON TV" and prev_status != "ON TV":
@@ -116,6 +130,10 @@ def _handle_status_transition(prev_status, new_status, hass):
         prev_source = hass.data.pop("ags_source_before_tv", None)
         if prev_source is not None:
             hass.data["ags_media_player_source"] = prev_source
+        else:
+            _ensure_valid_source(hass)
+    elif new_status == "ON":
+        _ensure_valid_source(hass)
 
 ### Sensor Functions ###
 
