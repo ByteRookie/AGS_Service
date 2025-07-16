@@ -198,6 +198,11 @@ def get_active_rooms(rooms, hass):
     """Fetch the list of active rooms based on switches in hass.data."""
     
     active_rooms = []
+    tv_candidates: list[tuple[int, str]] = []
+
+    ags_source = hass.data.get("ags_media_player_source")
+    music_sources = [src["Source"] for src in hass.data["ags_service"]["Sources"]]
+    tv_source_active = ags_source not in music_sources if ags_source is not None else False
 
     for room in rooms:
         room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
@@ -205,20 +210,37 @@ def get_active_rooms(rooms, hass):
             continue
 
         skip_room = False
-        for device in room['devices']:
-            if device.get('device_type') != 'tv':
+        candidate_priority = None
+        active_tvs = []
+
+        for device in room["devices"]:
+            if device.get("device_type") != "tv":
                 continue
-            state = hass.states.get(device['device_id'])
-            if state and state.state != 'off':
-                if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
-                    skip_room = False
-                    break
-                else:
-                    skip_room = True
+            state = hass.states.get(device["device_id"])
+            if state and state.state != "off":
+                active_tvs.append(device)
+
+        if active_tvs:
+            if any(d.get("tv_mode", TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO for d in active_tvs):
+                skip_room = False
+            else:
+                skip_room = True
+                if tv_source_active:
+                    candidate_priority = min(d.get("priority", 0) for d in active_tvs)
+
+        if candidate_priority is not None:
+            tv_candidates.append((candidate_priority, room["room"]))
+            continue
+
         if skip_room:
             continue
 
         active_rooms.append(room['room'])
+
+    if tv_source_active and tv_candidates:
+        selected_room = min(tv_candidates, key=lambda x: x[0])[1]
+        if selected_room not in active_rooms:
+            active_rooms.append(selected_room)
     
     # Store the list of active rooms in hass.data
     hass.data['active_rooms'] = active_rooms
@@ -227,8 +249,10 @@ def get_active_rooms(rooms, hass):
 ### Function to Update Status ### 
 def update_ags_status(ags_config, hass):
     rooms = ags_config['rooms']
-    active_rooms = hass.data.get('active_rooms', [])
     prev_status = hass.data.get('ags_status')
+    ags_source = hass.data.get('ags_media_player_source')
+    music_sources = [src['Source'] for src in hass.data['ags_service']['Sources']]
+    tv_source_active = ags_source not in music_sources if ags_source is not None else False
     default_source_name = None
     sources_list = hass.data['ags_service']['Sources']
     for src in sources_list:
@@ -367,6 +391,11 @@ def update_ags_status(ags_config, hass):
     if tv_found:
         hass.data['current_tv_mode'] = active_tv_mode
         if active_tv_mode != TV_MODE_NO_MUSIC:
+            ags_status = "ON TV"
+            _handle_status_transition(prev_status, ags_status, hass)
+            hass.data['ags_status'] = ags_status
+            return ags_status
+        if tv_source_active and (prev_status not in music_sources or ags_source == "TV"):
             ags_status = "ON TV"
             _handle_status_transition(prev_status, ags_status, hass)
             hass.data['ags_status'] = ags_status
