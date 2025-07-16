@@ -419,16 +419,25 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         disable_Tv_Source = ags_config['disable_Tv_Source']
 
         tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
+        ags_source = self.hass.data.get("ags_media_player_source")
+        music_sources = [s["Source"] for s in self.hass.data['ags_service']['Sources']]
+
         if (
+            tv_mode == TV_MODE_NO_MUSIC
+            and ags_source not in music_sources
+            and self.primary_speaker_state is not None
+        ):
+            sources = self.primary_speaker_state.attributes.get('source_list') or []
+            if "Exit TV" not in sources:
+                sources.append("Exit TV")
+        elif (
             self.ags_status == "ON TV"
-            and disable_Tv_Source == False
+            and not disable_Tv_Source
             and tv_mode != TV_MODE_NO_MUSIC
         ):
             sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
-
         else:
             sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-            # Check if any device has a type of TV and add "TV" to the source list
             if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
                 sources.append("TV")
 
@@ -450,7 +459,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
-        self.hass.data["ags_media_player_source"] = source
+        current = self.hass.data.get("ags_media_player_source")
+        music_sources = [s["Source"] for s in self.hass.data['ags_service']['Sources']]
+
+        if source == "Exit TV":
+            prev = self.hass.data.pop("ags_source_before_tv", None)
+            if prev is not None:
+                self.hass.data["ags_media_player_source"] = prev
+                source = prev
+            else:
+                source = current
+        else:
+            if current in music_sources and source not in music_sources:
+                self.hass.data["ags_source_before_tv"] = current
+            self.hass.data["ags_media_player_source"] = source
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
