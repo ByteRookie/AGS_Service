@@ -701,6 +701,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         await wait_for_actions(hass)
         await hass.data["ags_service"]["update_event"].wait()
 
+        # Skip repeated "OFF" handling once the system is fully stopped
+        if new_status == "OFF" and old_status == "OFF":
+            return
+
         rooms = ags_config["rooms"]
         device_states = {s.entity_id: s for s in hass.states.async_all()}
         tv_map = {
