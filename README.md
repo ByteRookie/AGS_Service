@@ -244,6 +244,9 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 # Changelog
 
 
+### v1.5.2
+- Ignore repeated turn-off events so no extra stop commands fire once the system is off.
+
 ### v1.5.1
 - Source changes from the AGS media player now ignore the playback check so
   playlists switch instantly. Automations still wait for idle speakers.
