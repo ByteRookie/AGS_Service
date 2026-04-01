@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import timedelta
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.helpers.event import async_track_state_change_event
 
 # Sensors mostly update via the state change listener below, so heavy polling
@@ -164,6 +164,9 @@ class InactiveSpeakersSensor(SensorEntity):
     
 ## Sensor for Status 
 class AGSStatusSensor(SensorEntity):
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["ON", "ON TV", "Override", "OFF"]
+
     def __init__(self, hass):
         """Initialize the sensor."""
 

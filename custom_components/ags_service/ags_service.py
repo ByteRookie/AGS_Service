@@ -2,6 +2,7 @@
 import logging
 import asyncio
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 CONF_TV_MODE = 'tv_mode'
 TV_MODE_TV_AUDIO = 'tv_audio'
@@ -30,8 +31,10 @@ async def _action_worker(hass: HomeAssistant) -> None:
                     )
                 else:
                     await hass.services.async_call("media_player", service, data)
-            except Exception as exc:  # pragma: no cover - safety net
+            except HomeAssistantError as exc:
                 _LOGGER.warning("Failed media action %s: %s", service, exc)
+            except Exception as exc:  # pragma: no cover - safety net
+                _LOGGER.warning("Unexpected error in media action %s: %s", service, exc)
             finally:
                 _ACTION_QUEUE.task_done()
         except asyncio.CancelledError:
@@ -220,7 +223,7 @@ def get_active_rooms(rooms, hass):
             if device.get('device_type') != 'tv':
                 continue
             state = hass.states.get(device['device_id'])
-            if state and state.state != 'off':
+            if state and state.state not in ['off', 'unavailable', 'unknown', 'standby', 'idle', 'paused', 'buffering']:
                 if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
                     skip_room = False
                     break
@@ -353,7 +356,7 @@ def update_ags_status(ags_config, hass):
             if (
                 device.get('device_type') == 'tv'
                 and device_state
-                and device_state.state != 'off'
+                and device_state.state not in ['off', 'unavailable', 'unknown', 'standby', 'idle', 'paused', 'buffering']
             ):
                 room_tv_on = True
                 if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:

@@ -369,7 +369,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         
         return self.primary_speaker_state.attributes.get('media_position_updated_at') if self.primary_speaker_state else None
     @property
-    def supported_features(self):
+    def supported_features(self) -> MPFeature:
         return (
             MPFeature.SEEK
             | MPFeature.PLAY

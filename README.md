@@ -245,15 +245,19 @@ Overall, `tv_mode` lets you decide how each TV affects its room:
 ## License
 
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
-
 # Changelog
+
+### v1.6.5
+- **Asynchronous Architecture and Stability Update**
+- **Deadlock Prevention**: Moved to a fully non-blocking, event-driven model for room switches and sensor updates, resolving startup "hangs" and ensuring UI responsiveness.
+- **TV "Ghosting" Fix**: Refined TV state detection to ignore `standby`, `idle`, and `paused` modes, preventing inaccurate "ON TV" status transitions.
+- **Modern HA Compliance**: Migrated to `MediaPlayerEntityFeature` enums and added `SensorDeviceClass.ENUM` for native state translations.
+- **Dynamic OTT Routing**: Completed the `ott_devices` array feature, allowing users to map multiple external players (Apple TV, Xbox, etc.) to specific TV inputs.
+- **Performance Tuning**: Implemented state change filtering to reduce CPU overhead by ignoring redundant attribute updates during playback.
 
 ### v1.6.4
 - **Deadlock Fix and Performance Optimization**
-- **Resolved Startup Deadlock**: Removed the `update_event` synchronization logic that caused Home Assistant to freeze during integration setup and state transitions.
-- **Improved UI Responsiveness**: Room switches now use a "fire-and-forget" approach for status updates, ensuring the UI remains responsive and preventing circular dependencies in the event loop.
-
-### v1.6.3
+...
 - **OTT Routing Enhancement and Configuration Fix**
 - **Dynamic OTT Routing**: Added support for an array of `ott_devices` per TV. AGS can now dynamically route media commands to the correct OTT device (e.g., Apple TV, Xbox) based on the TV's current active source/input.
 - **Fixed Configuration Crash**: Resolved a schema validation error where omitting `static_name` would cause Home Assistant to fail setup. The validator now correctly handles `None` or missing values for this field.
