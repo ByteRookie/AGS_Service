@@ -193,6 +193,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_primary_speaker_changed(self, event):
         """Handle state change events for tracked entities."""
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        
+        if old_state is not None and new_state is not None:
+            # Filter out spam: Only trigger if the actual state, group, or source changed
+            state_changed = old_state.state != new_state.state
+            group_changed = old_state.attributes.get("group_members") != new_state.attributes.get("group_members")
+            source_changed = old_state.attributes.get("source") != new_state.attributes.get("source")
+            
+            if not (state_changed or group_changed or source_changed):
+                return  # Ignore media_position clock ticks
+
         await update_ags_sensors(self.ags_config, self.hass)
         self._refresh_from_data()
         self.async_schedule_update_ha_state(True)

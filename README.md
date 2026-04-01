@@ -243,6 +243,12 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.6.2
+- **Stabilization and Event Loop Optimization**
+- **Reduced CPU Usage**: Added state-change filtering to event listeners. The integration now ignores `media_position` clock ticks, preventing unnecessary full system refreshes and saving significant CPU cycles.
+- **Fixed Task Leaks**: Background workers are now explicitly cancelled during integration reloads and unloads, eliminating duplicate tasks and race conditions.
+- **Fixed Switch UI Race Condition**: The status handler is now properly awaited during sensor updates, ensuring that grouping actions complete and UI switches reflect the correct state instantly.
+
 ### v1.6.0
 - **Architectural, Sonos Optimization, and Critical Bug Fix Update**
 - **Performance Optimization**: Eliminated full HA state machine fetches. The integration now only monitors configured media players, drastically reducing CPU usage on lower-end hardware like Raspberry Pi.

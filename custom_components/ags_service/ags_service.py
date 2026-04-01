@@ -170,10 +170,8 @@ async def update_ags_sensors(ags_config, hass):
             get_inactive_tv_speakers(rooms, hass)
             new_status = hass.data.get('ags_status')
             if new_status != prev_status or new_rooms != prev_rooms:
-                hass.async_create_task(
-                    handle_ags_status_change(
-                        hass, ags_config, new_status, prev_status
-                    )
+                await handle_ags_status_change(
+                    hass, ags_config, new_status, prev_status
                 )
             ## Use in Future release ###
             #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":

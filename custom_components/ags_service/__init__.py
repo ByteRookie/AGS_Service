@@ -118,6 +118,10 @@ async def async_setup(hass, config):
         'batch_unjoin': ags_config.get(CONF_BATCH_UNJOIN, False),
     }
 
+    # Cancel existing action worker if it's already running (from a previous setup)
+    if "action_worker" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["action_worker"].cancel()
+
     # Initialize shared media action queue
     await ensure_action_queue(hass)
 
@@ -135,3 +139,13 @@ async def async_setup(hass, config):
     await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 
     return True
+
+async def async_unload_entry(hass, entry):
+    """Unload a config entry and cancel background tasks."""
+    # Cancel the action queue worker
+    if DOMAIN in hass.data and "action_worker" in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["action_worker"].cancel()
+    
+    # Unload platforms (sensor, switch, media_player)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "media_player"])
+    return unload_ok

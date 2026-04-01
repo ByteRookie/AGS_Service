@@ -33,9 +33,20 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Define a function to be called when a tracked entity changes its state
     async def state_changed_listener(event):
         """Refresh sensors when a tracked entity changes state."""
+        old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
-        if new_state is None:
+        
+        if old_state is None or new_state is None:
             return
+            
+        # Filter out spam: Only trigger if the actual state, group, or source changed
+        state_changed = old_state.state != new_state.state
+        group_changed = old_state.attributes.get("group_members") != new_state.attributes.get("group_members")
+        source_changed = old_state.attributes.get("source") != new_state.attributes.get("source")
+        
+        if not (state_changed or group_changed or source_changed):
+            return  # Ignore media_position clock ticks
+            
         for sensor in sensors:
             await sensor.async_update_ha_state(True)
 
