@@ -247,16 +247,17 @@ Overall, `tv_mode` lets you decide how each TV affects its room:
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 # Changelog
 
+### v1.6.6
+- **HomeKit Integration and Architectural Refinement**
+- **Apple HomeKit Support**: Added `MediaPlayerDeviceClass.TV` metadata to the virtual player, enabling native iOS Remote widget support and proper identification in the Home app.
+- **Rogue Speaker Election Fix**: Refined the "Sticky Master" logic to correctly identify rogue playback. The system now allows speakers to maintain their source if a TV in the same room is inactive.
+- **Modern HA Standards**: Fully migrated to `MediaPlayerEntityFeature` bitwise enums and added `SensorDeviceClass.ENUM` for improved UI state translations.
+- **Event Loop Optimization**: Enhanced spam filtering in both media player and sensor state listeners to prevent redundant processing during active playback.
+- **Startup Stability**: Finalized the transition to asynchronous task creation for all room switch toggles, eliminating the 10-second setup timeout.
+
 ### v1.6.5
 - **Asynchronous Architecture and Stability Update**
-- **Deadlock Prevention**: Moved to a fully non-blocking, event-driven model for room switches and sensor updates, resolving startup "hangs" and ensuring UI responsiveness.
-- **TV "Ghosting" Fix**: Refined TV state detection to ignore `standby`, `idle`, and `paused` modes, preventing inaccurate "ON TV" status transitions.
-- **Modern HA Compliance**: Migrated to `MediaPlayerEntityFeature` enums and added `SensorDeviceClass.ENUM` for native state translations.
-- **Dynamic OTT Routing**: Completed the `ott_devices` array feature, allowing users to map multiple external players (Apple TV, Xbox, etc.) to specific TV inputs.
-- **Performance Tuning**: Implemented state change filtering to reduce CPU overhead by ignoring redundant attribute updates during playback.
-
-### v1.6.4
-- **Deadlock Fix and Performance Optimization**
+...
 ...
 - **OTT Routing Enhancement and Configuration Fix**
 - **Dynamic OTT Routing**: Added support for an array of `ott_devices` per TV. AGS can now dynamically route media commands to the correct OTT device (e.g., Apple TV, Xbox) based on the TV's current active source/input.

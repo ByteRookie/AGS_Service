@@ -427,7 +427,13 @@ def check_primary_speaker_logic(ags_config, hass):
                 if ags_status == "ON TV" and current_source != "TV":
                     is_rogue = True
                 elif ags_status == "ON" and current_source == "TV":
-                    is_rogue = True
+                    # Only rogue if an actual TV in this room is ACTIVE
+                    is_rogue = False
+                    for room in rooms:
+                        if any(d['device_id'] == current_primary for d in room['devices']):
+                            if any(d['device_type'] == 'tv' and (s := hass.states.get(d['device_id'])) and s.state not in ['off', 'standby', 'idle', 'unavailable', 'unknown', 'paused', 'buffering'] for d in room['devices']):
+                                is_rogue = True
+                            break
                 
                 if not is_rogue:
                     # Check if this speaker is in an active room
@@ -447,7 +453,7 @@ def check_primary_speaker_logic(ags_config, hass):
                 tv_on = False
                 for device in sorted_devices:
                     device_state = hass.states.get(device['device_id'])
-                    if device['device_type'] == 'tv' and device_state is not None and device_state.state != 'off':
+                    if device['device_type'] == 'tv' and device_state is not None and device_state.state not in ['off', 'standby', 'idle', 'unavailable', 'unknown', 'paused', 'buffering']:
                         tv_on = True
                         break
 

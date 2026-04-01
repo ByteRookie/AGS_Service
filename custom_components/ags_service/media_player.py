@@ -1,5 +1,5 @@
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.components.media_player import MediaPlayerEntity
+from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerDeviceClass
 from homeassistant.components.media_player.const import (
     MediaPlayerEntityFeature as MPFeature,
 )
@@ -65,6 +65,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
+    _attr_device_class = MediaPlayerDeviceClass.TV
+
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
@@ -221,6 +223,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             
             if not (state_changed or group_changed or source_changed):
                 return  # Ignore media_position clock ticks
+
+            # Second level check: avoid updates if only state is same and group is same
+            if old_state.state == new_state.state and not group_changed:
+                # Still check source to be sure
+                if not source_changed:
+                    return
 
         await update_ags_sensors(self.ags_config, self.hass)
         self._refresh_from_data()

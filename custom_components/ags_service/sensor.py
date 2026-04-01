@@ -46,6 +46,12 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         
         if not (state_changed or group_changed or source_changed):
             return  # Ignore media_position clock ticks
+
+        # Second level check: avoid updates if only state is same and group is same
+        if old_state.state == new_state.state and not group_changed:
+            # Still check source to be sure
+            if not source_changed:
+                return
             
         for sensor in sensors:
             await sensor.async_update_ha_state(True)
