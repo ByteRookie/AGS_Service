@@ -243,6 +243,22 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.6.0
+- **Architectural and Sonos Optimization Update**
+- **Sticky Master Logic**: The integration now stays on the current primary speaker as long as it's active and playing, preventing audio interruptions and master swaps during whole-home audio movement.
+- **Sonos Optimizations**: 
+  - Automatically synchronizes volume of newly joined speakers with the master before grouping for a seamless transition.
+  - Refined grouping commands to reduce network chatter and improved stability with settling delays.
+  - Excluded master from its own follower list in `join` commands to prevent grouping stutters.
+- Converted all Media Player methods to asynchronous operations for better responsiveness and compatibility with the latest Home Assistant standards (2025+).
+- Improved Primary Speaker selection logic to allow group members to be candidates, preventing audio dropouts during room transitions.
+- Enhanced source selection stability by ensuring all TV and music source commands use the centralized action queue.
+- Added comprehensive `CONFIG_SCHEMA` for robust configuration validation on startup.
+- Fixed entity tracking bugs to ensure the UI updates instantly when device states change.
+- Refined status initialization to default to `OFF` for more predictable system behavior.
+- Improved task management: The action queue worker is now properly managed within `hass.data` to prevent task leaks.
+- Added detailed logging for status transitions, grouping actions, and source selection to aid in troubleshooting.
+- Added safety checks to prevent integration errors during unloading.
 
 ### v1.5.2
 - Ignore repeated turn-off events so no extra stop commands fire once the system is off.
@@ -252,7 +268,7 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
   playlists switch instantly. Automations still wait for idle speakers.
 
 ### v1.5.0
-- **Breaking change**: replace `ott_device` with an `ott_devices` list that matches TV inputs and supports a `default: true` fallback.
+- Added `ott_device` support to allow external player control for TVs.
 - Added `batch_unjoin` option to unjoin all speakers at once for faster shutdown.
 - Last playing speakers now stop automatically when the final room turns off.
 - Speakers in rooms that are off no longer count as active.

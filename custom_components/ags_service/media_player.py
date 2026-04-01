@@ -25,18 +25,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
     async_add_entities([ags_media_player])
     
-    # Set up a listener to monitor changes to sensor.ags_primary_speaker
-    async_track_state_change_event(hass, "switch.media_system", ags_media_player.async_primary_speaker_changed)
-
-    # Set up a listener to monitor changes to the primary speaker (from hass.data)
-    keys_to_check = ['primary_speaker', 'ags_status', 'switch_media_system_state', 'active_rooms', 'active_speakers', 'ags_media_player_source' ]
-
-    for key in keys_to_check:
-        entity_id = hass.data.get(key)
-        if entity_id:
-            async_track_state_change_event(hass, entity_id, ags_media_player.async_primary_speaker_changed)
-
-    # Add switches for rooms and zone.home
+    # Add switches for rooms, zone.home and schedule
     entities_to_track = ['zone.home']
     schedule_cfg = ags_config.get('schedule_entity')
     if schedule_cfg and schedule_cfg.get('entity_id'):
@@ -44,6 +33,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     for room in rooms:
         room_switch = f"switch.{room['room'].lower().replace(' ', '_')}_media"
         entities_to_track.append(room_switch)
+
+    # Track the global actions switch if sensors/switches were created
+    if ags_config.get("create_sensors"):
+        entities_to_track.append("switch.ags_actions")
 
     for entity in entities_to_track:
         async_track_state_change_event(hass, entity, ags_media_player.async_primary_speaker_changed)
@@ -121,13 +114,11 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
 
 
-    def update(self):
+    async def async_update(self):
         """Fetch latest state."""
         ### Move logic here for sensor to remove sensor.py ##
 
-        asyncio.run_coroutine_threadsafe(
-            update_ags_sensors(self.ags_config, self._hass), self.hass.loop
-        ).result()
+        await update_ags_sensors(self.ags_config, self._hass)
 
         self._refresh_from_data()
 
@@ -297,14 +288,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         
         return self.primary_speaker_state.attributes.get('is_volume_muted') if self.primary_speaker_state else None
 
-    def set_volume_level(self, volume):
+    async def async_set_volume_level(self, volume):
         """Set the volume level for all active speakers."""
         active_speakers = self.hass.data.get('active_speakers', [])
-        # Use async_call to avoid blocking when changing multiple speakers
-        self._schedule_media_call('volume_set', {
-            'entity_id': active_speakers,
-            'volume_level': volume,
-        })
+        if active_speakers:
+            await self.hass.services.async_call('media_player', 'volume_set', {
+                'entity_id': active_speakers,
+                'volume_level': volume,
+            })
+            await self.async_update()
 
     @property
     def volume_level(self):
@@ -366,52 +358,64 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     # Implement methods to control the AGS Primary Speaker
 
-    def media_play(self):
-        # Fire and forget the service call so the UI stays responsive
-        self._schedule_media_call('media_play', {
-            'entity_id': self.primary_speaker_entity_id
-        })
-        self._schedule_ags_update()
+    async def async_media_play(self):
+        """Play media."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_play', {
+                'entity_id': self.primary_speaker_entity_id
+            })
+            await self.async_update()
 
-    def media_pause(self):
-        self._schedule_media_call('media_pause', {
-            'entity_id': self.primary_speaker_entity_id
-        })
-        self._schedule_ags_update()
+    async def async_media_pause(self):
+        """Pause media."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_pause', {
+                'entity_id': self.primary_speaker_entity_id
+            })
+            await self.async_update()
 
-    def media_stop(self):
-        self._schedule_media_call('media_stop', {
-            'entity_id': self.primary_speaker_entity_id
-        })
-        self._schedule_ags_update()
+    async def async_media_stop(self):
+        """Stop media."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_stop', {
+                'entity_id': self.primary_speaker_entity_id
+            })
+            await self.async_update()
 
-    def media_next_track(self):
-        self._schedule_media_call('media_next_track', {
-            'entity_id': self.primary_speaker_entity_id
-        })
-        self._schedule_ags_update()
+    async def async_media_next_track(self):
+        """Next track."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_next_track', {
+                'entity_id': self.primary_speaker_entity_id
+            })
+            await self.async_update()
 
-    def turn_on(self):
+    async def async_turn_on(self):
+        """Turn on."""
         self.hass.data['switch_media_system_state'] = True
-        self._schedule_ags_update()
+        await self.async_update()
 
-    def turn_off(self):
+    async def async_turn_off(self):
+        """Turn off."""
         self.hass.data['switch_media_system_state'] = False
-        self._schedule_ags_update()
+        await self.async_update()
 
-    def media_previous_track(self):
-        self._schedule_media_call('media_previous_track', {
-            'entity_id': self.primary_speaker_entity_id
-        })
-        self._schedule_ags_update()
+    async def async_media_previous_track(self):
+        """Previous track."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_previous_track', {
+                'entity_id': self.primary_speaker_entity_id
+            })
+            await self.async_update()
   
-    def media_seek(self, position):
+    async def async_media_seek(self, position):
         """Seek to a specific point in the media on the primary speaker."""
-        self._schedule_media_call('media_seek', {
-            'entity_id': self.primary_speaker_entity_id,
-            'seek_position': position
-        })
-        self._schedule_ags_update()
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'media_seek', {
+                'entity_id': self.primary_speaker_entity_id,
+                'seek_position': position
+            })
+            await self.async_update()
     @property
     def source_list(self):
         """List of available sources."""
@@ -448,22 +452,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 return source_dict["Source_Value"]
         return None  # if not found
 
-    def select_source(self, source):
+    async def async_select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
         self.hass.data["ags_media_player_source"] = source
 
         actions_enabled = self.hass.data.get("switch.ags_actions", True)
         if actions_enabled:
-            self.hass.loop.call_soon_threadsafe(
-                lambda: self.hass.async_create_task(
-                    ags_select_source(
-                        self.ags_config,
-                        self.hass,
-                        ignore_playing=True,
-                    )
-                )
+            await ags_select_source(
+                self.ags_config,
+                self.hass,
+                ignore_playing=True,
             )
-        self._schedule_ags_update()
+        await self.async_update()
            
 
     @property
@@ -481,28 +481,23 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             return self.primary_speaker_state.attributes.get('repeat', 'off')
         return 'off'
 
-    def set_shuffle(self, shuffle):
+    async def async_set_shuffle(self, shuffle):
         """Enable/Disable shuffle mode."""
-        self._schedule_media_call('shuffle_set', {
-            'entity_id': self.primary_speaker_entity_id,
-            'shuffle': not self.shuffle
-        })
-        self._schedule_ags_update()
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'shuffle_set', {
+                'entity_id': self.primary_speaker_entity_id,
+                'shuffle': shuffle
+            })
+            await self.async_update()
 
-    def set_repeat(self, repeat):
+    async def async_set_repeat(self, repeat):
         """Set repeat mode."""
-        if self.repeat == "off":
-            repeat_value = "one"
-        elif self.repeat=="one":
-            repeat_value = "all"
-        else:
-            repeat_value = "off"
-
-        self._schedule_media_call('repeat_set', {
-            'entity_id': self.primary_speaker_entity_id,
-            'repeat':  repeat_value
-        })
-        self._schedule_ags_update()
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'repeat_set', {
+                'entity_id': self.primary_speaker_entity_id,
+                'repeat':  repeat
+            })
+            await self.async_update()
 
 
 # Define the secondary "Media System" media player class for homekit
@@ -563,33 +558,33 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
         """Return True if the media player is muted."""
         return self._primary_player.is_volume_muted
 
-    def turn_on(self):
+    async def async_turn_on(self):
         """Turn the media player on."""
-        self._primary_player.turn_on()
+        await self._primary_player.async_turn_on()
 
-    def turn_off(self):
+    async def async_turn_off(self):
         """Turn the media player off."""
-        self._primary_player.turn_off()
+        await self._primary_player.async_turn_off()
 
-    def set_volume_level(self, volume):
+    async def async_set_volume_level(self, volume):
         """Set the volume level."""
-        self._primary_player.set_volume_level(volume)
+        await self._primary_player.async_set_volume_level(volume)
 
-    def mute_volume(self, mute):
+    async def async_mute_volume(self, mute):
         """Mute the volume."""
-        self._primary_player.mute_volume(mute)
+        await self._primary_player.async_mute_volume(mute)
 
-    def select_source(self, source):
+    async def async_select_source(self, source):
         """Select the input source."""
-        self._primary_player.select_source(source)
+        await self._primary_player.async_select_source(source)
 
-    def media_play(self):
+    async def async_media_play(self):
         """Play the media."""
-        self._primary_player.media_play()
+        await self._primary_player.async_media_play()
 
-    def media_pause(self):
+    async def async_media_pause(self):
         """Pause the media."""
-        self._primary_player.media_pause()
+        await self._primary_player.async_media_pause()
 
     @property
     def device_class(self):

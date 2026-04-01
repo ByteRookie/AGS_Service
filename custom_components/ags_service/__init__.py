@@ -38,60 +38,53 @@ TV_MODE_NO_MUSIC = 'no_music'
 
 
 # Define the configuration schema for a device
-DEVICE_SCHEMA = vol.Schema({
-    vol.Required("rooms"): vol.All(
-        cv.ensure_list,
-        [
-            vol.Schema(
-                {
-                    vol.Required("room"): cv.string,
-                    vol.Required("devices"): vol.All(
-                        cv.ensure_list,
-                        [
-                            vol.Schema(
-                                {
-                                    vol.Required("device_id"): cv.string,
-                                    vol.Required("device_type"): cv.string,
-                                    vol.Required("priority"): cv.positive_int,
-                                    vol.Optional("override_content"): cv.string,
-                                    vol.Optional(CONF_OTT_DEVICE): cv.string,
-                                    vol.Optional(CONF_TV_MODE): vol.In([TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]),
-                                }
-                            )
-                        ],
-                    ),
-                }
-            )
-        ],
-    ),
-    vol.Required("Sources"): vol.All(
-        cv.ensure_list,
-        [
-            vol.Schema(
-                {
-                    vol.Required("Source"): cv.string,
-                    vol.Required("Source_Value"): cv.string,
-                    vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
-                    vol.Optional(CONF_SOURCE_DEFAULT, default=False): cv.boolean,
-                }
-            )
-        ],
-    ),
-    vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
-    vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
-    vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
-    vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
-    vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
-    vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
-    vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
-    vol.Optional(CONF_SCHEDULE_ENTITY): vol.Schema({
-        vol.Required('entity_id'): cv.string,
-        vol.Optional('on_state', default='on'): cv.string,
-        vol.Optional('off_state', default='off'): cv.string,
-        vol.Optional('schedule_override', default=False): cv.boolean,
-    }),
-    vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
-})
+DEVICE_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.entity_id,
+        vol.Required("device_type"): cv.string,
+        vol.Required("priority"): cv.positive_int,
+        vol.Optional("override_content"): cv.string,
+        vol.Optional(CONF_OTT_DEVICE): cv.entity_id,
+        vol.Optional(CONF_TV_MODE): vol.In([TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]),
+    }
+)
+
+ROOM_SCHEMA = vol.Schema(
+    {
+        vol.Required("room"): cv.string,
+        vol.Required("devices"): vol.All(cv.ensure_list, [DEVICE_SCHEMA]),
+    }
+)
+
+SOURCE_SCHEMA = vol.Schema(
+    {
+        vol.Required("Source"): cv.string,
+        vol.Required("Source_Value"): cv.string,
+        vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
+        vol.Optional(CONF_SOURCE_DEFAULT, default=False): cv.boolean,
+    }
+)
+
+CONFIG_SCHEMA = vol.Schema({
+    DOMAIN: vol.Schema({
+        vol.Required("rooms"): vol.All(cv.ensure_list, [ROOM_SCHEMA]),
+        vol.Required("Sources"): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
+        vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
+        vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
+        vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
+        vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
+        vol.Optional(CONF_STATIC_NAME, default=None): cv.string,
+        vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
+        vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
+        vol.Optional(CONF_SCHEDULE_ENTITY): vol.Schema({
+            vol.Required('entity_id'): cv.entity_id,
+            vol.Optional('on_state', default='on'): cv.string,
+            vol.Optional('off_state', default='off'): cv.string,
+            vol.Optional('schedule_override', default=False): cv.boolean,
+        }),
+        vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
+    })
+}, extra=vol.ALLOW_EXTRA)
 
 async def async_setup(hass, config):
     """Set up the custom component."""
