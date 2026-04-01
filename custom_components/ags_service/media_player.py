@@ -177,8 +177,25 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             )
 
             if sorted_devices:
-                first_device = sorted_devices[0]
-                selected_device_id = first_device.get('ott_device', first_device["device_id"])
+                tv_device = sorted_devices[0]
+                ott_devices = tv_device.get('ott_devices')
+                
+                if ott_devices:
+                    # Fetch the TV's current state to see what input is active
+                    tv_state = self.hass.states.get(tv_device['device_id'])
+                    current_input = tv_state.attributes.get('source') if tv_state else None
+                    
+                    # Try to find a matching input
+                    found_ott = None
+                    for ott in ott_devices:
+                        if ott.get('tv_input') == current_input:
+                            found_ott = ott['ott_device']
+                            break
+                    
+                    # Fallback to the first device in the list if no match
+                    selected_device_id = found_ott if found_ott else ott_devices[0]['ott_device']
+                else:
+                    selected_device_id = tv_device.get('ott_device', tv_device["device_id"])
             else:
                 selected_device_id = self.hass.data.get('primary_speaker', None)
 

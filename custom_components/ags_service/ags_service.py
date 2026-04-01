@@ -589,8 +589,23 @@ def get_control_device_id(ags_config, hass):
             key=lambda x: x['priority'],
         )
         if sorted_devices:
-            first_device = sorted_devices[0]
-            return first_device.get('ott_device', first_device['device_id'])
+            tv_device = sorted_devices[0]
+            ott_devices = tv_device.get('ott_devices')
+            
+            if ott_devices:
+                # Fetch the TV's current state to see what input is active
+                tv_state = hass.states.get(tv_device['device_id'])
+                current_input = tv_state.attributes.get('source') if tv_state else None
+                
+                # Try to find a matching input
+                for ott in ott_devices:
+                    if ott.get('tv_input') == current_input:
+                        return ott['ott_device']
+                
+                # Fallback to the first device in the list if no match
+                return ott_devices[0]['ott_device']
+                
+            return tv_device.get('ott_device', tv_device['device_id'])
 
     return primary_speaker
 

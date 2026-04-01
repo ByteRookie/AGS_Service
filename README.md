@@ -124,7 +124,8 @@ ags_service:
 | `static_name` | `none` | Custom name for the AGS Media Player. |
 | `disable_Tv_Source` | `false` | Hide TV source in the static source list. |
 | `batch_unjoin` | `false` | Unjoin all speakers at once when turning off. |
-| `ott_device` | _None_ | External player for TVs that use a streaming box or console. AGS pulls play/pause controls from this device when the TV is active (`ON TV`). |
+| `ott_device` | _None_ | (Legacy) Singular external player for a TV. |
+| `ott_devices` | _None_ | Array of external players mapped to TV inputs (e.g., Apple TV on HDMI 1). |
 
 The `tv_mode` option can be set on TV devices to control how they affect their room:
 
@@ -153,7 +154,11 @@ ags_service:
   rooms:
     - room: "Room 1"
       devices:
-#          ott_device: "media_player.ott_1"  # optional: streaming box used for playback
+#          ott_devices: 
+#            - ott_device: "media_player.apple_tv"
+#              tv_input: "HDMI 1"
+#            - ott_device: "media_player.xbox"
+#              tv_input: "HDMI 2"
         - device_id: "media_player.device_1"
           device_type: "tv"
           priority: 1
@@ -242,6 +247,11 @@ Overall, `tv_mode` lets you decide how each TV affects its room:
 This project is released under a Non-Commercial License. See the [LICENSE](LICENSE) file for details.
 
 # Changelog
+
+### v1.6.3
+- **OTT Routing Enhancement and Configuration Fix**
+- **Dynamic OTT Routing**: Added support for an array of `ott_devices` per TV. AGS can now dynamically route media commands to the correct OTT device (e.g., Apple TV, Xbox) based on the TV's current active source/input.
+- **Fixed Configuration Crash**: Resolved a schema validation error where omitting `static_name` would cause Home Assistant to fail setup. The validator now correctly handles `None` or missing values for this field.
 
 ### v1.6.2
 - **Stabilization and Event Loop Optimization**
