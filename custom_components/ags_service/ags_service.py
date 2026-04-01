@@ -151,6 +151,9 @@ async def update_ags_sensors(ags_config, hass):
     event = hass.data['ags_service']['update_event']
 
     async with lock:
+        # Clear the event so handle_ags_status_change blocks until the refresh
+        # completes.
+        event.clear()
         try:
             # Call and execute the functions to set sensor values for all of AGS
             # Configured rooms rarely change, only compute once
@@ -190,8 +193,8 @@ async def update_ags_sensors(ags_config, hass):
                         exc,
                     )
 
-            if not event.is_set():
-                event.set()
+            # Signal that the update cycle is complete
+            event.set()
 
         return prev_status, new_status
 
@@ -423,15 +426,26 @@ def check_primary_speaker_logic(ags_config, hass):
         if current_primary and current_primary != "none":
             state = hass.states.get(current_primary)
             if state and state.state not in ['off', 'idle', 'paused', 'standby', 'unavailable']:
-                # Check if this speaker is in an active room
-                is_active = False
-                for room in rooms:
-                    if room['room'] in (active_rooms or []):
-                        if any(d['device_id'] == current_primary for d in room['devices']):
-                            is_active = True
-                            break
-                if is_active:
-                    return current_primary
+                
+                # Verify it's not playing a "rogue" source (like a manual YouTube cast)
+                # If ags_status is "ON", we expect music. If "ON TV", we expect "TV" source.
+                current_source = state.attributes.get("source")
+                is_rogue = False
+                if ags_status == "ON TV" and current_source != "TV":
+                    is_rogue = True
+                elif ags_status == "ON" and current_source == "TV":
+                    is_rogue = True
+                
+                if not is_rogue:
+                    # Check if this speaker is in an active room
+                    is_active = False
+                    for room in rooms:
+                        if room['room'] in (active_rooms or []):
+                            if any(d['device_id'] == current_primary for d in room['devices']):
+                                is_active = True
+                                break
+                    if is_active:
+                        return current_primary
 
         # If no sticky master, find the best playing speaker
         for room in rooms:
@@ -668,8 +682,17 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
                 media_id = source_info["value"]
                 media_type = source_info["type"]
 
+                # Only apply the Sonos-specific "FV:" prefix if the device is Sonos.
+                # This ensures compatibility with other brands like HEOS or Bluesound.
                 if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
-                    media_id = f"FV:{media_id}"
+                    # Check the domain of the target speaker
+                    if primary_speaker_entity_id.startswith("media_player.sonos_") or (
+                        (ent_state := hass.states.get(primary_speaker_entity_id)) is not None
+                        and "sonos" in ent_state.attributes.get("friendly_name", "").lower()
+                    ):
+                         # Note: A better way in HA is checking entity_registry, but
+                         # for a custom component this check is a safe middle ground.
+                         media_id = f"FV:{media_id}"
 
                 await enqueue_media_action(
                     hass,
@@ -722,7 +745,16 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             return
 
         rooms = ags_config["rooms"]
-        device_states = {s.entity_id: s for s in hass.states.async_all()}
+        
+        # Performance optimization: Only fetch states for configured devices
+        # instead of the entire HA state machine.
+        configured_entities = {d["device_id"] for r in rooms for d in r["devices"]}
+        device_states = {
+            eid: hass.states.get(eid) 
+            for eid in configured_entities 
+            if hass.states.get(eid) is not None
+        }
+
         tv_map = {
             d["device_id"]: any(dev.get("device_type") == "tv" for dev in room["devices"])
             for room in rooms

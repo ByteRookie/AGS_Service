@@ -244,8 +244,11 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 # Changelog
 
 ### v1.6.0
-- **Architectural and Sonos Optimization Update**
-- **Sticky Master Logic**: The integration now stays on the current primary speaker as long as it's active and playing, preventing audio interruptions and master swaps during whole-home audio movement.
+- **Architectural, Sonos Optimization, and Critical Bug Fix Update**
+- **Performance Optimization**: Eliminated full HA state machine fetches. The integration now only monitors configured media players, drastically reducing CPU usage on lower-end hardware like Raspberry Pi.
+- **Concurrency Fix**: Corrected `update_event` synchronization logic. Sensor updates and action queue processing are now properly serialized across all update cycles.
+- **Brand Compatibility**: Removed hardcoded Sonos `FV:` prefixes from `play_media` calls. The integration is now fully compatible with HEOS, Bluesound, Chromecast, and other media player platforms.
+- **Smart Sticky Master**: Enhanced "Sticky Master" logic to detect "rogue" playback. If the current master switches to an external source (like manual casting), AGS will now correctly elect a new master for the whole-home audio group.
 - **Sonos Optimizations**: 
   - Automatically synchronizes volume of newly joined speakers with the master before grouping for a seamless transition.
   - Refined grouping commands to reduce network chatter and improved stability with settling delays.
