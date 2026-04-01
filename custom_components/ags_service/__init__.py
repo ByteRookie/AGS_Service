@@ -120,7 +120,7 @@ async def async_setup(hass, config):
         'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
         'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
         'default_on': ags_config.get(CONF_DEFAULT_ON, False),
-        'static_name': ags_config.get(CONF_STATIC_NAME, None),
+        'static_name': ags_config.get(CONF_STATIC_NAME, ""),
         'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
         'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
         'batch_unjoin': ags_config.get(CONF_BATCH_UNJOIN, False),
@@ -135,7 +135,6 @@ async def async_setup(hass, config):
 
     # Initialize synchronization primitives used for sensor updates
     hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
-    hass.data[DOMAIN]["update_event"] = asyncio.Event()
 
 
     # Load the sensor and switch platforms and pass the configuration to them

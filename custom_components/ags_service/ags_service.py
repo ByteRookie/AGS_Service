@@ -148,51 +148,43 @@ async def update_ags_sensors(ags_config, hass):
         return None, None
 
     lock = hass.data['ags_service']['sensor_lock']
-    event = hass.data['ags_service']['update_event']
 
     async with lock:
-        # Clear the event so handle_ags_status_change blocks until the refresh
-        # completes.
-        event.clear()
-        try:
-            # Call and execute the functions to set sensor values for all of AGS
-            # Configured rooms rarely change, only compute once
-            if 'configured_rooms' not in hass.data:
-                get_configured_rooms(rooms, hass)
-            prev_rooms = hass.data.get('active_rooms', [])
-            get_active_rooms(rooms, hass)
-            new_rooms = hass.data.get('active_rooms', [])
-            prev_status = hass.data.get('ags_status')
-            update_ags_status(ags_config, hass)
-            update_speaker_states(rooms, hass)
-            get_preferred_primary_speaker(rooms, hass)
-            determine_primary_speaker(ags_config, hass)
-            get_inactive_tv_speakers(rooms, hass)
-            new_status = hass.data.get('ags_status')
-            if new_status != prev_status or new_rooms != prev_rooms:
-                await handle_ags_status_change(
-                    hass, ags_config, new_status, prev_status
-                )
-            ## Use in Future release ###
-            #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
-            #    _LOGGER.error("ags source change has been called")
-            #    ags_select_source(ags_config, hass)
-        finally:
-            sensors = hass.data.get('ags_sensors', [])
-            for sensor in sensors:
-                try:
-                    hass.loop.call_soon_threadsafe(
-                        sensor.async_schedule_update_ha_state, True
-                    )
-                except Exception as exc:
-                    _LOGGER.debug(
-                        'Error scheduling update for %s: %s',
-                        getattr(sensor, 'entity_id', 'unknown'),
-                        exc,
-                    )
+        # Call and execute the functions to set sensor values for all of AGS
+        # Configured rooms rarely change, only compute once
+        if 'configured_rooms' not in hass.data:
+            get_configured_rooms(rooms, hass)
+        prev_rooms = hass.data.get('active_rooms', [])
+        get_active_rooms(rooms, hass)
+        new_rooms = hass.data.get('active_rooms', [])
+        prev_status = hass.data.get('ags_status')
+        update_ags_status(ags_config, hass)
+        update_speaker_states(rooms, hass)
+        get_preferred_primary_speaker(rooms, hass)
+        determine_primary_speaker(ags_config, hass)
+        get_inactive_tv_speakers(rooms, hass)
+        new_status = hass.data.get('ags_status')
+        if new_status != prev_status or new_rooms != prev_rooms:
+            await handle_ags_status_change(
+                hass, ags_config, new_status, prev_status
+            )
+        ## Use in Future release ###
+        #if hass.data.get('primary_speaker') == "none" and hass.data.get('active_speakers') != [] and hass.data.get('preferred_primary_speaker') != "none":
+        #    _LOGGER.error("ags source change has been called")
+        #    ags_select_source(ags_config, hass)
 
-            # Signal that the update cycle is complete
-            event.set()
+        sensors = hass.data.get('ags_sensors', [])
+        for sensor in sensors:
+            try:
+                hass.loop.call_soon_threadsafe(
+                    sensor.async_schedule_update_ha_state, True
+                )
+            except Exception as exc:
+                _LOGGER.debug(
+                    'Error scheduling update for %s: %s',
+                    getattr(sensor, 'entity_id', 'unknown'),
+                    exc,
+                )
 
         return prev_status, new_status
 
@@ -751,7 +743,6 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         # Ensure any prior media actions have finished before evaluating the
         # new state.
         await wait_for_actions(hass)
-        await hass.data["ags_service"]["update_event"].wait()
 
         # Skip repeated "OFF" handling once the system is fully stopped
         if new_status == "OFF" and old_status == "OFF":

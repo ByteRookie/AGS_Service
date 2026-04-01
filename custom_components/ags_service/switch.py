@@ -72,14 +72,14 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        await self._maybe_join()
+        self.hass.async_create_task(self._maybe_join())
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
-        await self._maybe_unjoin()
+        self.hass.async_create_task(self._maybe_unjoin())
 
     async def async_added_to_hass(self):
         """Run when entity about to be added to hass."""

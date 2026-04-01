@@ -248,6 +248,11 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 
 # Changelog
 
+### v1.6.4
+- **Deadlock Fix and Performance Optimization**
+- **Resolved Startup Deadlock**: Removed the `update_event` synchronization logic that caused Home Assistant to freeze during integration setup and state transitions.
+- **Improved UI Responsiveness**: Room switches now use a "fire-and-forget" approach for status updates, ensuring the UI remains responsive and preventing circular dependencies in the event loop.
+
 ### v1.6.3
 - **OTT Routing Enhancement and Configuration Fix**
 - **Dynamic OTT Routing**: Added support for an array of `ott_devices` per TV. AGS can now dynamically route media commands to the correct OTT device (e.g., Apple TV, Xbox) based on the TV's current active source/input.
