@@ -391,6 +391,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MPFeature.VOLUME_SET
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
+            | MPFeature.GROUPING
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -569,6 +570,7 @@ class MediaSystemMediaPlayer(MediaPlayerEntity):
             | MPFeature.TURN_ON
             | MPFeature.TURN_OFF
             | MPFeature.VOLUME_SET
+            | MPFeature.GROUPING
         )
 
     @property

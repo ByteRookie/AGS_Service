@@ -250,21 +250,17 @@ This project is released under a Non-Commercial License. See the [LICENSE](LICEN
 ### v1.6.6
 - **HomeKit Integration and Architectural Refinement**
 - **Apple HomeKit Support**: Added `MediaPlayerDeviceClass.TV` metadata to the virtual player, enabling native iOS Remote widget support and proper identification in the Home app.
+- **Grouping Support**: Added `MPFeature.GROUPING` to both the virtual and HomeKit media players, signaling multi-room audio capabilities to Home Assistant and Apple platforms.
 - **Rogue Speaker Election Fix**: Refined the "Sticky Master" logic to correctly identify rogue playback. The system now allows speakers to maintain their source if a TV in the same room is inactive.
 - **Modern HA Standards**: Fully migrated to `MediaPlayerEntityFeature` bitwise enums and added `SensorDeviceClass.ENUM` for improved UI state translations.
 - **Event Loop Optimization**: Enhanced spam filtering in both media player and sensor state listeners to prevent redundant processing during active playback.
 - **Startup Stability**: Finalized the transition to asynchronous task creation for all room switch toggles, eliminating the 10-second setup timeout.
-
-### v1.6.5
-- **Asynchronous Architecture and Stability Update**
-...
-...
-- **OTT Routing Enhancement and Configuration Fix**
+- **Deadlock Cleanup**: Removed the legacy `update_event` synchronization logic to prevent potential `KeyError` crashes and ensure ultra-stable state transitions.
 - **Dynamic OTT Routing**: Added support for an array of `ott_devices` per TV. AGS can now dynamically route media commands to the correct OTT device (e.g., Apple TV, Xbox) based on the TV's current active source/input.
 - **Fixed Configuration Crash**: Resolved a schema validation error where omitting `static_name` would cause Home Assistant to fail setup. The validator now correctly handles `None` or missing values for this field.
 
-### v1.6.2
-- **Stabilization and Event Loop Optimization**
+### v1.6.5
+...
 - **Reduced CPU Usage**: Added state-change filtering to event listeners. The integration now ignores `media_position` clock ticks, preventing unnecessary full system refreshes and saving significant CPU cycles.
 - **Fixed Task Leaks**: Background workers are now explicitly cancelled during integration reloads and unloads, eliminating duplicate tasks and race conditions.
 - **Fixed Switch UI Race Condition**: The status handler is now properly awaited during sensor updates, ensuring that grouping actions complete and UI switches reflect the correct state instantly.
