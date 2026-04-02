@@ -45,6 +45,19 @@ Configure cascading logic per device. This example shows a "News" override that 
 **Cascading Source Overrides (News Mode)**
 * Define device-specific behavior for any source. Want "Morning News" to play on the TV if it's on, but fall back to the speaker if it's off? V2 handles this with prioritized execution logic.
 
+**Lovelace Custom Card (`ags-media-card`)**
+* V2 includes a beautiful, premium Lovelace dashboard card specifically built for AGS. It provides a rich player with dynamic blurred backgrounds, live room volume grouping, and a grid of your global music sources. 
+
+### How to add the Custom Card to your Dashboard:
+1. Go to **Settings** → **Dashboards** → click the three dots (⋮) in the top right → **Resources**.
+2. Click **Add Resource** in the bottom right corner.
+3. Enter the URL: `/ags-static/ags-media-card.js`
+4. Ensure the Resource type is set to **JavaScript Module**, and click Create.
+5. Go to your Lovelace dashboard, click Edit, Add Card, search for "Manual", and paste the following:
+```yaml
+type: custom:ags-media-card
+```
+
 **Native Group Spoofing**
 * The virtual AGS player now spoofs native Sonos grouping. This means standard Home Assistant dashboards and HomeKit see the entire group as a single, controllable unit with accurate member tracking.
 

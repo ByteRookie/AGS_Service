@@ -44,7 +44,8 @@ async def async_setup_platform(
         rooms = hass.data[DOMAIN]["rooms"]
         
         for room in rooms:
-            unique_id = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+            safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+            unique_id = f"switch.{safe_room_id}_media"
             if unique_id not in added_room_switches:
                 new_entities.append(RoomSwitch(hass, room))
                 added_room_switches.add(unique_id)
@@ -74,7 +75,11 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self.hass = hass
         self.room = room
         self._attr_name = f"{room['room']} Media"
-        self._attr_unique_id = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        
+        # Use a safe slugified version for internal keys and force the entity_id
+        safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        self.entity_id = f"switch.{safe_room_id}_media"
+        self._attr_unique_id = self.entity_id
 
         # Check if the state is already stored in hass.data
         switch_key = self._attr_unique_id
@@ -91,19 +96,15 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
-        rooms = self.hass.data["ags_service"]["rooms"]
-        get_active_rooms(rooms, self.hass)
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
-        self.hass.async_create_task(self._maybe_join())
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
-        self.hass.async_create_task(self._maybe_unjoin())
 
     async def async_added_to_hass(self):
         """Run when entity about to be added to hass."""
@@ -112,41 +113,6 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
-
-    async def _maybe_join(self) -> None:
-        """Refresh sensors and enforce the current AGS state."""
-        prev_status, new_status = await update_ags_sensors(
-            self.hass.data["ags_service"], self.hass
-        )
-
-        # ``update_ags_sensors`` already schedules ``handle_ags_status_change``
-        # whenever the global status flips.  If the status didn't change we
-        # invoke it here so toggling a room still syncs grouping.
-        if new_status == prev_status:
-            await handle_ags_status_change(
-                self.hass,
-                self.hass.data["ags_service"],
-                new_status,
-                prev_status,
-            )
-
-        await wait_for_actions(self.hass)
-
-    async def _maybe_unjoin(self) -> None:
-        """Refresh sensors and enforce the current AGS state."""
-        prev_status, new_status = await update_ags_sensors(
-            self.hass.data["ags_service"], self.hass
-        )
-
-        if new_status == prev_status:
-            await handle_ags_status_change(
-                self.hass,
-                self.hass.data["ags_service"],
-                new_status,
-                prev_status,
-            )
-
-        await wait_for_actions(self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""

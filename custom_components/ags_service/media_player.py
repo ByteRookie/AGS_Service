@@ -6,52 +6,67 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 import asyncio
+from . import DOMAIN, SIGNAL_AGS_RELOAD
 from .ags_service import (
     update_ags_sensors,
     ags_select_source,
     TV_MODE_TV_AUDIO,
     TV_MODE_NO_MUSIC,
+    TV_IGNORE_STATES,
 )
 
 import logging
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    ags_config = hass.data['ags_service']
-    rooms = ags_config['rooms']
-    
+    ags_config = hass.data[DOMAIN]
 
     ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
     async_add_entities([ags_media_player])
     
-    # Add switches for rooms, zone.home and schedule
-    entities_to_track = ['zone.home']
-    schedule_cfg = ags_config.get('schedule_entity')
-    if schedule_cfg and schedule_cfg.get('entity_id'):
-        entities_to_track.append(schedule_cfg['entity_id'])
-    for room in rooms:
-        room_switch = f"switch.{room['room'].lower().replace(' ', '_')}_media"
-        entities_to_track.append(room_switch)
+    tracked_entities = set()
+    unsubs = []
 
-    # Track the global actions switch if sensors/switches were created
-    if ags_config.get("create_sensors"):
-        entities_to_track.append("switch.ags_actions")
+    def update_tracked_entities():
+        nonlocal unsubs, tracked_entities
+        
+        # Unsubscribe old trackers
+        for unsub in unsubs:
+            unsub()
+        unsubs = []
+        tracked_entities = set(['zone.home'])
+        
+        cfg = hass.data[DOMAIN]
+        rooms = cfg.get('rooms', [])
+        
+        schedule_cfg = cfg.get('schedule_entity')
+        if schedule_cfg and schedule_cfg.get('entity_id'):
+            tracked_entities.add(schedule_cfg['entity_id'])
+            
+        if cfg.get("create_sensors"):
+            tracked_entities.add("switch.ags_actions")
+            
+        for room in rooms:
+            safe_room_id = "".join(c for c in room.get('room', '').lower().replace(' ', '_') if c.isalnum() or c == '_')
+            if safe_room_id:
+                tracked_entities.add(f"switch.{safe_room_id}_media")
+            for device in room.get("devices", []):
+                tracked_entities.add(device["device_id"])
+                
+        # Create new trackers
+        if tracked_entities:
+            unsubs.append(async_track_state_change_event(
+                hass, list(tracked_entities), ags_media_player.async_primary_speaker_changed
+            ))
 
-    for entity in entities_to_track:
-        async_track_state_change_event(hass, entity, ags_media_player.async_primary_speaker_changed)
+    # Initial tracking
+    update_tracked_entities()
 
-    # Also track state changes for all configured media player devices so the
-    # AGS entity updates immediately when a device reports new state. Without
-    # this the UI lags until the next poll when the primary speaker changes.
-    for room in rooms:
-        for device in room["devices"]:
-            async_track_state_change_event(
-                hass, device["device_id"], ags_media_player.async_primary_speaker_changed
-            )
-
-
+    # Listen for hot reload to update tracking
+    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     _attr_device_class = MediaPlayerDeviceClass.TV
@@ -223,6 +238,327 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self._refresh_from_data()
         self.async_schedule_update_ha_state(True)
 
+    def _build_source_details(self):
+        """Expose AGS-configured sources for richer frontend rendering."""
+        return [
+            {
+                "name": source.get("Source"),
+                "value": source.get("Source_Value"),
+                "media_content_type": source.get("media_content_type"),
+                "default": source.get("source_default", False),
+            }
+            for source in self.hass.data[DOMAIN].get("Sources", [])
+            if source.get("Source")
+        ]
+
+    def _get_room_switch_entity_id(self, room_name: str) -> str | None:
+        safe_room_id = "".join(
+            c for c in room_name.lower().replace(" ", "_") if c.isalnum() or c == "_"
+        )
+        return f"switch.{safe_room_id}_media" if safe_room_id else None
+
+    def _get_global_block_reason(self) -> str | None:
+        """Return the global reason AGS is not actively including rooms."""
+        if self.ags_status != "OFF":
+            return None
+
+        zone_state = self.hass.states.get("zone.home")
+        if (
+            not self.ags_config.get("disable_zone", False)
+            and zone_state is not None
+            and zone_state.state == "0"
+        ):
+            return "Zone check is pausing AGS because nobody is home"
+
+        schedule_cfg = self.hass.data[DOMAIN].get("schedule_entity")
+        if schedule_cfg and self.hass.data.get("schedule_state") is False:
+            return "Schedule is currently outside its active window"
+
+        if self.hass.data.get("switch_media_system_state") is False:
+            return "AGS system switch is turned off"
+
+        return "AGS is idle"
+
+    def _build_logic_flags(self):
+        """Summarize the control conditions behind AGS decisions."""
+        actions_switch = self.hass.states.get("switch.ags_actions")
+        zone_state = self.hass.states.get("zone.home")
+        schedule_cfg = self.hass.data[DOMAIN].get("schedule_entity")
+        schedule_entity = (
+            self.hass.states.get(schedule_cfg["entity_id"])
+            if schedule_cfg and schedule_cfg.get("entity_id")
+            else None
+        )
+        selected_source = self.hass.data.get("ags_media_player_source")
+
+        return [
+            {
+                "label": "Actions",
+                "value": "Enabled" if actions_switch is None or actions_switch.state == "on" else "Paused",
+                "tone": "good" if actions_switch is None or actions_switch.state == "on" else "warn",
+                "detail": "Join and source actions follow the AGS Actions switch",
+            },
+            {
+                "label": "Zone",
+                "value": (
+                    "Ignored"
+                    if self.ags_config.get("disable_zone", False)
+                    else (
+                        f"Home: {zone_state.state}"
+                        if zone_state is not None
+                        else "zone.home missing"
+                    )
+                ),
+                "tone": "neutral" if self.ags_config.get("disable_zone", False) else "info",
+                "detail": "Occupancy can pause AGS when zone checking is enabled",
+            },
+            {
+                "label": "Schedule",
+                "value": (
+                    "Not configured"
+                    if schedule_entity is None
+                    else f"{schedule_entity.entity_id}: {schedule_entity.state}"
+                ),
+                "tone": "neutral" if schedule_entity is None else "info",
+                "detail": "Home Assistant schedules can disable or re-enable AGS",
+            },
+            {
+                "label": "TV Mode",
+                "value": self.hass.data.get("current_tv_mode") or "None",
+                "tone": "info" if self.ags_status == "ON TV" else "neutral",
+                "detail": "TV mode can include rooms or intentionally isolate them",
+            },
+            {
+                "label": "Source",
+                "value": selected_source or "None selected",
+                "tone": "good" if selected_source else "neutral",
+                "detail": "The AGS source picker feeds the dashboard card and fallback routing",
+            },
+        ]
+
+    def _build_room_diagnostics(self):
+        """Explain why each room is included, skipped, or idle."""
+        active_rooms = set(self.active_rooms or [])
+        global_block_reason = self._get_global_block_reason()
+        room_diagnostics = []
+
+        for room in self.ags_config.get("rooms", []):
+            room_name = room.get("room", "")
+            switch_entity_id = self._get_room_switch_entity_id(room_name)
+            switch_on = bool(self.hass.data.get(switch_entity_id))
+            speaker_states = []
+            active_tv_names = []
+            no_music_tv = False
+
+            for device in room.get("devices", []):
+                state = self.hass.states.get(device["device_id"])
+                if device.get("device_type") == "speaker":
+                    speaker_states.append(state)
+                if (
+                    device.get("device_type") == "tv"
+                    and state
+                    and state.state.lower() not in TV_IGNORE_STATES
+                ):
+                    active_tv_names.append(
+                        state.attributes.get("friendly_name", device["device_id"])
+                    )
+                    if device.get("tv_mode", TV_MODE_TV_AUDIO) == TV_MODE_NO_MUSIC:
+                        no_music_tv = True
+
+            available_speakers = [
+                state
+                for state in speaker_states
+                if state and state.state.lower() not in TV_IGNORE_STATES
+            ]
+
+            if room_name in active_rooms:
+                state_label = "included"
+                reason = (
+                    f"Included with {len(available_speakers) or len(speaker_states)} speaker(s)"
+                )
+                tone = "good"
+            elif switch_on and no_music_tv:
+                state_label = "skipped"
+                reason = (
+                    f"Skipped because {', '.join(active_tv_names)} is active in No Music mode"
+                )
+                tone = "warn"
+            elif switch_on and global_block_reason:
+                state_label = "blocked"
+                reason = global_block_reason
+                tone = "neutral"
+            elif switch_on and not speaker_states:
+                state_label = "skipped"
+                reason = "Room switch is on, but no speaker devices are configured"
+                tone = "warn"
+            elif switch_on and not available_speakers:
+                state_label = "waiting"
+                reason = "Room switch is on, but no speaker is currently available"
+                tone = "warn"
+            elif switch_on:
+                state_label = "waiting"
+                reason = "Room switch is on and waiting for grouping logic"
+                tone = "info"
+            else:
+                state_label = "off"
+                reason = "Room switch is off"
+                tone = "neutral"
+
+            room_diagnostics.append(
+                {
+                    "name": room_name,
+                    "switch_entity_id": switch_entity_id,
+                    "switch_on": switch_on,
+                    "included": room_name in active_rooms,
+                    "state": state_label,
+                    "tone": tone,
+                    "reason": reason,
+                    "active_tv_names": active_tv_names,
+                    "speaker_count": len(
+                        [device for device in room.get("devices", []) if device.get("device_type") == "speaker"]
+                    ),
+                    "device_count": len(room.get("devices", [])),
+                }
+            )
+
+        return room_diagnostics
+
+    def _build_speaker_candidates(self):
+        """Expose the ranking behind speaker election."""
+        candidates = []
+        active_rooms = set(self.active_rooms or [])
+        preferred = self.preferred_primary_speaker
+        selected = self.primary_speaker
+        index = 1
+
+        for room in self.ags_config.get("rooms", []):
+            if room.get("room") not in active_rooms:
+                continue
+
+            tv_active = any(
+                (
+                    device.get("device_type") == "tv"
+                    and (state := self.hass.states.get(device["device_id"]))
+                    and state.state.lower() not in TV_IGNORE_STATES
+                )
+                for device in room.get("devices", [])
+            )
+
+            speakers = sorted(
+                [
+                    device
+                    for device in room.get("devices", [])
+                    if device.get("device_type") == "speaker"
+                ],
+                key=lambda item: item.get("priority", 999),
+            )
+
+            for device in speakers:
+                state = self.hass.states.get(device["device_id"])
+                speaker_state = state.state if state else "missing"
+                source = state.attributes.get("source") if state else None
+                available = (
+                    state is not None
+                    and speaker_state.lower() not in TV_IGNORE_STATES
+                )
+
+                reason_parts = []
+                if device["device_id"] == selected:
+                    reason_parts.append("Selected as current primary")
+                if device["device_id"] == preferred:
+                    reason_parts.append("Best priority in active rooms")
+                if (
+                    device["device_id"] == selected
+                    and selected not in (None, "none")
+                    and preferred not in (None, "none")
+                    and selected != preferred
+                ):
+                    reason_parts.append("Sticky master kept playing")
+                if tv_active:
+                    reason_parts.append("TV present in this room")
+                if not reason_parts:
+                    reason_parts.append("Available for election")
+
+                candidates.append(
+                    {
+                        "rank": index,
+                        "entity_id": device["device_id"],
+                        "friendly_name": (
+                            state.attributes.get("friendly_name")
+                            if state
+                            else device["device_id"]
+                        ),
+                        "room": room.get("room"),
+                        "priority": device.get("priority"),
+                        "state": speaker_state,
+                        "source": source,
+                        "available": available,
+                        "selected": device["device_id"] == selected,
+                        "preferred": device["device_id"] == preferred,
+                        "reason": "; ".join(reason_parts),
+                    }
+                )
+                index += 1
+
+        return candidates
+
+    def _build_room_details(self):
+        """Return room and device metadata used by the custom dashboard card."""
+        active_rooms = set(self.active_rooms or [])
+        active_speakers = set(self.active_speakers or [])
+        room_details = []
+
+        for room in self.ags_config.get("rooms", []):
+            safe_room_id = "".join(
+                c
+                for c in room.get("room", "").lower().replace(" ", "_")
+                if c.isalnum() or c == "_"
+            )
+            switch_entity_id = f"switch.{safe_room_id}_media" if safe_room_id else None
+            switch_state = self.hass.states.get(switch_entity_id) if switch_entity_id else None
+
+            devices = []
+            tv_active = False
+            for device in room.get("devices", []):
+                state = self.hass.states.get(device["device_id"])
+                device_type = device.get("device_type", "speaker")
+                if (
+                    device_type == "tv"
+                    and state
+                    and state.state.lower() not in TV_IGNORE_STATES
+                ):
+                    tv_active = True
+
+                devices.append(
+                    {
+                        "entity_id": device["device_id"],
+                        "friendly_name": (
+                            state.attributes.get("friendly_name")
+                            if state
+                            else device["device_id"]
+                        ),
+                        "device_type": device_type,
+                        "priority": device.get("priority"),
+                        "state": state.state if state else None,
+                        "source": state.attributes.get("source") if state else None,
+                        "active": device["device_id"] in active_speakers,
+                        "tv_mode": device.get("tv_mode"),
+                    }
+                )
+
+            room_details.append(
+                {
+                    "name": room.get("room"),
+                    "switch_entity_id": switch_entity_id,
+                    "switch_state": switch_state.state if switch_state else "off",
+                    "active": room.get("room") in active_rooms,
+                    "tv_active": tv_active,
+                    "devices": devices,
+                }
+            )
+
+        return room_details
+
     
     @property
     def extra_state_attributes(self):
@@ -244,19 +580,29 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         attributes = {
             "dynamic_title": dynamic_title,
-            "configured_rooms": self.configured_rooms or "Not available",
-            "active_rooms": self.active_rooms or "Not available",
-            "active_speakers": self.active_speakers or "Not available",
-            "inactive_speakers": self.inactive_speakers or "Not available",
-            "ags_status": self.ags_status or "Not available",
-            "primary_speaker": self.primary_speaker or "Not available",
-            "preferred_primary_speaker": self.preferred_primary_speaker or "Not available",
+            "configured_rooms": self.configured_rooms or [],
+            "active_rooms": self.active_rooms or [],
+            "active_speakers": self.active_speakers or [],
+            "inactive_speakers": self.inactive_speakers or [],
+            "ags_status": self.ags_status or "OFF",
+            "primary_speaker": self.primary_speaker,
+            "preferred_primary_speaker": self.preferred_primary_speaker,
             # ags_source now contains the numeric favorite ID. If no source is
             # selected the value will be ``None`` which allows automations to
             # skip calling ``play_media`` rather than passing an invalid
             # favourite reference.
             "ags_source": self.ags_source,
-            "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or "Not available",
+            "selected_source_name": self.hass.data.get("ags_media_player_source"),
+            "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or [],
+            "primary_speaker_room": self.primary_speaker_room,
+            "control_device_id": self.primary_speaker_entity_id,
+            "browse_entity_id": self.primary_speaker_entity_id or self.primary_speaker or self.entity_id,
+            "current_tv_mode": self.hass.data.get("current_tv_mode"),
+            "ags_sources": self._build_source_details(),
+            "logic_flags": self._build_logic_flags(),
+            "room_diagnostics": self._build_room_diagnostics(),
+            "speaker_candidates": self._build_speaker_candidates(),
+            "room_details": self._build_room_details(),
         }
         return attributes
 
@@ -277,7 +623,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def group_members(self):
         """Return list of members in the same group."""
-        return self.hass.data.get('active_speakers', [])
+        active = self.hass.data.get('active_speakers', [])
+        if not active:
+            return []
+        
+        # Home Assistant typically expects the entity itself to be part of the group_members list
+        if self.entity_id and self.entity_id not in active:
+            return [self.entity_id] + active
+        return active
 
     @property
     def state(self):
@@ -385,6 +738,32 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MediaPlayerEntityFeature.TURN_ON
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.GROUPING
+            | MediaPlayerEntityFeature.BROWSE_MEDIA
+        )
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Proxy media browsing through the current AGS control speaker."""
+        target_entity_id = self.primary_speaker_entity_id or self.primary_speaker
+
+        if target_entity_id and target_entity_id != self.entity_id:
+            payload = {"entity_id": target_entity_id}
+            if media_content_type is not None and media_content_id is not None:
+                payload["media_content_type"] = media_content_type
+                payload["media_content_id"] = media_content_id
+
+            return await self.hass.services.async_call(
+                "media_player",
+                "browse_media",
+                payload,
+                blocking=True,
+                return_response=True,
+            )
+
+        from homeassistant.components import media_source
+        return await media_source.async_browse_media(
+            self.hass,
+            media_content_type,
+            media_content_id,
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -450,7 +829,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source_list(self):
         """List of available sources."""
-        return [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+
+        # Merge sources from the primary speaker if available
+        if self.primary_speaker_state and self.primary_speaker_state.attributes.get('source_list'):
+            speaker_sources = self.primary_speaker_state.attributes.get('source_list')
+            for src in speaker_sources:
+                if src not in sources:
+                    sources.append(src)
+
+        return sources
 
     @property
     def source(self):
@@ -458,7 +846,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if self.ags_status == "ON TV":
             return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None 
         else:
-            return self.hass.data.get("ags_media_player_source")
+            # If the primary speaker is playing a source not in our ags_media_player_source, reflect it
+            current_spk_source = self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None
+            ags_source = self.hass.data.get("ags_media_player_source")
+            if current_spk_source and current_spk_source != ags_source:
+                 # Check if the speaker source is one of our globals. If not, just show the speaker source.
+                 is_global = any(s["Source"] == current_spk_source for s in self.hass.data['ags_service']['Sources'])
+                 if not is_global and current_spk_source in self.source_list:
+                      return current_spk_source
+            return ags_source
 
     def get_source_value_by_name(self, source_name):
         for source_dict in self.hass.data['ags_service']['Sources']:
@@ -468,17 +864,27 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
-        self.hass.data["ags_media_player_source"] = source
+        # Check if source is one of our configured global sources
+        is_global_source = any(source_dict["Source"] == source for source_dict in self.hass.data['ags_service']['Sources'])
 
-        actions_enabled = self.hass.data.get("switch.ags_actions", True)
-        if actions_enabled:
-            await ags_select_source(
-                self.ags_config,
-                self.hass,
-                ignore_playing=True,
-            )
-        await self.async_update()
-           
+        if is_global_source:
+            self.hass.data["ags_media_player_source"] = source
+            actions_enabled = self.hass.data.get("switch.ags_actions", True)
+            if actions_enabled:
+                await ags_select_source(
+                    self.ags_config,
+                    self.hass,
+                    ignore_playing=True,
+                )
+        else:
+            # It must be a source from the primary speaker itself
+            if self.primary_speaker_entity_id:
+                await self.hass.services.async_call('media_player', 'select_source', {
+                    'entity_id': self.primary_speaker_entity_id,
+                    'source': source
+                })
+
+        await self.async_update()           
 
     @property
     def shuffle(self):
@@ -512,4 +918,3 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 'repeat':  repeat
             })
             await self.async_update()
-

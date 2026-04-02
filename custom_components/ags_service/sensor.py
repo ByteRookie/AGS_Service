@@ -4,6 +4,9 @@ from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+from . import DOMAIN, SIGNAL_AGS_RELOAD
 
 # Sensors mostly update via the state change listener below, so heavy polling
 # isn't required. 30 seconds keeps them responsive without excessive work.
@@ -11,11 +14,10 @@ SCAN_INTERVAL = timedelta(seconds=30)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
-    ags_config = hass.data['ags_service']
+    ags_config = hass.data[DOMAIN]
     global SCAN_INTERVAL
     interval = ags_config.get('interval_sync', 30)
     SCAN_INTERVAL = timedelta(seconds=interval)
-    rooms = ags_config['rooms']
 
     sensors = [
         ConfiguredRoomsSensor(hass), 
@@ -59,23 +61,48 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Register sensors so other modules can refresh them immediately
     hass.data['ags_sensors'] = sensors
 
-    entities_to_track = ['zone.home']
-    schedule_cfg = ags_config.get('schedule_entity')
-    if schedule_cfg and schedule_cfg.get('entity_id'):
-        entities_to_track.append(schedule_cfg['entity_id'])
-    
-  
+    tracked_entities = set()
+    unsubs = []
 
-    for room in rooms:
-        entities_to_track.append(f"switch.{room['room'].lower().replace(' ', '_')}_media")
-        for device in room['devices']:
-            entities_to_track.append(device['device_id'])
+    def update_tracked_entities():
+        nonlocal unsubs, tracked_entities
+        
+        # Unsubscribe old trackers
+        for unsub in unsubs:
+            unsub()
+        unsubs = []
+        tracked_entities = set(['zone.home'])
+        
+        cfg = hass.data[DOMAIN]
+        rooms = cfg.get('rooms', [])
+        
+        schedule_cfg = cfg.get('schedule_entity')
+        if schedule_cfg and schedule_cfg.get('entity_id'):
+            tracked_entities.add(schedule_cfg['entity_id'])
+            
+        if cfg.get("create_sensors"):
+            tracked_entities.add("switch.ags_actions")
+            
+        for room in rooms:
+            safe_room_id = "".join(c for c in room.get('room', '').lower().replace(' ', '_') if c.isalnum() or c == '_')
+            if safe_room_id:
+                tracked_entities.add(f"switch.{safe_room_id}_media")
+            for device in room.get("devices", []):
+                tracked_entities.add(device["device_id"])
+                
+        # Create new trackers
+        if tracked_entities:
+            unsubs.append(async_track_state_change_event(
+                hass, list(tracked_entities), state_changed_listener
+            ))
 
-    # Register the state change listener
-    async_track_state_change_event(hass, entities_to_track, state_changed_listener)
+    # Initial tracking
+    update_tracked_entities()
+
+    # Listen for hot reload to update tracking
+    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
 
     # Add the sensors to Home Assistant
-    
     async_add_entities(sensors, True)
 
 

@@ -8,20 +8,20 @@ CONF_TV_MODE = 'tv_mode'
 TV_MODE_TV_AUDIO = 'tv_audio'
 TV_MODE_NO_MUSIC = 'no_music'
 
+SONOS_FAVORITE_PREFIX = "FV:"
+
 # Ghost TV ignore list
 TV_IGNORE_STATES = ['off', 'unavailable', 'unknown', 'standby', 'idle', 'paused', 'buffering', 'none', 'power_off', 'sleeping']
 
 
 _LOGGER = logging.getLogger(__name__)
 
-_ACTION_QUEUE: asyncio.Queue | None = None
-
-
 async def _action_worker(hass: HomeAssistant) -> None:
     """Process queued media_player actions sequentially."""
+    queue = hass.data["ags_service"]["action_queue"]
     while True:
         try:
-            service, data = await _ACTION_QUEUE.get()
+            service, data = await queue.get()
             try:
                 if service == "delay":
                     await asyncio.sleep(data.get("seconds", 1))
@@ -38,7 +38,7 @@ async def _action_worker(hass: HomeAssistant) -> None:
             except Exception as exc:  # pragma: no cover - safety net
                 _LOGGER.warning("Unexpected error in media action %s: %s", service, exc)
             finally:
-                _ACTION_QUEUE.task_done()
+                queue.task_done()
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -47,14 +47,13 @@ async def _action_worker(hass: HomeAssistant) -> None:
 
 
 async def ensure_action_queue(hass: HomeAssistant) -> None:
-    """Initialize the global media action queue if needed."""
-    global _ACTION_QUEUE
-    if _ACTION_QUEUE is None:
-        _ACTION_QUEUE = asyncio.Queue()
-
+    """Initialize the media action queue in hass.data if needed."""
     if "ags_service" not in hass.data:
         hass.data["ags_service"] = {}
         
+    if "action_queue" not in hass.data["ags_service"]:
+        hass.data["ags_service"]["action_queue"] = asyncio.Queue()
+
     if "action_worker" not in hass.data["ags_service"]:
         worker = hass.loop.create_task(_action_worker(hass))
         hass.data["ags_service"]["action_worker"] = worker
@@ -63,13 +62,13 @@ async def ensure_action_queue(hass: HomeAssistant) -> None:
 async def enqueue_media_action(hass: HomeAssistant, service: str, data: dict) -> None:
     """Add a media_player service call to the action queue."""
     await ensure_action_queue(hass)
-    await _ACTION_QUEUE.put((service, data))
+    await hass.data["ags_service"]["action_queue"].put((service, data))
 
 
 async def wait_for_actions(hass: HomeAssistant) -> None:
     """Pause until the action queue has been processed."""
     await ensure_action_queue(hass)
-    await _ACTION_QUEUE.join()
+    await hass.data["ags_service"]["action_queue"].join()
 
 
 async def _wait_until_ungrouped(
@@ -218,7 +217,8 @@ def get_active_rooms(rooms, hass):
     active_rooms = []
 
     for room in rooms:
-        room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        room_key = f"switch.{safe_room_id}_media"
         if not hass.data.get(room_key):
             continue
 
@@ -283,6 +283,8 @@ def update_ags_status(ags_config, hass):
                 if (override_val in str(media_content_id) or 
                     override_val in str(source) or 
                     override_val in str(media_title)):
+                    # Force the media system switch ON if an override is actively playing
+                    hass.data['switch_media_system_state'] = True
                     ags_status = "Override"
                     _handle_status_transition(prev_status, ags_status, hass)
                     hass.data['ags_status'] = ags_status
@@ -361,7 +363,8 @@ def update_ags_status(ags_config, hass):
     tv_found = False
     active_tv_mode = None
     for room in rooms:
-        room_key = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+        safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        room_key = f"switch.{safe_room_id}_media"
         if not hass.data.get(room_key):
             continue
 
@@ -663,18 +666,23 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
             return
 
         source = hass.data.get('ags_media_player_source')
+        
         if source is None:
             sources_list = hass.data['ags_service']['Sources']
-            source = next(
-                (
-                    src["Source"]
-                    for src in sources_list
-                    if src.get("source_default") is True
-                ),
-                None,
-            )
+            
+            # Check default source schedule override
+            sched_cfg = ags_config.get("default_source_schedule")
+            if sched_cfg and sched_cfg.get("entity_id") and sched_cfg.get("source_name"):
+                state_obj = hass.states.get(sched_cfg["entity_id"])
+                if state_obj and state_obj.state == sched_cfg.get("on_state", "on"):
+                    source = sched_cfg["source_name"]
+            
+            # Normal default
+            if source is None:
+                source = next((src["Source"] for src in sources_list if src.get("source_default") is True), None)
             if source is None and sources_list:
                 source = sources_list[0]["Source"]
+                
             if source is not None:
                 hass.data['ags_media_player_source'] = source
         status = hass.data.get('ags_status', "OFF")
@@ -807,11 +815,11 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
                 media_type = source_info["type"]
 
                 # FIX 3: Sonos Favorites Bug (Entity Registry)
-                if media_type == "favorite_item_id" and not media_id.startswith("FV:"):
+                if media_type == "favorite_item_id" and not media_id.startswith(SONOS_FAVORITE_PREFIX):
                     registry = hass.helpers.entity_registry.async_get(hass)
                     entry = registry.async_get(primary_speaker_entity_id)
                     if entry and entry.platform == "sonos":
-                         media_id = f"FV:{media_id}"
+                         media_id = f"{SONOS_FAVORITE_PREFIX}{media_id}"
 
                 await enqueue_media_action(
                     hass,
@@ -1025,6 +1033,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
         missing = sorted(active_set - group_set - {calculated})
         extra = sorted(group_set - active_set - {calculated})
 
+        if not missing and not extra:
+            _LOGGER.debug("AGS group for %s is already synchronized", calculated)
+        
         if missing and actions_enabled:
             _LOGGER.info("AGS joining speakers to %s: %s", calculated, missing)
             
@@ -1044,13 +1055,16 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             # Join using only the followers (exclude the master from group_members)
             followers = [spk for spk in active_speakers if spk != calculated]
-            await enqueue_media_action(
-                hass,
-                "join",
-                {"entity_id": calculated, "group_members": followers},
-            )
-            # Short delay to let Sonos settle the group
-            await enqueue_media_action(hass, "delay", {"seconds": 1.0})
+            if followers:
+                await enqueue_media_action(
+                    hass,
+                    "join",
+                    {"entity_id": calculated, "group_members": followers},
+                )
+                # Short delay to let Sonos settle the group
+                await enqueue_media_action(hass, "delay", {"seconds": 1.0})
+            else:
+                _LOGGER.debug("No followers to join to %s", calculated)
 
         if extra and actions_enabled:
             _LOGGER.info("AGS unjoining extra speakers from %s: %s", calculated, extra)
