@@ -1,7 +1,8 @@
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.components.media_player import MediaPlayerEntity, MediaPlayerDeviceClass
-from homeassistant.components.media_player.const import (
-    MediaPlayerEntityFeature as MPFeature,
+from homeassistant.components.media_player import (
+    MediaPlayerEntity,
+    MediaPlayerDeviceClass,
+    MediaPlayerEntityFeature,
 )
 from homeassistant.const import STATE_IDLE
 from homeassistant.helpers.event import async_track_state_change_event
@@ -52,18 +53,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
 
 
-    # Create and add the secondary "Media System" media player only if SHOW_MEDIA_SYSTEM is True
-    if ags_config['homekit_player']:
-        media_system_player = MediaSystemMediaPlayer(ags_media_player)
-        #entities.append(media_system_player)
-        entities = [media_system_player]
-
-        async_add_entities(entities, True)
-
-    
-
-
-
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     _attr_device_class = MediaPlayerDeviceClass.TV
 
@@ -78,7 +67,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Initialize the media player."""
         self._hass = hass
         self.ags_config = ags_config
-        self._name = "AGS Media Player"
+        self._name = "Whole Home Audio"
         self._state = STATE_IDLE
         self.primary_speaker_entity_id = None
         self.primary_speaker_state = None   # Initialize the attribute
@@ -239,8 +228,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
 
+        room_count = len(self.hass.data.get('active_rooms', []))
+        if self.primary_speaker_room is None and self.ags_status != "OFF":
+            dynamic_title = "All Rooms are Off"
+        else:
+            rooms_text = self.primary_speaker_room
+            if self.ags_status == "OFF":
+                dynamic_title = "AGS Media System"
+            elif room_count == 1:
+                dynamic_title = f"{rooms_text} is Active"
+            elif room_count > 1:
+                dynamic_title = f"{rooms_text} + {room_count-1} Active"
+            else:
+                dynamic_title = "All Rooms are Off"
 
         attributes = {
+            "dynamic_title": dynamic_title,
             "configured_rooms": self.configured_rooms or "Not available",
             "active_rooms": self.active_rooms or "Not available",
             "active_speakers": self.active_speakers or "Not available",
@@ -266,26 +269,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def name(self):
         ags_config = self.hass.data['ags_service']
-        static_name = ags_config['static_name']
+        static_name = ags_config.get('static_name')
         if static_name: 
             return static_name 
-        else:
-            """Return the name of the sensor."""
-            room_count = len(self.hass.data.get('active_rooms', []))
-            
-            if self.primary_speaker_room is None and self.ags_status != "OFF":
-                return "All Rooms are Off"
-            else:
-                rooms_text = self.primary_speaker_room
+        return "Whole Home Audio"
 
-            if self.ags_status == "OFF":
-                return "AGS Media System"
-            elif room_count == 1 :
-                return rooms_text + " is Active"
-            elif room_count > 1:
-                return rooms_text + " + " + str(room_count-1) + " Active"
-            else: 
-                return "All Rooms are Off"
+    @property
+    def group_members(self):
+        """Return list of members in the same group."""
+        return self.hass.data.get('active_speakers', [])
 
     @property
     def state(self):
@@ -377,21 +369,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         
         return self.primary_speaker_state.attributes.get('media_position_updated_at') if self.primary_speaker_state else None
     @property
-    def supported_features(self) -> MPFeature:
+    def supported_features(self) -> MediaPlayerEntityFeature:
         return (
-            MPFeature.SEEK
-            | MPFeature.PLAY
-            | MPFeature.PAUSE
-            | MPFeature.STOP
-            | MPFeature.SHUFFLE_SET
-            | MPFeature.REPEAT_SET
-            | MPFeature.NEXT_TRACK
-            | MPFeature.PREVIOUS_TRACK
-            | MPFeature.SELECT_SOURCE
-            | MPFeature.VOLUME_SET
-            | MPFeature.TURN_ON
-            | MPFeature.TURN_OFF
-            | MPFeature.GROUPING
+            MediaPlayerEntityFeature.SEEK
+            | MediaPlayerEntityFeature.PLAY
+            | MediaPlayerEntityFeature.PAUSE
+            | MediaPlayerEntityFeature.STOP
+            | MediaPlayerEntityFeature.SHUFFLE_SET
+            | MediaPlayerEntityFeature.REPEAT_SET
+            | MediaPlayerEntityFeature.NEXT_TRACK
+            | MediaPlayerEntityFeature.PREVIOUS_TRACK
+            | MediaPlayerEntityFeature.SELECT_SOURCE
+            | MediaPlayerEntityFeature.VOLUME_SET
+            | MediaPlayerEntityFeature.VOLUME_STEP
+            | MediaPlayerEntityFeature.TURN_ON
+            | MediaPlayerEntityFeature.TURN_OFF
+            | MediaPlayerEntityFeature.GROUPING
         )
 
     # Implement methods to control the AGS Primary Speaker
@@ -457,24 +450,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source_list(self):
         """List of available sources."""
-        ags_config = self.hass.data['ags_service']
-        disable_Tv_Source = ags_config['disable_Tv_Source']
-
-        tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
-        if (
-            self.ags_status == "ON TV"
-            and disable_Tv_Source == False
-            and tv_mode != TV_MODE_NO_MUSIC
-        ):
-            sources = self.primary_speaker_state.attributes.get('source_list') if self.primary_speaker_state else None
-
-        else:
-            sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-            # Check if any device has a type of TV and add "TV" to the source list
-            if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
-                sources.append("TV")
-
-        return sources
+        return [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
 
     @property
     def source(self):
@@ -536,96 +512,4 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 'repeat':  repeat
             })
             await self.async_update()
-
-
-# Define the secondary "Media System" media player class for homekit
-class MediaSystemMediaPlayer(MediaPlayerEntity):
-    def __init__(self, ags_media_player):
-        """Initialize the media system player."""
-        self._primary_player = ags_media_player
-
-    @property
-    def unique_id(self):
-        """Return a unique ID."""
-        return "ags_homekit_media_system"
-
-    @property
-    def name(self):
-        """Return the name of the media system player."""
-        ags_config = self.hass.data['ags_service']
-        return ags_config['homekit_player']
-
-    @property
-    def state(self):
-        """Return the state of the primary player."""
-        return self._primary_player.state
-
-    @property
-    def supported_features(self):
-        """Flag media player features that are supported."""
-        return (
-            MPFeature.PLAY
-            | MPFeature.PAUSE
-            | MPFeature.SELECT_SOURCE
-            | MPFeature.TURN_ON
-            | MPFeature.TURN_OFF
-            | MPFeature.VOLUME_SET
-            | MPFeature.GROUPING
-        )
-
-    @property
-    def source(self):
-        """Return the current input source of the device."""
-        return self._primary_player.source
-
-    @property
-    def source_list(self):
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
-        # Check if any device has a type of TV and add "TV" to the source list
-        if any(device.get("device_type") == "tv" for room in self.hass.data['ags_service']['rooms'] for device in room["devices"]):
-            sources.append("TV")
-
-        return sources
-
-    @property
-    def volume_level(self):
-        """Volume level of the media player (0..1)."""
-        return self._primary_player.volume_level
-
-    @property
-    def is_volume_muted(self):
-        """Return True if the media player is muted."""
-        return self._primary_player.is_volume_muted
-
-    async def async_turn_on(self):
-        """Turn the media player on."""
-        await self._primary_player.async_turn_on()
-
-    async def async_turn_off(self):
-        """Turn the media player off."""
-        await self._primary_player.async_turn_off()
-
-    async def async_set_volume_level(self, volume):
-        """Set the volume level."""
-        await self._primary_player.async_set_volume_level(volume)
-
-    async def async_mute_volume(self, mute):
-        """Mute the volume."""
-        await self._primary_player.async_mute_volume(mute)
-
-    async def async_select_source(self, source):
-        """Select the input source."""
-        await self._primary_player.async_select_source(source)
-
-    async def async_media_play(self):
-        """Play the media."""
-        await self._primary_player.async_media_play()
-
-    async def async_media_pause(self):
-        """Pause the media."""
-        await self._primary_player.async_media_pause()
-
-    @property
-    def device_class(self):
-        return "tv"
 

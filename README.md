@@ -1,53 +1,61 @@
-# Auto Grouping Speaker Service (AGS Service)
+# Auto Grouping Speaker Service (AGS Service) V2
 ![Cover image showing Music moves between rooms](cover.png)
 
-AGS Service is a custom Home Assistant integration that automatically manages speakers across your home.  It creates a virtual **AGS Media Player** that always points to the best speaker for the active rooms and keeps groups in sync as you move around.  Designed around Sonos and LG TVs but compatible with any media player Home Assistant supports, AGS makes whole‑home audio effortless.
+AGS Service is a custom Home Assistant integration that automatically manages speakers across your home. V2 introduces a modern, UI-driven configuration and advanced cascading orchestration.
 
-The integration continuously tracks room occupancy and speaker states, regrouping devices on the fly so your music or TV audio follows you.  With sensors, switches and automations built in, AGS can react to schedules, manual overrides and even HomeKit.  Whether you want music in every room or sound that follows you from place to place, AGS handles the heavy lifting.
-> **Disclaimer**
-> AGS Service controls real hardware. Test carefully before relying on it.
-> The authors are not responsible for unintended behavior.
+## Features (New in V2)
 
-## Table of Contents
-* [Features](#features)
-* [File Structure](#file-structure)
-* [Installation](#installation)
-* [Quick Start](#quick-start)
-* [Configuration](#configuration)
-* [Service Logic](#service-logic)
-* [Sensor Logic](#sensor-logic)
-* [License](#license)
-* [Changelog](#changelog)
+**UI-Driven Configuration**
+* Stop editing YAML. AGS now features a dedicated **Custom Panel** in the Home Assistant sidebar for real-time orchestration visualization and settings management.
 
-## Features
+**Cascading Source Overrides (News Mode)**
+* Define device-specific behavior for any source. Want "Morning News" to play on the TV if it's on, but fall back to the speaker if it's off? V2 handles this with prioritized execution logic.
 
-**Virtual AGS Media Player**
+**Native Group Spoofing**
+* The virtual AGS player now spoofs native Sonos grouping. This means standard Home Assistant dashboards and HomeKit see the entire group as a single, controllable unit with accurate member tracking.
 
-* Acts as the master player for the entire system. It automatically points to the best speaker based on room activity and exposes normal media controls (play, pause, volume, source, next/previous). Optionally a second HomeKit‑friendly player can mirror these controls for Apple users.
+**One-Click Migration**
+* Existing YAML configurations are automatically migrated to the new JSON-based storage system upon first startup.
 
-**Sensors**
+## Custom Panel UI
 
-* `AGS Service Configured Rooms` – lists every room defined in the configuration.
-* `AGS Service Active Rooms` – shows which rooms are currently active according to their media switch and overall status.
-* `AGS Service Active Speakers` – the speakers playing in the active rooms.
-* `AGS Service Inactive Speakers` – speakers in rooms that are currently inactive.
-* `AGS Service Status` – overall system state (`ON`, `ON TV`, `Override`, or `OFF`).
-* `AGS Service Primary Speaker` – the speaker chosen as the primary output.
-* `AGS Service Preferred Primary Speaker` – backup speaker that will take over if the primary stops playing.
-* `AGS Service Source` – name of the media source that will be played when AGS starts playback.
-* `AGS Service Inactive TV Speakers` – TV‑related speakers that are currently inactive.
+The new AGS Custom Panel provides:
+* **Orchestration Logic Visualizer**: See exactly how AGS is electing masters and syncing groups in real-time.
+* **Active Room Grid**: A quick-glance view of which rooms are currently part of the whole-home audio group.
+* **Advanced Settings**: Manage priorities, source overrides, and global toggles without a restart.
 
-All of the data from these sensors is also available as attributes of the
-`media_player.ags_media_player` entity, so you may disable the sensors and still
-access their values.
+## Service Logic
 
-**Switches**
+AGS evaluates several conditions to decide when to play and which speaker should be primary:
 
-* `(Room Name) Media` – toggle a room on or off manually. One switch is created for every room in your configuration.
-**Central Command Handling**
+1. **Cascading Overrides**: If a source is selected, AGS checks for a TV override, then a Speaker fallback, and finally the global Sources list.
+2. **Sticky Master**: Prevents music cutouts by maintaining the current primary speaker as long as it remains active and in an active room.
+3. **Ghost TV Detection**: Improved ignore filters ensure that TVs in standby or "none" states don't trap the system in "ON TV" mode.
 
-* All join, unjoin and playback commands run through a single status handler.
-* A queue processes commands sequentially to prevent race conditions.
+## Installation
+
+### Install with HACS
+
+1. Open **HACS → Integrations → ⋮ → Custom repositories**.
+2. Add `https://github.com/ByteRookie/AGS_Service` as a new **Integration** repository.
+3. Search for **AGS Service** in HACS and install it.
+4. Restart Home Assistant.
+
+## Changelog
+
+### v2.0.0
+- **Architectural Overhaul**: Transitioned to UI-driven configuration via `hass.helpers.storage`.
+- **Cascading Source Overrides**: Added "News Mode" cascading logic (TV -> Speaker -> Global).
+- **HomeKit & Spoofing**: Consolidated entities and added native group spoofing for better HomeKit stability.
+- **Custom Panel**: Introduced a LitElement-based dashboard for real-time orchestration tracking.
+- **Bug Fixes**:
+  - Fixed "TV_MODE_NO_MUSIC" cleanup loops.
+  - Resolved "TV Hijack" routing errors.
+  - Patched Sonos Favorites bug with Entity Registry verification.
+  - Enhanced Bluetooth/Line-In detection.
+  - Improved Idle Lockout and Standalone Room fallbacks.
+  - Fixed "Ghost TV" state detection across all core logic.
+  - Added safety nets for dead master failovers.
 
 
 ## File Structure
