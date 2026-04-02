@@ -126,6 +126,10 @@ class AGSPanel extends LitElement {
               <span>Disable Zone Check</span>
               <ha-switch .checked="${this.config.disable_zone}" @change="${(e) => this.config.disable_zone = e.target.checked}"></ha-switch>
             </div>
+            <div class="utility-link">
+              <span>Need a News Mode script?</span>
+              <a href="https://github.com/ByteRookie/AGS_Service/blob/main/blueprints/script/ags_news_mode.yaml" target="_blank">Get the Blueprint</a>
+            </div>
           </div>
         </ha-card>
 
@@ -314,6 +318,8 @@ class AGSPanel extends LitElement {
 
       .settings-container { display: flex; flex-direction: column; gap: 16px; }
       .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+      .utility-link { margin-top: 12px; padding: 12px; background: var(--secondary-background-color); border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+      .utility-link a { color: var(--primary-color); text-decoration: none; font-weight: bold; }
       .room-card { margin-bottom: 8px; }
       .room-header { padding: 12px; display: flex; align-items: center; cursor: pointer; font-weight: bold; }
       .room-actions { margin-left: auto; }
