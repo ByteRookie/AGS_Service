@@ -680,28 +680,30 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
         status = hass.data.get('ags_status', "OFF")
         primary_speaker_entity_id_raw = get_control_device_id(ags_config, hass)
 
-
-        # FIX 8: Dead Master Failover
-        if not primary_speaker_entity_id_raw or primary_speaker_entity_id_raw == "none":
+        # Phase 3: Dead Master Failsafe Refinement
+        # Ensure we have a functional device BEFORE evaluating overrides
+        primary_speaker_entity_id = primary_speaker_entity_id_raw
+        if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
             primary_speaker_entity_id = hass.data.get('preferred_primary_speaker', "")
-            hass.data['primary_speaker'] = primary_speaker_entity_id
-        else:
-            primary_speaker_entity_id = primary_speaker_entity_id_raw
         
-        # Dead master check
         state = hass.states.get(primary_speaker_entity_id)
         if state is None or state.state == "unavailable":
+             _LOGGER.warning("Primary master %s is unavailable, searching for failover", primary_speaker_entity_id)
              active_speakers = hass.data.get('active_speakers', [])
+             failover_found = False
              for spk in active_speakers:
                  s = hass.states.get(spk)
                  if s and s.state != "unavailable":
                      primary_speaker_entity_id = spk
                      hass.data['primary_speaker'] = spk
+                     failover_found = True
+                     _LOGGER.info("Failover elected: %s", spk)
                      break
+             if not failover_found:
+                 _LOGGER.error("No available speakers found for source selection")
+                 return
 
-        if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
-            return
-
+        # Re-fetch state for the elected (or failover) device
         state = hass.states.get(primary_speaker_entity_id)
         if state is None or state.state == "unavailable":
             return

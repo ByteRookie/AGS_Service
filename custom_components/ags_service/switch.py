@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .ags_service import (
     get_active_rooms,
@@ -15,6 +16,9 @@ from .ags_service import (
     update_ags_sensors,
     handle_ags_status_change,
 )
+
+# Import the signal and domain
+from . import DOMAIN, SIGNAL_AGS_RELOAD
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,15 +32,35 @@ async def async_setup_platform(
 ) -> None:
     """Set up the switch platform."""
     # Retrieve the room information from the shared data
-    ags_config = hass.data["ags_service"]
-    rooms = ags_config["rooms"]
+    ags_config = hass.data[DOMAIN]
+    
+    # Track which rooms already have switches
+    added_room_switches = set()
 
-    entities = [RoomSwitch(hass, room) for room in rooms]
+    @callback
+    def async_discover_switches():
+        """Discover and add new room switches dynamically."""
+        new_entities = []
+        rooms = hass.data[DOMAIN]["rooms"]
+        
+        for room in rooms:
+            unique_id = f"switch.{room['room'].lower().replace(' ', '_')}_media"
+            if unique_id not in added_room_switches:
+                new_entities.append(RoomSwitch(hass, room))
+                added_room_switches.add(unique_id)
+        
+        if new_entities:
+            async_add_entities(new_entities)
+
+    # Initial setup
+    async_discover_switches()
 
     if ags_config.get("create_sensors"):
-        entities.append(AGSActionsSwitch(hass))
+        async_add_entities([AGSActionsSwitch(hass)])
 
-    async_add_entities(entities)
+    # Phase 2: Hot-Reload Engine
+    # Listen for reload signal to add new rooms dynamically
+    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, async_discover_switches)
 
     await ensure_action_queue(hass)
 

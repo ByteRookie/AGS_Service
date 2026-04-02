@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.components import websocket_api
 from .ags_service import ensure_action_queue
 
@@ -16,6 +17,9 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
+
+# Signal for dynamic entity updates
+SIGNAL_AGS_RELOAD = "ags_service_reload"
 
 # Define the configuration keys
 CONF_ROOM = 'room'
@@ -109,6 +113,22 @@ CONFIG_SCHEMA = vol.Schema({
     })
 }, extra=vol.ALLOW_EXTRA)
 
+# Add a custom logging handler to capture AGS specific logs
+class AGSLogHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.logs = []
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        self.logs.append(log_entry)
+        if len(self.logs) > 50:
+            self.logs.pop(0)
+
+ags_log_handler = AGSLogHandler()
+ags_log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_LOGGER.addHandler(ags_log_handler)
+
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the custom component."""
     
@@ -139,35 +159,34 @@ async def async_setup(hass: HomeAssistant, config: dict):
                 "interval_sync": 30
             }
 
-    ags_config = stored_config
+    # Internal helper to apply config to hass.data
+    def apply_config(cfg):
+        # Validate device-specific constraints
+        for room in cfg.get('rooms', []):
+            for device in room.get('devices', []):
+                if (CONF_OTT_DEVICE in device or CONF_OTT_DEVICES in device) and device.get('device_type') != 'tv':
+                    raise vol.Invalid("ott_device is only allowed for devices with device_type 'tv'")
+                if CONF_TV_MODE in device and device.get('device_type') != 'tv':
+                    raise vol.Invalid("tv_mode is only allowed for devices with device_type 'tv'")
+                if device.get('device_type') == 'tv' and CONF_TV_MODE not in device:
+                    device[CONF_TV_MODE] = TV_MODE_TV_AUDIO
 
-    # Validate ott_device and tv_mode usage
-    for room in ags_config.get('rooms', []):
-        for device in room.get('devices', []):
-            if (CONF_OTT_DEVICE in device or CONF_OTT_DEVICES in device) and device.get('device_type') != 'tv':
-                raise vol.Invalid(
-                    "ott_device is only allowed for devices with device_type 'tv'"
-                )
-            if CONF_TV_MODE in device and device.get('device_type') != 'tv':
-                raise vol.Invalid(
-                    "tv_mode is only allowed for devices with device_type 'tv'"
-                )
-            if device.get('device_type') == 'tv' and CONF_TV_MODE not in device:
-                device[CONF_TV_MODE] = TV_MODE_TV_AUDIO
+        hass.data[DOMAIN].update({
+            'rooms': cfg.get('rooms', []),
+            'Sources': cfg.get('Sources', []),
+            'disable_zone': cfg.get(CONF_DISABLE_ZONE, False),
+            'homekit_player': cfg.get(CONF_HOMEKIT_PLAYER, None),
+            'create_sensors': cfg.get(CONF_CREATE_SENSORS, False),
+            'default_on': cfg.get(CONF_DEFAULT_ON, False),
+            'static_name': cfg.get(CONF_STATIC_NAME, ""),
+            'disable_Tv_Source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
+            'schedule_entity': cfg.get(CONF_SCHEDULE_ENTITY),
+            'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
+        })
 
-    hass.data[DOMAIN] = {
-        'rooms': ags_config.get('rooms', []),
-        'Sources': ags_config.get('Sources', []),
-        'disable_zone': ags_config.get(CONF_DISABLE_ZONE, False),
-        'homekit_player': ags_config.get(CONF_HOMEKIT_PLAYER, None),
-        'create_sensors': ags_config.get(CONF_CREATE_SENSORS, False),
-        'default_on': ags_config.get(CONF_DEFAULT_ON, False),
-        'static_name': ags_config.get(CONF_STATIC_NAME, ""),
-        'disable_Tv_Source': ags_config.get(CONF_DISABLE_TV_SOURCE, False),
-        'schedule_entity': ags_config.get(CONF_SCHEDULE_ENTITY),
-        'batch_unjoin': ags_config.get(CONF_BATCH_UNJOIN, False),
-        'store': store
-    }
+    hass.data[DOMAIN] = {'store': store}
+    apply_config(stored_config)
+    hass.data[DOMAIN]['apply_config'] = apply_config
 
     # Cancel existing action worker if it's already running (from a previous setup)
     if "action_worker" in hass.data[DOMAIN]:
@@ -180,17 +199,15 @@ async def async_setup(hass: HomeAssistant, config: dict):
     hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
 
 
-    # Load the sensor and switch platforms and pass the configuration to them
-    create_sensors = ags_config.get('create_sensors', False)
-    if create_sensors:
-        await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
-    
+    # Load the sensor and switch platforms
+    await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
     await async_load_platform(hass, 'switch', DOMAIN, {}, config)
     await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 
     # Register WebSocket API endpoints
     websocket_api.async_register_command(hass, ws_get_config)
     websocket_api.async_register_command(hass, ws_save_config)
+    websocket_api.async_register_command(hass, ws_get_logs)
 
     # Register static path for panel
     import os
@@ -205,8 +222,6 @@ async def async_setup(hass: HomeAssistant, config: dict):
         "ags-service",
         {"module_url": "/ags-static/ags-panel.js"},
     )
-    # The actual panel registration usually requires more boilerplate for serving static files
-    # For now, I'll stick to the logic requested.
 
     return True
 
@@ -237,19 +252,36 @@ def ws_get_config(hass, connection, msg):
 })
 @callback
 def ws_save_config(hass, connection, msg):
-    """Handle save config command."""
+    """Handle save config command with validation and hot-reload."""
     new_config = msg["config"]
-    hass.data[DOMAIN].update(new_config)
+    
+    # Phase 2: Configuration Validation
+    try:
+        validated_config = CONFIG_SCHEMA({DOMAIN: new_config})[DOMAIN]
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_config", str(err))
+        return
+
+    # Update live memory
+    hass.data[DOMAIN]['apply_config'](validated_config)
+    
+    # Phase 2: Hot-Reload Engine
+    # Signal entities to refresh themselves based on new config
+    async_dispatcher_send(hass, SIGNAL_AGS_RELOAD)
     
     # Trigger storage save
     store = hass.data[DOMAIN]["store"]
-    hass.async_create_task(store.async_save(new_config))
-    
-    # Trigger reload/sync
-    # (In a real implementation, we might want to reload the integration or re-initialize sensors)
-    # For now, we update hass.data which sensors/players read from.
+    hass.async_create_task(store.async_save(validated_config))
     
     connection.send_result(msg["id"])
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "ags_service/get_logs",
+})
+@callback
+def ws_get_logs(hass, connection, msg):
+    """Expose AGS specific logs via WebSocket."""
+    connection.send_result(msg["id"], ags_log_handler.logs)
 
 async def async_unload_entry(hass, entry):
     """Unload a config entry and cancel background tasks."""
