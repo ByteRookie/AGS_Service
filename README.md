@@ -16,12 +16,26 @@ AGS Service is a utility that handles the "handshakes" between your speakers. It
 *   **Sticky Master Logic**: Prevents audio cutouts by maintaining the lead speaker as long as it's active, even if a higher-priority room joins.
 *   **No More YAML**: Manage everything through a dedicated Sidebar Panel.
 
+## Quick Start
+
+1. **Install**: Install via HACS (recommended) or place the `ags_service` folder in `custom_components`.
+2. **Restart**: Restart Home Assistant.
+3. **Configure**: Open the **AGS Service** icon in your Home Assistant sidebar.
+4. **Migration**: If you have an existing YAML configuration, AGS will automatically import it into the UI on the first run. You can then safely remove the `ags_service:` block from your `configuration.yaml`.
+
 ## 📸 UI Showcase
 
-> **Note to Developers**: Please capture and embed these three high-resolution screenshots:
-> 1. **Overview Tab**: Capture the header showing the `dynamic_title` (e.g., "Living Room + 2 Active") and the animated Orchestration Logic stepper.
-> 2. **Settings Tab**: Show a Room card expanded to reveal nested Devices, their priorities, and their types.
-> 3. **Override UI**: A clear view of a "Source Override" (News Mode) configured with a script and the "Run when TV off" toggle.
+### 1. Orchestration Overview
+The Overview tab provides a real-time visualization of the AGS engine. See the `dynamic_title` in action and track the animated stepper as it elects masters and syncs groups.
+![AGS Overview Tab](overview.png)
+
+### 2. Nested Device Management
+Manage your home's complexity with ease. Expand any room to configure device priorities, types, and specific entity IDs using native Home Assistant pickers.
+![AGS Settings Tab](settings.png)
+
+### 3. News Mode (Source Overrides)
+Configure cascading logic per device. This example shows a "News" override that triggers an Apple TV script but falls back to standard behavior when the TV is off.
+![AGS Override UI](overrides.png)
 
 ## Features (New in V2)
 
