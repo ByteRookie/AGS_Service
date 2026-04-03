@@ -449,18 +449,18 @@ class AGSPanel extends HTMLElement {
 
   getBrowseEntityId() {
     const ags = this.getAgsState();
-    if (ags?.entity_id && this.hass.states[ags.entity_id]) {
-      return ags.entity_id;
+    // browse_entity_id is always a speaker (never TV/OTT), falls back to highest-priority
+    // configured speaker even when system is idle — safe for music library browsing
+    const browseEid = ags?.attributes?.browse_entity_id;
+    if (browseEid && browseEid !== "none" && this.hass.states[browseEid]) {
+      return browseEid;
     }
-    const control = ags?.attributes?.control_device_id;
-    if (control && this.hass.states[control]) {
-      return control;
-    }
+    // Fall back to primary_speaker (also always a speaker)
     const primary = ags?.attributes?.primary_speaker;
-    if (primary && this.hass.states[primary]) {
+    if (primary && primary !== "none" && this.hass.states[primary]) {
       return primary;
     }
-    return ags?.entity_id || null;
+    return null;
   }
 
   mergeSources(sourceEntries) {
@@ -1755,6 +1755,29 @@ class AGSPanel extends HTMLElement {
           font-weight: 800;
           text-transform: uppercase;
           color: var(--secondary-text-color);
+        }
+
+        .entity-field {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+        }
+
+        .entity-field ha-entity-picker {
+          display: block;
+          width: 100%;
+        }
+
+        /* Hide the manual text fallback — ha-entity-picker handles custom entry via allowCustomEntity */
+        .entity-fallback {
+          display: none;
+        }
+
+        .entity-helper {
+          margin-top: 6px;
+          font-size: 0.8rem;
+          color: var(--secondary-text-color);
+          font-weight: 500;
         }
 
         .log-view {
