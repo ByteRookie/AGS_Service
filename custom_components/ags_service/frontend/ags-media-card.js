@@ -21,7 +21,9 @@ class AgsMediaCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._config) this.render();
+    if (this._config && !this.loading) {
+      this.initData();
+    }
   }
 
   getAgsPlayer() {
@@ -222,14 +224,15 @@ class AgsMediaCard extends HTMLElement {
           --text: var(--primary-text-color, #212121);
           --text-sec: var(--secondary-text-color, #6b6b6b);
           --divider: var(--divider-color, rgba(0,0,0,0.12));
-          --glass: rgba(var(--rgb-primary-text-color, 0,0,0), 0.06);
-          --glass-heavy: rgba(var(--rgb-primary-text-color, 0,0,0), 0.10);
+          --glass: color-mix(in srgb, var(--primary-text-color) 10%, transparent);
+          --glass-heavy: color-mix(in srgb, var(--primary-text-color) 20%, transparent);
         }
-        @media (prefers-color-scheme: dark) {
-          :host { --text: var(--primary-text-color, #e4e4e4); --text-sec: var(--secondary-text-color, #a8a8a8); --divider: rgba(255,255,255,0.13); --glass: rgba(255,255,255,0.07); --glass-heavy: rgba(255,255,255,0.13); }
-          .backdrop { filter: blur(40px) saturate(1.4) brightness(0.2); opacity: 0.85; }
+        .backdrop {
+          filter: blur(40px) saturate(1.4);
+          opacity: 0.18;
+          background-size: cover;
+          background-position: center;
         }
-        @media (prefers-color-scheme: light) { .backdrop { filter: blur(40px) saturate(1.4) brightness(1.1); opacity: 0.18; } }
         
         ha-card { position: relative; overflow: hidden; border-radius: 28px; background: var(--card-bg); color: var(--text); max-width: 400px; margin: 0 auto; aspect-ratio: 0.7 / 1; display: flex; flex-direction: column; border: 1px solid var(--divider); box-shadow: var(--ha-card-box-shadow, 0 4px 20px rgba(0,0,0,0.1)); transition: all 0.3s; }
         .backdrop { position: absolute; inset: -20px; background-image: ${pic ? `url(${pic})` : 'none'}; background-size: cover; background-position: center; z-index: 0; transition: 0.8s; }

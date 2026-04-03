@@ -659,9 +659,12 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
     source is selected while playback is active.
     """
 
-    try:
-        # FIX 9: Direct Killswitch Fetching
-        state_obj = hass.states.get("switch.ags_actions")
+    sources_list = []
+    if control_device_state := hass.states.get(control_device_id):
+        sources_list = control_device_state.attributes.get('source_list', [])
+        # Fix IndexError by checking if sources_list is not empty
+        if sources_list:
+            fallback_source = sources_list[0]["Source"]
         actions_enabled = state_obj.state == "on" if state_obj else True
         if not actions_enabled:
             return
