@@ -105,6 +105,14 @@ class AgsMediaCard extends HTMLElement {
     const ags = this.getAgsPlayer();
     if (!ags) return;
     this._browseError = "";
+    
+    // Ensure both media_content_type and media_content_id are provided
+    if (node && (!node.media_content_type || !node.media_content_id)) {
+      this._browseError = "Media content type and ID must be provided together";
+      this.render();
+      return;
+    }
+
     // browse_entity_id is always a speaker (falls back to highest-priority configured speaker)
     const browseEid = ags.attributes.browse_entity_id;
     const fallbackEid = ags.attributes.primary_speaker;
