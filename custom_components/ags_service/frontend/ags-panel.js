@@ -1384,12 +1384,12 @@ class AGSPanel extends HTMLElement {
         :host {
           display: block;
           min-height: 100vh;
-          background: var(--primary-background-color);
-          color: var(--primary-text-color);
+          background: var(--primary-background-color, #1a1a1a);
+          color: var(--primary-text-color, #ffffff);
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
-          --ags-primary: var(--primary-color);
-          --ags-glass: rgba(var(--rgb-card-background-color), 0.6);
-          --ags-border: rgba(var(--rgb-primary-text-color), 0.08);
+          --ags-primary: var(--primary-color, #ff9800);
+          --ags-glass: rgba(var(--rgb-card-background-color), 0.4);
+          --ags-border: rgba(var(--rgb-primary-text-color), 0.12);
         }
 
         * {
@@ -1537,12 +1537,12 @@ class AGSPanel extends HTMLElement {
         }
 
         .panel-card {
-          background: var(--ags-glass);
+          background: rgba(var(--rgb-card-background-color), 0.8);
           backdrop-filter: blur(20px);
           border: 1px solid var(--ags-border);
           border-radius: 28px;
           padding: 32px;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
         }
 
         .grid {
