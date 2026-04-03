@@ -510,38 +510,59 @@ class AGSPanel extends HTMLElement {
   }
 
   bindEntityPickers() {
+    // Clear existing bindings first
+    this.shadowRoot.querySelectorAll("ha-entity-picker").forEach(picker => {
+      if (picker.__agsBound) {
+        picker.removeEventListener("value-changed", picker.__agsValueChangeHandler);
+        picker.__agsBound = false;
+      }
+    });
+
+    // Bind new pickers
     this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((picker) => {
-      picker.hass = this.hass;
-      const includeDomains = picker.getAttribute("include-domains");
-      if (includeDomains) {
+      if (!picker.__agsBound) {
+        picker.hass = this.hass;
+        const includeDomains = picker.getAttribute("include-domains");
+        
         try {
-          picker.includeDomains = JSON.parse(includeDomains);
+          if (includeDomains) {
+            picker.includeDomains = JSON.parse(includeDomains);
+          }
         } catch (error) {
-          // eslint-disable-next-line no-console
           console.error("Failed to parse include-domains", error);
         }
-      }
-      picker.allowCustomEntity = true;
-      picker.clearable = true;
-      const value = picker.getAttribute("data-value") || "";
-      picker.value = value;
-      if (picker.__agsBound) {
-        return;
-      }
-      picker.__agsBound = true;
-      picker.addEventListener("value-changed", (event) => {
-        const path = picker.getAttribute("data-path");
-        if (!path) {
-          return;
-        }
-        const nextValue = String(event.detail?.value || "").trim();
-        const sanitized =
-          nextValue.toLowerCase() === "entity id" || nextValue.toLowerCase() === "choose entity"
+
+        picker.allowCustomEntity = true;
+        picker.clearable = true;
+        const value = picker.getAttribute("data-value") || "";
+        picker.value = value;
+
+        // Store handler to avoid duplicates
+        const handleValueChange = (event) => {
+          const path = picker.getAttribute("data-path");
+          if (!path) return;
+
+          const nextValue = String(event.detail?.value || "").trim();
+          const sanitized = nextValue.toLowerCase() === "entity id" 
             ? ""
             : nextValue;
-        this.updateConfig(path, sanitized);
-      });
+          
+          this.updateConfig(path, sanitized);
+        };
+
+        picker.__agsValueChangeHandler = handleValueChange;
+        picker.addEventListener("value-changed", handleValueChange);
+        picker.__agsBound = true;
+
+        console.log(`Bound entity picker for path: ${picker.getAttribute("data-path")}`);
+      }
     });
+  }
+
+  // Ensure entity pickers are bound after initial load
+  initEntityPickers() {
+    this.bindEntityPickers();
+    console.log("Initialized entity pickers");
   }
 
   bindEmbeddedDashboard() {
