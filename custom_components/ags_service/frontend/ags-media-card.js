@@ -263,8 +263,8 @@ class AgsMediaCard extends HTMLElement {
       <style>
         :host {
           --primary: var(--primary-color, #ff9800);
-          --card-bg: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.88);
-          --card-bg-strong: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.96);
+          --card-bg: rgba(17, 24, 39, 0.95);
+          --card-bg-strong: rgba(17, 24, 39, 1);
           --text: var(--primary-text-color, #212121);
           --text-sec: var(--secondary-text-color, #6b6b6b);
           --divider: var(--divider-color, rgba(0,0,0,0.12));

@@ -1173,7 +1173,7 @@ class AGSPanel extends HTMLElement {
             </div>
 
             <div style="margin-top:24px;">
-              <label>Custom Matcher (Legacy)</label>
+              <label>Off Override</label>
               <input type="text" placeholder="Title/Source keyword to trigger override" value="${this.escapeHtml(device.override_content || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)" />
             </div>
           </div>
@@ -1516,10 +1516,7 @@ class AGSPanel extends HTMLElement {
         :host {
           display: block;
           min-height: 100vh;
-          background:
-            radial-gradient(circle at top left, rgba(var(--rgb-primary-color), 0.14), transparent 32%),
-            radial-gradient(circle at top right, rgba(var(--rgb-primary-color), 0.08), transparent 28%),
-            var(--primary-background-color, #f4f6fb);
+          background: rgba(17, 24, 39, 1);
           color: var(--primary-text-color, #111827);
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
           --ags-primary: var(--primary-color, #ff9800);

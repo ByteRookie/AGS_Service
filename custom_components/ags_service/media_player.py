@@ -22,10 +22,16 @@ import logging
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    """Set up the media player platform."""
     ags_config = hass.data[DOMAIN]
 
+    # Create and add the AGS media player
     ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
     async_add_entities([ags_media_player])
+    
+    # Ensure the media player is properly registered
+    hass.helpers.dispatcher.async_connect(SIGNAL_AGS_RELOAD, async lambda _: 
+        await ags_media_player.async_update())
     
     tracked_entities = set()
     unsubs = []
