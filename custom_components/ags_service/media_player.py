@@ -30,8 +30,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities([ags_media_player])
     
     # Ensure the media player is properly registered
-    hass.helpers.dispatcher.async_connect(SIGNAL_AGS_RELOAD, async lambda _: 
-        await ags_media_player.async_update())
+    async def reload_handler(_):
+        await ags_media_player.async_update()
+    
+    hass.helpers.dispatcher.async_connect(SIGNAL_AGS_RELOAD, reload_handler)
     
     tracked_entities = set()
     unsubs = []
