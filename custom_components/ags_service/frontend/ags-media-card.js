@@ -9,6 +9,7 @@ class AgsMediaCard extends HTMLElement {
     this._browseItems = [];
     this._loadingBrowse = false;
     this._showSourceMenu = false;
+    this._browseError = "";
   }
 
   setConfig(config) {
@@ -71,12 +72,21 @@ class AgsMediaCard extends HTMLElement {
   async browseMedia(node = null) {
     const ags = this.getAgsPlayer();
     if (!ags) return;
-    const browseEid = ags.attributes.browse_entity_id || ags.attributes.primary_speaker;
-    if (!browseEid || browseEid === "none") { this._browseItems = []; this.render(); return; }
+    this._browseError = "";
+    // browse_entity_id is always a speaker (falls back to highest-priority configured speaker)
+    const browseEid = ags.attributes.browse_entity_id;
+    const fallbackEid = ags.attributes.primary_speaker;
+    const targetEid = (browseEid && browseEid !== "none") ? browseEid : (fallbackEid && fallbackEid !== "none" ? fallbackEid : null);
+    if (!targetEid) {
+      this._browseItems = [];
+      this._browseError = "No speaker configured for browsing. Add a speaker in AGS settings.";
+      this.render();
+      return;
+    }
     this._loadingBrowse = true;
     this.render();
     try {
-      const payload = { type: "media_player/browse_media", entity_id: browseEid };
+      const payload = { type: "media_player/browse_media", entity_id: targetEid };
       if (node) { payload.media_content_type = node.media_content_type; payload.media_content_id = node.media_content_id; }
       const res = await this._hass.callWS(payload);
       this._browseItems = res.children || [];
@@ -85,7 +95,10 @@ class AgsMediaCard extends HTMLElement {
           this._browseStack.push(node);
         }
       } else { this._browseStack = []; }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      this._browseError = "Could not load media library. Make sure your speaker is reachable.";
+    }
     this._loadingBrowse = false;
     this.render();
   }
@@ -185,26 +198,6 @@ class AgsMediaCard extends HTMLElement {
     `;
   }
 
-  renderBrowse() {
-    return `
-      <div class="browse-view">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-          ${this._browseStack.length>0?`<button class="icon-btn" onclick="this.getRootNode().host.browseBack()"><ha-icon icon="mdi:chevron-left"></ha-icon></button>`:''}
-          <div class="view-title" style="margin:0;">${this._browseStack.length>0?this.escapeHtml(this._browseStack[this._browseStack.length-1].title):'Library'}</div>
-        </div>
-        ${this._loadingBrowse?'<div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>':`
-          <div class="browse-list" style="display:flex; flex-direction:column; gap:6px;">${this._browseItems.map((i, idx) => `
-            <div class="list-card browse-item" onclick="this.getRootNode().host._handleBrowseClick(${idx})">
-              ${i.thumbnail?`<img src="${i.thumbnail}" onerror="this.style.display='none'"/>` : ''}
-              ${!i.thumbnail ? `<ha-icon icon="${i.can_expand?'mdi:folder':'mdi:music-note'}" style="opacity:0.4;"></ha-icon>` : ''}
-              <div class="browse-label">${this.escapeHtml(i.title)}</div>
-              ${i.can_expand ? `<ha-icon icon="mdi:chevron-right" style="opacity:0.2; --mdc-icon-size: 18px;"></ha-icon>` : ''}
-            </div>`).join("")}</div>
-        `}
-      </div>
-    `;
-  }
-
   render() {
     const ags = this.getAgsPlayer();
     if (!ags) return;
@@ -223,21 +216,20 @@ class AgsMediaCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host { 
-          --primary: var(--primary-color, #ff9800); 
+        :host {
+          --primary: var(--primary-color, #ff9800);
           --card-bg: var(--ha-card-background, var(--card-background-color, #fff));
           --text: var(--primary-text-color, #212121);
-          --text-sec: var(--secondary-text-color, #727272);
-          --divider: var(--divider-color, rgba(0,0,0,0.1));
-          --glass: rgba(var(--rgb-primary-text-color, 0,0,0), 0.05);
-          --glass-heavy: rgba(var(--rgb-primary-text-color, 0,0,0), 0.08);
+          --text-sec: var(--secondary-text-color, #6b6b6b);
+          --divider: var(--divider-color, rgba(0,0,0,0.12));
+          --glass: rgba(var(--rgb-primary-text-color, 0,0,0), 0.06);
+          --glass-heavy: rgba(var(--rgb-primary-text-color, 0,0,0), 0.10);
         }
-        @media (prefers-color-scheme: dark) { 
-          :host { --text: #b0b0b0; --text-sec: #808080; --divider: rgba(255,255,255,0.1); }
-          ha-card { --glass: rgba(255,255,255,0.08); --glass-heavy: rgba(255,255,255,0.12); }
-          .backdrop { filter: blur(40px) saturate(1.4) brightness(0.3); opacity: 0.6; } 
+        @media (prefers-color-scheme: dark) {
+          :host { --text: var(--primary-text-color, #e4e4e4); --text-sec: var(--secondary-text-color, #a8a8a8); --divider: rgba(255,255,255,0.13); --glass: rgba(255,255,255,0.07); --glass-heavy: rgba(255,255,255,0.13); }
+          .backdrop { filter: blur(40px) saturate(1.4) brightness(0.2); opacity: 0.85; }
         }
-        @media (prefers-color-scheme: light) { .backdrop { filter: blur(40px) saturate(1.4) brightness(1.1); opacity: 0.2; } }
+        @media (prefers-color-scheme: light) { .backdrop { filter: blur(40px) saturate(1.4) brightness(1.1); opacity: 0.18; } }
         
         ha-card { position: relative; overflow: hidden; border-radius: 28px; background: var(--card-bg); color: var(--text); max-width: 400px; margin: 0 auto; aspect-ratio: 0.7 / 1; display: flex; flex-direction: column; border: 1px solid var(--divider); box-shadow: var(--ha-card-box-shadow, 0 4px 20px rgba(0,0,0,0.1)); transition: all 0.3s; }
         .backdrop { position: absolute; inset: -20px; background-image: ${pic ? `url(${pic})` : 'none'}; background-size: cover; background-position: center; z-index: 0; transition: 0.8s; }
@@ -284,6 +276,8 @@ class AgsMediaCard extends HTMLElement {
         .browse-label { font-weight: 700; font-size: 0.9rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
         .power-btn.on { color: var(--primary); opacity: 1; }
         .loading-spin { text-align: center; padding: 40px; }
+        .browse-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; color: var(--text-sec); font-size: 0.9rem; font-weight: 600; text-align: center; }
+        .browse-empty ha-icon { --mdc-icon-size: 40px; opacity: 0.4; }
         .system-off-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
         .off-icon-wrap { width: 80px; height: 80px; border-radius: 50%; background: var(--glass-heavy); display: flex; align-items: center; justify-content: center; color: var(--text-sec); opacity: 0.5; }
         .off-text { font-size: 1.1rem; font-weight: 800; color: var(--text-sec); }
@@ -354,17 +348,28 @@ class AgsMediaCard extends HTMLElement {
   }
 
   renderBrowse() {
-    return `<div class="browse-view"><div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-      ${this._browseStack.length>0?`<button class="icon-btn" onclick="this.getRootNode().host.browseBack()"><ha-icon icon="mdi:chevron-left"></ha-icon></button>`:''}
-      <div class="view-title" style="margin:0;">${this._browseStack.length>0?this.escapeHtml(this._browseStack[this._browseStack.length-1].title):'Library'}</div>
-    </div>${this._loadingBrowse?'<div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>':`
-      <div class="browse-list" style="display:flex; flex-direction:column; gap:6px;">${this._browseItems.map((i, idx) => `
+    let content;
+    if (this._loadingBrowse) {
+      content = '<div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>';
+    } else if (this._browseError) {
+      content = `<div class="browse-empty"><ha-icon icon="mdi:speaker-off"></ha-icon><div>${this.escapeHtml(this._browseError)}</div></div>`;
+    } else if (!this._browseItems.length) {
+      content = '<div class="browse-empty"><ha-icon icon="mdi:music-off"></ha-icon><div>No items found</div></div>';
+    } else {
+      content = `<div class="browse-list" style="display:flex; flex-direction:column; gap:6px;">${this._browseItems.map((i, idx) => `
         <div class="list-card browse-item" onclick="this.getRootNode().host._handleBrowseClick(${idx})">
-          ${i.thumbnail?`<img src="${i.thumbnail}" onerror="this.style.display='none'"/>` : ''}
-          ${!i.thumbnail ? `<ha-icon icon="${i.can_expand?'mdi:folder':'mdi:music-note'}" style="opacity:0.4;"></ha-icon>` : ''}
+          ${i.thumbnail ? `<img src="${i.thumbnail}" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:6px;object-fit:cover;flex-shrink:0;"/>` : `<ha-icon icon="${i.can_expand?'mdi:folder':'mdi:music-note'}" style="opacity:0.4;flex-shrink:0;"></ha-icon>`}
           <div class="browse-label">${this.escapeHtml(i.title)}</div>
-          ${i.can_expand ? `<ha-icon icon="mdi:chevron-right" style="opacity:0.2; --mdc-icon-size: 18px;"></ha-icon>` : ''}
-        </div>`).join("")}</div>`}</div>`;
+          ${i.can_expand ? `<ha-icon icon="mdi:chevron-right" style="opacity:0.3; --mdc-icon-size: 18px; flex-shrink:0;"></ha-icon>` : ''}
+        </div>`).join("")}</div>`;
+    }
+    return `<div class="browse-view">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        ${this._browseStack.length > 0 ? `<button class="icon-btn" onclick="this.getRootNode().host.browseBack()"><ha-icon icon="mdi:chevron-left"></ha-icon></button>` : ''}
+        <div class="view-title" style="margin:0;">${this._browseStack.length > 0 ? this.escapeHtml(this._browseStack[this._browseStack.length-1].title) : 'Library'}</div>
+      </div>
+      ${content}
+    </div>`;
   }
 
   openPortal() {
