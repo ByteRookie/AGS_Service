@@ -51,6 +51,9 @@ class AGSPanel extends HTMLElement {
       this.config = this.normalizeConfig(config);
       this.logs = Array.isArray(logs) ? logs : [];
       this.ensureRoomSelection();
+      
+      // Initialize entity pickers after config is loaded
+      this.initEntityPickers();
     } catch (error) {
       this.error = error.message || String(error);
     } finally {
