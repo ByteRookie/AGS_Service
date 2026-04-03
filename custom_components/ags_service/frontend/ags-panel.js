@@ -72,7 +72,7 @@ class AGSPanel extends HTMLElement {
       rooms: Array.isArray(config?.rooms) ? config.rooms : [],
       Sources: Array.isArray(config?.Sources) ? config.Sources : [],
       disable_zone: Boolean(config?.disable_zone),
-      homekit_player: normalizeEntityValue(config?.homekit_player || ""),
+      homekit_player: normalizeEntityValue(config?.homekit_player || "") || null,
       create_sensors: config?.create_sensors !== false,
       default_on: Boolean(config?.default_on),
       static_name: config?.static_name || "",
@@ -82,57 +82,78 @@ class AGSPanel extends HTMLElement {
       batch_unjoin: Boolean(config?.batch_unjoin),
     };
 
-    normalized.rooms = normalized.rooms.map((room) => ({
-      room: room?.room || "New Room",
-      devices: Array.isArray(room?.devices)
-        ? room.devices.map((device) => {
-            const normalizedDevice = {
-              device_id: normalizeEntityValue(device?.device_id || ""),
-              device_type: device?.device_type || "speaker",
-              priority: Number.isFinite(device?.priority) ? device.priority : 1,
-              override_content: device?.override_content || "",
-              source_overrides: Array.isArray(device?.source_overrides)
-                ? device.source_overrides.map((override) => {
-                    const normalizedOverride = {
-                      source_name: override?.source_name || "",
-                      mode: override?.mode || "source",
-                      run_when_tv_off: Boolean(override?.run_when_tv_off),
-                    };
-                    if (normalizedOverride.mode === "script") {
-                      const scriptEntity = normalizeEntityValue(
-                        override?.script_entity || "",
-                      );
-                      if (scriptEntity) {
-                        normalizedOverride.script_entity = scriptEntity;
+    normalized.rooms = normalized.rooms.map((room) => {
+      const devices = Array.isArray(room?.devices)
+        ? room.devices
+            .map((device, deviceIndex) => {
+              const rawPriority = Number(device?.priority);
+              const normalizedDevice = {
+                device_id: normalizeEntityValue(device?.device_id || ""),
+                device_type: device?.device_type === "tv" ? "tv" : "speaker",
+                priority:
+                  Number.isFinite(rawPriority) && rawPriority > 0
+                    ? rawPriority
+                    : deviceIndex + 1,
+                override_content: device?.override_content || "",
+                source_overrides: Array.isArray(device?.source_overrides)
+                  ? device.source_overrides.map((override) => {
+                      const normalizedOverride = {
+                        source_name: override?.source_name || "",
+                        mode: override?.mode || "source",
+                        run_when_tv_off: Boolean(override?.run_when_tv_off),
+                      };
+                      if (normalizedOverride.mode === "script") {
+                        const scriptEntity = normalizeEntityValue(
+                          override?.script_entity || "",
+                        );
+                        if (scriptEntity) {
+                          normalizedOverride.script_entity = scriptEntity;
+                        }
+                      } else {
+                        normalizedOverride.source_value = override?.source_value || "";
                       }
-                    } else {
-                      normalizedOverride.source_value = override?.source_value || "";
-                    }
-                    return normalizedOverride;
-                  })
-                : [],
-            };
+                      return normalizedOverride;
+                    })
+                  : [],
+                __sortIndex: deviceIndex,
+              };
 
-            if (normalizedDevice.device_type === "tv") {
-              normalizedDevice.tv_mode = device?.tv_mode || "tv_audio";
-              const ottDevice = normalizeEntityValue(device?.ott_device || "");
-              if (ottDevice) {
-                normalizedDevice.ott_device = ottDevice;
+              if (normalizedDevice.device_type === "tv") {
+                normalizedDevice.tv_mode = device?.tv_mode || "tv_audio";
+                const ottDevice = normalizeEntityValue(device?.ott_device || "");
+                if (ottDevice) {
+                  normalizedDevice.ott_device = ottDevice;
+                }
+                normalizedDevice.ott_devices = Array.isArray(device?.ott_devices)
+                  ? device.ott_devices
+                      .map((mapping) => ({
+                        ott_device: normalizeEntityValue(mapping?.ott_device || ""),
+                        tv_input: mapping?.tv_input || "",
+                      }))
+                      .filter((mapping) => mapping.ott_device || mapping.tv_input)
+                  : [];
               }
-              normalizedDevice.ott_devices = Array.isArray(device?.ott_devices)
-                ? device.ott_devices
-                    .map((mapping) => ({
-                      ott_device: normalizeEntityValue(mapping?.ott_device || ""),
-                      tv_input: mapping?.tv_input || "",
-                    }))
-                    .filter((mapping) => mapping.ott_device || mapping.tv_input)
-                : [];
-            }
 
-            return normalizedDevice;
-          })
-        : [],
-    }));
+              return normalizedDevice;
+            })
+            .sort((left, right) => {
+              if (left.priority !== right.priority) {
+                return left.priority - right.priority;
+              }
+              return left.__sortIndex - right.__sortIndex;
+            })
+            .map((device, index) => {
+              const normalizedDevice = { ...device, priority: index + 1 };
+              delete normalizedDevice.__sortIndex;
+              return normalizedDevice;
+            })
+        : [];
+
+      return {
+        room: room?.room || "New Room",
+        devices,
+      };
+    });
 
     normalized.schedule_entity =
       normalized.schedule_entity && normalizeEntityValue(normalized.schedule_entity.entity_id)
@@ -154,12 +175,26 @@ class AGSPanel extends HTMLElement {
           }
         : null;
 
-    normalized.Sources = normalized.Sources.map((source) => ({
-      Source: source?.Source || "",
-      Source_Value: source?.Source_Value || "",
-      media_content_type: source?.media_content_type || "favorite_item_id",
-      source_default: Boolean(source?.source_default),
-    }));
+    let defaultAssigned = false;
+    normalized.Sources = normalized.Sources.map((source) => {
+      const isDefault = Boolean(source?.source_default) && !defaultAssigned;
+      defaultAssigned = defaultAssigned || isDefault;
+      return {
+        Source: source?.Source || "",
+        Source_Value: source?.Source_Value || "",
+        media_content_type: source?.media_content_type || "favorite_item_id",
+        source_default: isDefault,
+      };
+    });
+
+    if (
+      normalized.default_source_schedule &&
+      !normalized.Sources.some(
+        (source) => source.Source === normalized.default_source_schedule.source_name,
+      )
+    ) {
+      normalized.default_source_schedule = null;
+    }
 
     return normalized;
   }
@@ -204,6 +239,58 @@ class AGSPanel extends HTMLElement {
       .replace(/[^a-z0-9_]/g, "");
   }
 
+  resolveMediaUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) {
+      return "";
+    }
+    if (/^(https?:|data:)/i.test(raw)) {
+      return raw;
+    }
+    if (raw.startsWith("//")) {
+      return `${window.location.protocol}${raw}`;
+    }
+    if (typeof this.hass?.hassUrl === "function") {
+      return this.hass.hassUrl(raw.startsWith("/") ? raw : `/${raw}`);
+    }
+    return raw;
+  }
+
+  getConfigIssues(config = this.config) {
+    const issues = [];
+    const seenDevices = new Map();
+    const seenSources = new Map();
+
+    (config?.rooms || []).forEach((room) => {
+      (room?.devices || []).forEach((device) => {
+        const entityId = String(device?.device_id || "").trim();
+        if (!entityId) {
+          return;
+        }
+        if (seenDevices.has(entityId)) {
+          issues.push(`Device ${entityId} is assigned more than once.`);
+          return;
+        }
+        seenDevices.set(entityId, room.room || "room");
+      });
+    });
+
+    (config?.Sources || []).forEach((source) => {
+      const name = String(source?.Source || "").trim();
+      if (!name) {
+        return;
+      }
+      const key = name.toLowerCase();
+      if (seenSources.has(key)) {
+        issues.push(`Source name "${name}" is duplicated.`);
+        return;
+      }
+      seenSources.set(key, true);
+    });
+
+    return issues;
+  }
+
   setTab(tab) {
     this.activeTab = tab;
     this.render();
@@ -229,12 +316,15 @@ class AGSPanel extends HTMLElement {
     }
 
     obj[parts[parts.length - 1]] = value;
+    this.config = this.normalizeConfig(this.config);
+    this.render();
   }
 
   removeAt(path, index) {
     const target = this.resolvePath(path);
     if (Array.isArray(target)) {
       target.splice(index, 1);
+      this.config = this.normalizeConfig(this.config);
       this.ensureRoomSelection();
       this.render();
     }
@@ -270,6 +360,7 @@ class AGSPanel extends HTMLElement {
       room: `Room ${this.config.rooms.length + 1}`,
       devices: [],
     });
+    this.config = this.normalizeConfig(this.config);
     this.selectedRoomIdx = this.config.rooms.length - 1;
     this.render();
   }
@@ -279,6 +370,7 @@ class AGSPanel extends HTMLElement {
       return;
     }
     this.config.rooms.splice(index, 1);
+    this.config = this.normalizeConfig(this.config);
     this.ensureRoomSelection();
     this.render();
   }
@@ -287,13 +379,14 @@ class AGSPanel extends HTMLElement {
     this.config.rooms[roomIndex].devices.push({
       device_id: "",
       device_type: "speaker",
-      priority: 1,
+      priority: this.config.rooms[roomIndex].devices.length + 1,
       tv_mode: "tv_audio",
       ott_device: "",
       ott_devices: [],
       override_content: "",
       source_overrides: [],
     });
+    this.config = this.normalizeConfig(this.config);
     this.render();
   }
 
@@ -308,6 +401,7 @@ class AGSPanel extends HTMLElement {
       device.ott_devices = [];
     }
     device.ott_devices.push({ ott_device: "", tv_input: "" });
+    this.config = this.normalizeConfig(this.config);
     this.render();
   }
 
@@ -323,6 +417,7 @@ class AGSPanel extends HTMLElement {
       script_entity: "",
       run_when_tv_off: false,
     });
+    this.config = this.normalizeConfig(this.config);
     this.render();
   }
 
@@ -333,6 +428,39 @@ class AGSPanel extends HTMLElement {
       media_content_type: "favorite_item_id",
       source_default: false,
     });
+    this.config = this.normalizeConfig(this.config);
+    this.render();
+  }
+
+  setSourceDefault(index, isDefault) {
+    this.config.Sources.forEach((source, sourceIndex) => {
+      source.source_default = isDefault ? sourceIndex === index : false;
+    });
+    this.config = this.normalizeConfig(this.config);
+    this.render();
+  }
+
+  setDevicePriority(roomIndex, deviceIndex, requestedPriority) {
+    const room = this.config?.rooms?.[roomIndex];
+    if (!room || !Array.isArray(room.devices)) {
+      return;
+    }
+
+    const deviceCount = room.devices.length;
+    if (!deviceCount) {
+      return;
+    }
+
+    const safePriority = Math.max(
+      1,
+      Math.min(deviceCount, parseInt(requestedPriority, 10) || 1),
+    );
+    const [movedDevice] = room.devices.splice(deviceIndex, 1);
+    room.devices.splice(safePriority - 1, 0, movedDevice);
+    room.devices.forEach((device, index) => {
+      device.priority = index + 1;
+    });
+    this.config = this.normalizeConfig(this.config);
     this.render();
   }
 
@@ -353,9 +481,19 @@ class AGSPanel extends HTMLElement {
     }
 
     try {
+      const normalizedConfig = this.normalizeConfig(this.config);
+      const issues = this.getConfigIssues(normalizedConfig);
+      this.config = normalizedConfig;
+      if (issues.length) {
+        this.error = issues.join(" ");
+        this.render();
+        return;
+      }
+
+      this.error = "";
       await this.hass.callWS({
         type: "ags_service/config/save",
-        config: this.normalizeConfig(this.config),
+        config: normalizedConfig,
       });
       this.hass.callService("persistent_notification", "create", {
         title: "AGS Service",
@@ -434,13 +572,6 @@ class AGSPanel extends HTMLElement {
             data-value="${encodedValue}"
             include-domains='${encodedDomains}'
           ></ha-entity-picker>
-          <input
-            type="text"
-            class="entity-fallback"
-            placeholder="Or enter entity_id manually"
-            value="${encodedValue}"
-            onchange="this.getRootNode().host.updateConfig('${this.escapeHtml(path)}', this.value)"
-          />
         </div>
         ${helper}
       </div>
@@ -485,6 +616,7 @@ class AGSPanel extends HTMLElement {
       added += 1;
     });
 
+    this.config = this.normalizeConfig(this.config);
     this.render();
     return added;
   }
@@ -1005,20 +1137,20 @@ class AGSPanel extends HTMLElement {
           <div style="margin-top:24px; padding-top:24px; border-top:1px solid var(--ags-border);">
             <div class="grid cols-2" style="gap:20px;">
               ${this.renderEntityField("Media Player Entity", `rooms.${roomIndex}.devices.${deviceIndex}.device_id`, device.device_id, ["media_player"])}
-              <div class="grid cols-2" style="gap:16px;">
-                <div>
-                  <label>Device Type</label>
-                  <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.device_type', this.value); this.getRootNode().host.render();">
+                <div class="grid cols-2" style="gap:16px;">
+                  <div>
+                    <label>Device Type</label>
+                    <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.device_type', this.value); this.getRootNode().host.render();">
                     <option value="speaker" ${device.device_type === "speaker" ? "selected" : ""}>Speaker</option>
                     <option value="tv" ${device.device_type === "tv" ? "selected" : ""}>Television</option>
                   </select>
                 </div>
-                <div>
-                  <label>Election Priority</label>
-                  <input type="number" min="1" value="${device.priority}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.priority', parseInt(this.value, 10) || 1)" />
+                  <div>
+                    <label>Election Priority</label>
+                  <input type="number" min="1" max="${this.config.rooms[roomIndex].devices.length}" value="${device.priority}" onchange="this.getRootNode().host.setDevicePriority(${roomIndex}, ${deviceIndex}, this.value)" />
+                  </div>
                 </div>
               </div>
-            </div>
 
             ${device.device_type === "tv" ? `
               <div class="grid cols-2" style="margin-top:20px; gap:20px;">
@@ -1160,19 +1292,19 @@ class AGSPanel extends HTMLElement {
               </div>
               <button class="secondary-btn" onclick="this.getRootNode().host.browseBack()">${this.browsePath.length ? "Back" : "Clear"}</button>
             </div>
-            <div class="grid cols-2" style="gap:12px;">
+            <div class="browse-results-grid">
               ${this.browseItems.map((item, index) => `
-                <div class="list-select" style="margin-bottom:0; padding:10px 14px; border-radius:12px;" onclick="this.getRootNode().host.openBrowseItem(${index})">
-                  <div style="display:flex; align-items:center; gap:12px; overflow:hidden;">
-                    ${item.thumbnail ? `<img src="${item.thumbnail}" style="width:40px; height:40px; border-radius:6px; object-fit:cover;" />` : `
-                      <div style="width:40px; height:40px; border-radius:6px; background:rgba(var(--rgb-primary-text-color), 0.05); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <div class="browse-result-card" onclick="this.getRootNode().host.openBrowseItem(${index})">
+                  <div class="browse-result-art">
+                    ${item.thumbnail ? `<img src="${this.resolveMediaUrl(item.thumbnail)}" style="width:100%; height:100%; object-fit:cover;" />` : `
+                      <div style="width:100%; height:100%; background:rgba(var(--rgb-primary-text-color), 0.05); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                         <ha-icon icon="${item.can_expand ? 'mdi:folder' : 'mdi:music-note'}"></ha-icon>
                       </div>
                     `}
-                    <div style="overflow:hidden;">
-                      <div style="font-weight:700; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
-                      <div class="section-help" style="font-size:0.75rem;">${this.escapeHtml(item.media_content_type || "media")}</div>
-                    </div>
+                  </div>
+                  <div class="browse-result-copy">
+                    <div style="font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
+                    <div class="section-help" style="font-size:0.78rem;">${this.escapeHtml(item.media_content_type || "media")}</div>
                   </div>
                   <button class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0;">${item.can_expand ? "Open" : "Add"}</button>
                 </div>
@@ -1212,7 +1344,7 @@ class AGSPanel extends HTMLElement {
                 </div>
                 <label class="list-select" style="margin:0; border:none; background:rgba(var(--rgb-primary-text-color), 0.03); padding:8px 16px;">
                   <span style="font-size:0.8rem; font-weight:700;">Set Default</span>
-                  <input type="checkbox" style="width:18px; height:18px;" ${source.source_default ? "checked" : ""} onchange="this.getRootNode().host.config.Sources.forEach((s, idx) => { s.source_default = idx === ${index}; }); this.getRootNode().host.render();" />
+                  <input type="checkbox" style="width:18px; height:18px;" ${source.source_default ? "checked" : ""} onchange="this.getRootNode().host.setSourceDefault(${index}, this.checked)" />
                 </label>
               </div>
             </div>
@@ -1384,12 +1516,19 @@ class AGSPanel extends HTMLElement {
         :host {
           display: block;
           min-height: 100vh;
-          background: var(--primary-background-color, #1a1a1a);
-          color: var(--primary-text-color, #ffffff);
+          background:
+            radial-gradient(circle at top left, rgba(var(--rgb-primary-color), 0.14), transparent 32%),
+            radial-gradient(circle at top right, rgba(var(--rgb-primary-color), 0.08), transparent 28%),
+            var(--primary-background-color, #f4f6fb);
+          color: var(--primary-text-color, #111827);
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
           --ags-primary: var(--primary-color, #ff9800);
-          --ags-glass: rgba(var(--rgb-card-background-color), 0.4);
+          --ags-surface: rgba(var(--rgb-card-background-color), 0.82);
+          --ags-surface-soft: rgba(var(--rgb-card-background-color), 0.64);
+          --ags-glass: rgba(var(--rgb-card-background-color), 0.5);
           --ags-border: rgba(var(--rgb-primary-text-color), 0.12);
+          --ags-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
+          --ags-muted: var(--secondary-text-color, #6b7280);
         }
 
         * {
@@ -1425,7 +1564,7 @@ class AGSPanel extends HTMLElement {
 
         .title-block p {
           margin: 8px 0 0;
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
           font-size: 1rem;
           font-weight: 600;
           max-width: 600px;
@@ -1537,12 +1676,12 @@ class AGSPanel extends HTMLElement {
         }
 
         .panel-card {
-          background: rgba(var(--rgb-card-background-color), 0.8);
+          background: var(--ags-surface);
           backdrop-filter: blur(20px);
           border: 1px solid var(--ags-border);
           border-radius: 28px;
           padding: 32px;
-          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+          box-shadow: var(--ags-shadow);
         }
 
         .grid {
@@ -1603,7 +1742,7 @@ class AGSPanel extends HTMLElement {
         }
 
         .metric-label {
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
           font-size: 0.85rem;
           font-weight: 700;
           text-transform: uppercase;
@@ -1629,7 +1768,7 @@ class AGSPanel extends HTMLElement {
 
         .status-off {
           background: rgba(var(--rgb-primary-text-color), 0.05);
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
           border-color: var(--ags-border);
         }
 
@@ -1663,7 +1802,7 @@ class AGSPanel extends HTMLElement {
           font-weight: 800;
           font-size: 0.8rem;
           text-transform: uppercase;
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
         }
 
         .mono {
@@ -1718,14 +1857,14 @@ class AGSPanel extends HTMLElement {
         }
 
         .section-help {
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
           font-size: 0.9rem;
           font-weight: 500;
         }
 
         input, select {
           width: 100%;
-          background: rgba(var(--rgb-primary-text-color), 0.03);
+          background: var(--ags-surface-soft);
           border: 1px solid var(--ags-border);
           border-radius: 12px;
           padding: 12px 16px;
@@ -1754,7 +1893,7 @@ class AGSPanel extends HTMLElement {
           font-size: 0.85rem;
           font-weight: 800;
           text-transform: uppercase;
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
         }
 
         .entity-field {
@@ -1768,16 +1907,62 @@ class AGSPanel extends HTMLElement {
           width: 100%;
         }
 
-        /* Hide the manual text fallback — ha-entity-picker handles custom entry via allowCustomEntity */
-        .entity-fallback {
-          display: none;
-        }
-
         .entity-helper {
           margin-top: 6px;
           font-size: 0.8rem;
-          color: var(--secondary-text-color);
+          color: var(--ags-muted);
           font-weight: 500;
+        }
+
+        .loading,
+        .error {
+          text-align: center;
+          font-weight: 700;
+        }
+
+        .error {
+          color: var(--error-color);
+          border-color: rgba(var(--rgb-error-color), 0.24);
+          background: rgba(var(--rgb-error-color), 0.08);
+        }
+
+        .browse-results-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 14px;
+        }
+
+        .browse-result-card {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          padding: 12px;
+          border-radius: 18px;
+          background: var(--ags-surface-soft);
+          border: 1px solid var(--ags-border);
+          cursor: pointer;
+          transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .browse-result-card:hover {
+          transform: translateY(-2px);
+          border-color: rgba(var(--rgb-primary-color), 0.28);
+        }
+
+        .browse-result-art {
+          aspect-ratio: 1.1 / 1;
+          overflow: hidden;
+          border-radius: 16px;
+          background:
+            linear-gradient(140deg, rgba(var(--rgb-primary-color), 0.18), rgba(var(--rgb-primary-text-color), 0.04)),
+            rgba(var(--rgb-primary-text-color), 0.04);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .browse-result-copy {
+          min-width: 0;
         }
 
         .log-view {

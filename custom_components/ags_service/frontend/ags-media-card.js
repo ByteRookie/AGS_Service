@@ -15,14 +15,19 @@ class AgsMediaCard extends HTMLElement {
   setConfig(config) {
     this._config = { entity: "media_player.ags_media_player", ...config };
     this._section = this._config.start_section || "player";
+    this.render();
   }
 
   getCardSize() { return 6; }
 
   set hass(hass) {
+    const hadBrowseItems = this._browseItems.length > 0;
     this._hass = hass;
-    if (this._config && !this.loading) {
-      this.initData();
+    if (this._config) {
+      this.render();
+      if (this._section === "browse" && !hadBrowseItems && !this._loadingBrowse) {
+        this.browseMedia();
+      }
     }
   }
 
@@ -40,6 +45,31 @@ class AgsMediaCard extends HTMLElement {
 
   escapeHtml(v) { return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   toArray(v) { return Array.isArray(v) ? v : []; }
+
+  resolveMediaUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^(https?:|data:)/i.test(raw)) return raw;
+    if (raw.startsWith("//")) return `${window.location.protocol}${raw}`;
+    if (typeof this._hass?.hassUrl === "function") {
+      return this._hass.hassUrl(raw.startsWith("/") ? raw : `/${raw}`);
+    }
+    return raw;
+  }
+
+  getArtworkUrl(primary, fallback = null) {
+    const candidates = [
+      primary?.attributes?.entity_picture_local,
+      primary?.attributes?.entity_picture,
+      primary?.attributes?.media_image_url,
+      primary?.attributes?.media_image_local,
+      fallback?.attributes?.entity_picture_local,
+      fallback?.attributes?.entity_picture,
+      fallback?.attributes?.media_image_url,
+      fallback?.attributes?.media_image_local,
+    ];
+    return this.resolveMediaUrl(candidates.find((candidate) => candidate));
+  }
 
   formatTime(s) {
     const v = Math.max(0, Math.floor(Number(s) || 0));
@@ -138,17 +168,23 @@ class AgsMediaCard extends HTMLElement {
     const status = ags.attributes.ags_status;
     const isTv = status === "ON TV";
     const isPlaying = ["playing", "buffering"].includes(control?.state || ags.state);
-    const pic = control?.attributes?.entity_picture || ags.attributes?.entity_picture || "";
+    const pic = this.getArtworkUrl(control, ags);
     const title = isTv ? "Television Audio" : (control?.attributes?.media_title || "Nothing Playing");
     const subtitle = isTv ? (control?.attributes?.friendly_name || "TV Mode") : (control?.attributes?.media_artist || "Ready to Play");
     const duration = Number(control?.attributes?.media_duration || 0);
     const pos = this.getLiveMediaPosition(control || ags);
     const prog = duration > 0 ? (pos / duration) * 100 : 0;
+    const sourceLabel = ags.attributes.selected_source_name || ags.attributes.source || "Ready";
 
     return `
       <div class="player-view">
+        <div class="hero-strip">
+          <span class="hero-pill">${this.escapeHtml(sourceLabel)}</span>
+          <span class="hero-pill subtle">${this.escapeHtml(isTv ? "TV Session" : isPlaying ? "Live Playback" : "Standby")}</span>
+        </div>
         <div class="art-focal">
           <div class="art-stack ${isTv ? 'tv-gradient' : ''}">
+            <div class="art-aura"></div>
             ${pic && !isTv ? `<img class="main-art" src="${pic}" />` : `
               <div class="idle-art">
                 <ha-icon icon="${isTv ? 'mdi:television-classic' : 'mdi:music-note-plus'}"></ha-icon>
@@ -202,9 +238,16 @@ class AgsMediaCard extends HTMLElement {
 
   render() {
     const ags = this.getAgsPlayer();
-    if (!ags) return;
+    if (!ags) {
+      this.shadowRoot.innerHTML = `
+        <ha-card style="padding:24px; border-radius:24px;">
+          <div style="font-weight:700;">AGS media player is unavailable.</div>
+        </ha-card>
+      `;
+      return;
+    }
     const ctrl = this.getControlPlayer();
-    const pic = ctrl?.attributes?.entity_picture || ags.attributes?.entity_picture || "";
+    const pic = this.getArtworkUrl(ctrl, ags);
     const active = this.toArray(ags.attributes.active_rooms);
     const agsSources = this.toArray(ags.attributes.ags_sources);
     const nativeSources = this.toArray(ags.attributes.source_list);
@@ -220,45 +263,52 @@ class AgsMediaCard extends HTMLElement {
       <style>
         :host {
           --primary: var(--primary-color, #ff9800);
-          --card-bg: var(--ha-card-background, var(--card-background-color, #fff));
+          --card-bg: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.88);
+          --card-bg-strong: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.96);
           --text: var(--primary-text-color, #212121);
           --text-sec: var(--secondary-text-color, #6b6b6b);
           --divider: var(--divider-color, rgba(0,0,0,0.12));
-          --glass: color-mix(in srgb, var(--primary-text-color) 10%, transparent);
-          --glass-heavy: color-mix(in srgb, var(--primary-text-color) 20%, transparent);
+          --glass: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.44);
+          --glass-heavy: rgba(var(--rgb-card-background-color, 255, 255, 255), 0.66);
+          --outline: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.12);
+          --shadow: 0 24px 48px rgba(15, 23, 42, 0.22);
         }
         .backdrop {
           filter: blur(40px) saturate(1.4);
-          opacity: 0.18;
+          opacity: 0.22;
           background-size: cover;
           background-position: center;
         }
         
-        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: var(--card-bg); color: var(--text); max-width: 400px; margin: 0 auto; aspect-ratio: 0.7 / 1; display: flex; flex-direction: column; border: 1px solid var(--divider); box-shadow: var(--ha-card-box-shadow, 0 4px 20px rgba(0,0,0,0.1)); transition: all 0.3s; }
+        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, rgba(var(--rgb-primary-color), 0.08), transparent 28%), var(--card-bg-strong); color: var(--text); max-width: 420px; margin: 0 auto; aspect-ratio: 0.72 / 1; display: flex; flex-direction: column; border: 1px solid var(--outline); box-shadow: var(--ha-card-box-shadow, var(--shadow)); transition: all 0.3s; }
         .backdrop { position: absolute; inset: -20px; background-image: ${pic ? `url(${pic})` : 'none'}; background-size: cover; background-position: center; z-index: 0; transition: 0.8s; }
-        .surface { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: linear-gradient(180deg, transparent 0%, var(--card-bg) 85%); }
+        .surface { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: linear-gradient(180deg, rgba(var(--rgb-card-background-color, 255, 255, 255), 0.18) 0%, var(--card-bg-strong) 78%); }
         .card-header { padding: 16px 20px 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
         .header-picker-wrap { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; position: relative; }
-        .source-mini-btn { display: flex; align-items:center; gap:6px; height: 28px; padding: 0 10px; border-radius: 8px; background: var(--glass-heavy); border: 1px solid var(--divider); color: var(--primary); font-weight: 900; font-size: 0.75rem; cursor: pointer; max-width: 130px; overflow: hidden; }
+        .source-mini-btn { display: flex; align-items:center; gap:6px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--glass-heavy); border: 1px solid var(--outline); color: var(--primary); font-weight: 900; font-size: 0.75rem; cursor: pointer; max-width: 150px; overflow: hidden; }
         .source-mini-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .header-rooms { font-size: 0.8rem; font-weight: 800; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
         .header-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-        .section-body { flex: 1; padding: 12px 20px; overflow-y: auto; scrollbar-width: none; position: relative; }
+        .section-body { flex: 1; padding: 12px 20px 20px; overflow-y: auto; scrollbar-width: none; position: relative; }
         .section-body::-webkit-scrollbar { display: none; }
-        .list-card { background: var(--glass); backdrop-filter: blur(10px); border: 1px solid var(--divider); border-radius: 16px; transition: 0.2s; }
+        .list-card { background: var(--glass); backdrop-filter: blur(10px); border: 1px solid var(--outline); border-radius: 18px; transition: 0.2s; }
         .master-vol-card { padding: 16px; background: var(--primary); color: #fff; border: none; box-shadow: 0 8px 16px rgba(var(--rgb-primary-color), 0.3); }
         .master-vol-card ha-icon { color: #fff; }
         .master-vol-card input[type=range] { accent-color: #fff; }
-        .art-focal { display: flex; justify-content: center; margin-bottom: 12px; }
-        .art-stack { width: 160px; height: 160px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid var(--divider); background: var(--glass-heavy); }
+        .hero-strip { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+        .hero-pill { padding: 6px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 900; letter-spacing: 0.02em; background: rgba(var(--rgb-primary-color), 0.12); color: var(--primary); border: 1px solid rgba(var(--rgb-primary-color), 0.18); }
+        .hero-pill.subtle { background: var(--glass); color: var(--text-sec); border-color: var(--outline); }
+        .art-focal { display: flex; justify-content: center; margin-bottom: 16px; }
+        .art-stack { position: relative; width: 188px; height: 188px; border-radius: 28px; overflow: hidden; box-shadow: 0 18px 40px rgba(15, 23, 42, 0.26); border: 1px solid var(--outline); background: linear-gradient(160deg, rgba(var(--rgb-primary-color), 0.16), rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.06)); }
+        .art-aura { position: absolute; inset: auto -10% -30% -10%; height: 55%; background: radial-gradient(circle at center, rgba(var(--rgb-primary-color), 0.34), transparent 70%); pointer-events: none; z-index: 0; }
         .tv-gradient { background: linear-gradient(135deg, #1a237e, #4a148c); display: flex; align-items: center; justify-content: center; }
-        .main-art { width: 100%; height: 100%; object-fit: cover; }
-        .idle-art { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text); opacity: 0.2; }
+        .main-art { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
+        .idle-art { position: relative; z-index: 1; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text); opacity: 0.22; }
         .idle-art ha-icon { --mdc-icon-size: 64px; }
-        .track-info { text-align: center; margin-bottom: 12px; padding: 0 10px; }
-        .track-title { font-size: 1.25rem; font-weight: 900; letter-spacing: -0.02em; margin-bottom: 2px; color: var(--text); }
-        .track-subtitle { font-size: 0.85rem; color: var(--text-sec); font-weight: 600; }
-        .playback-controls { padding: 16px; background: var(--glass); border-radius: 20px; }
+        .track-info { text-align: center; margin-bottom: 14px; padding: 0 10px; }
+        .track-title { font-size: 1.35rem; font-weight: 900; letter-spacing: -0.03em; margin-bottom: 4px; color: var(--text); }
+        .track-subtitle { font-size: 0.9rem; color: var(--text-sec); font-weight: 700; }
+        .playback-controls { padding: 16px; background: var(--glass); border-radius: 24px; border: 1px solid var(--outline); }
         .progress-bar { height: 4px; background: rgba(var(--rgb-primary-text-color, 0,0,0), 0.1); border-radius: 2px; overflow: hidden; }
         .progress-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
         .time-meta { display: flex; justify-content: space-between; font-size: 0.65rem; margin-top: 4px; color: var(--text-sec); font-weight: 700; }
@@ -270,13 +320,16 @@ class AgsMediaCard extends HTMLElement {
         .vol-label-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-weight: 800; }
         .volume-inline { display: flex; align-items: center; gap: 8px; }
         input[type=range] { flex: 1; accent-color: var(--primary); height: 4px; cursor: pointer; }
-        .footer { display: flex; justify-content: space-around; padding: 8px 16px 24px; background: var(--glass); border-top: 1px solid var(--divider); }
+        .footer { display: flex; justify-content: space-around; padding: 10px 16px 24px; background: var(--glass); border-top: 1px solid var(--outline); }
         .footer-btn { background: none; border: none; color: var(--text); opacity: 0.3; cursor: pointer; transition: 0.2s; padding: 10px; }
         .footer-btn.active { opacity: 1; color: var(--primary); transform: translateY(-2px); }
-        .browse-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; border-radius: 12px; }
+        .browse-grid, .fav-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
+        .browse-item { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 0; cursor: pointer; border-radius: 18px; }
         .browse-item:hover { background: var(--glass-heavy); }
-        .browse-item img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; }
-        .browse-label { font-weight: 700; font-size: 0.9rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+        .browse-art, .fav-art-shell { position: relative; aspect-ratio: 1 / 1; border-radius: 18px; overflow: hidden; border: 1px solid var(--outline); background: linear-gradient(160deg, rgba(var(--rgb-primary-color), 0.18), rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.05)); display:flex; align-items:center; justify-content:center; }
+        .browse-art img, .fav-art-shell img { width: 100%; height: 100%; object-fit: cover; }
+        .browse-label { font-weight: 800; font-size: 0.92rem; line-height: 1.2; min-height: 2.2em; color: var(--text); }
+        .browse-meta { font-size: 0.74rem; color: var(--text-sec); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
         .power-btn.on { color: var(--primary); opacity: 1; }
         .loading-spin { text-align: center; padding: 40px; }
         .browse-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; color: var(--text-sec); font-size: 0.9rem; font-weight: 600; text-align: center; }
@@ -285,10 +338,14 @@ class AgsMediaCard extends HTMLElement {
         .off-icon-wrap { width: 80px; height: 80px; border-radius: 50%; background: var(--glass-heavy); display: flex; align-items: center; justify-content: center; color: var(--text-sec); opacity: 0.5; }
         .off-text { font-size: 1.1rem; font-weight: 800; color: var(--text-sec); }
         .turn-on-btn { width: auto; height: auto; padding: 12px 24px; border-radius: 12px; display: flex; align-items: center; gap: 10px; font-weight: 800; }
-        .source-menu { position: absolute; top: 50px; left: 20px; right: 20px; background: var(--card-bg); border: 1px solid var(--primary); border-radius: 16px; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.4); padding: 8px; max-height: 250px; overflow-y: auto; }
+        .source-menu { position: absolute; top: 50px; left: 20px; right: 20px; background: var(--card-bg-strong); border: 1px solid var(--primary); border-radius: 16px; z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.24); padding: 8px; max-height: 250px; overflow-y: auto; }
         .source-menu-item { padding: 12px 16px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem; transition: 0.2s; border-bottom: 1px solid var(--divider); }
         .source-menu-item:hover { background: var(--glass-heavy); color: var(--primary); }
         .source-menu-item:last-child { border-bottom: none; }
+        @media (max-width: 420px) {
+          .browse-grid, .fav-grid { grid-template-columns: 1fr; }
+          ha-card { max-width: 100%; }
+        }
       </style>
       <ha-card>
         <div class="backdrop"></div>
@@ -334,10 +391,15 @@ class AgsMediaCard extends HTMLElement {
 
   renderFavorites(ags) {
     const s = this.toArray(ags.attributes.ags_sources);
-    return `<div class="favorites-view"><div class="view-title">Favorites</div><div class="fav-grid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">${s.map(f => `
-      <div class="fav-item" style="text-align:center; cursor:pointer;" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${f.name}'})">
-        <div class="fav-art-shell" style="aspect-ratio:1; border-radius:12px; background:var(--glass-heavy); display:flex; align-items:center; justify-content:center; margin-bottom:4px; border:1px solid var(--divider);"><ha-icon icon="mdi:star" style="color:var(--primary);"></ha-icon></div>
-        <div style="font-size:0.65rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-sec);">${this.escapeHtml(f.name)}</div>
+    const activeSource = ags.attributes.selected_source_name || ags.attributes.source;
+    const currentArt = this.getArtworkUrl(this.getControlPlayer(), ags);
+    return `<div class="favorites-view"><div class="view-title">Favorites</div><div class="fav-grid">${s.map(f => `
+      <div class="browse-item list-card" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${f.name}'})">
+        <div class="fav-art-shell">
+          ${currentArt && f.name === activeSource ? `<img src="${currentArt}" />` : `<ha-icon icon="${f.default ? "mdi:star-four-points" : "mdi:music-circle"}" style="color:var(--primary); --mdc-icon-size: 44px;"></ha-icon>`}
+        </div>
+        <div class="browse-label">${this.escapeHtml(f.name)}</div>
+        <div class="browse-meta">${f.default ? "Default source" : this.escapeHtml((f.media_content_type || "media").replace(/_/g, " "))}</div>
       </div>`).join("")}</div></div>`;
   }
 
@@ -359,11 +421,13 @@ class AgsMediaCard extends HTMLElement {
     } else if (!this._browseItems.length) {
       content = '<div class="browse-empty"><ha-icon icon="mdi:music-off"></ha-icon><div>No items found</div></div>';
     } else {
-      content = `<div class="browse-list" style="display:flex; flex-direction:column; gap:6px;">${this._browseItems.map((i, idx) => `
+      content = `<div class="browse-grid">${this._browseItems.map((i, idx) => `
         <div class="list-card browse-item" onclick="this.getRootNode().host._handleBrowseClick(${idx})">
-          ${i.thumbnail ? `<img src="${i.thumbnail}" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:6px;object-fit:cover;flex-shrink:0;"/>` : `<ha-icon icon="${i.can_expand?'mdi:folder':'mdi:music-note'}" style="opacity:0.4;flex-shrink:0;"></ha-icon>`}
-          <div class="browse-label">${this.escapeHtml(i.title)}</div>
-          ${i.can_expand ? `<ha-icon icon="mdi:chevron-right" style="opacity:0.3; --mdc-icon-size: 18px; flex-shrink:0;"></ha-icon>` : ''}
+          <div class="browse-art">
+            ${i.thumbnail ? `<img src="${this.resolveMediaUrl(i.thumbnail)}" onerror="this.remove()" />` : `<ha-icon icon="${i.can_expand?'mdi:folder':'mdi:music-note'}" style="opacity:0.5; --mdc-icon-size: 44px;"></ha-icon>`}
+          </div>
+          <div class="browse-label">${this.escapeHtml(i.title || "Untitled")}</div>
+          <div class="browse-meta">${this.escapeHtml(i.media_content_type || (i.can_expand ? "folder" : "playable"))}</div>
         </div>`).join("")}</div>`;
     }
     return `<div class="browse-view">
@@ -380,6 +444,10 @@ class AgsMediaCard extends HTMLElement {
     window.dispatchEvent(new Event("location-changed", { bubbles: true, composed: true }));
   }
 }
-customElements.define("ags-media-card", AgsMediaCard);
+if (!customElements.get("ags-media-card")) {
+  customElements.define("ags-media-card", AgsMediaCard);
+}
 window.customCards = window.customCards || [];
-window.customCards.push({ type: "ags-media-card", name: "AGS Media Card", preview: true });
+if (!window.customCards.find((card) => card.type === "ags-media-card")) {
+  window.customCards.push({ type: "ags-media-card", name: "AGS Media Card", preview: true });
+}

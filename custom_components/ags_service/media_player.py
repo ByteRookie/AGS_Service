@@ -748,20 +748,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if target_entity_id and target_entity_id != self.entity_id and target_entity_id != "none":
             try:
-                # Use the service call which is more reliable for proxying
-                result = await self.hass.services.async_call(
-                    "media_player",
-                    "browse_media",
-                    {
-                        "entity_id": target_entity_id,
-                        "media_content_type": media_content_type,
-                        "media_content_id": media_content_id,
-                    },
-                    blocking=True,
-                    return_response=True,
-                )
-                if result:
-                    return result
+                # browse_media is not a HA service — call the entity method directly
+                # via the entity component so integrations like Sonos/Spotify work correctly.
+                component = self.hass.data.get("entity_components", {}).get("media_player")
+                if component:
+                    target_entity = component.get_entity(target_entity_id)
+                    if target_entity and hasattr(target_entity, "async_browse_media"):
+                        return await target_entity.async_browse_media(
+                            media_content_type, media_content_id
+                        )
             except Exception as err:
                 _LOGGER.error("Error proxying browse_media to %s: %s", target_entity_id, err)
 
