@@ -136,6 +136,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
+        self.browsing_fallback_speaker = self.hass.data.get('browsing_fallback_speaker', None)
 
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
@@ -596,7 +597,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or [],
             "primary_speaker_room": self.primary_speaker_room,
             "control_device_id": self.primary_speaker_entity_id,
-            "browse_entity_id": self.primary_speaker_entity_id or self.primary_speaker or self.entity_id,
+            "browse_entity_id": self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else (self.preferred_primary_speaker if self.preferred_primary_speaker and self.preferred_primary_speaker != "none" else self.browsing_fallback_speaker),
             "current_tv_mode": self.hass.data.get("current_tv_mode"),
             "ags_sources": self._build_source_details(),
             "logic_flags": self._build_logic_flags(),
@@ -743,21 +744,26 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Proxy media browsing through the current AGS control speaker."""
-        target_entity_id = self.primary_speaker_entity_id or self.primary_speaker
+        target_entity_id = self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else (self.preferred_primary_speaker if self.preferred_primary_speaker and self.preferred_primary_speaker != "none" else self.browsing_fallback_speaker)
 
-        if target_entity_id and target_entity_id != self.entity_id:
-            payload = {"entity_id": target_entity_id}
-            if media_content_type is not None and media_content_id is not None:
-                payload["media_content_type"] = media_content_type
-                payload["media_content_id"] = media_content_id
-
-            return await self.hass.services.async_call(
-                "media_player",
-                "browse_media",
-                payload,
-                blocking=True,
-                return_response=True,
-            )
+        if target_entity_id and target_entity_id != self.entity_id and target_entity_id != "none":
+            try:
+                # Use the service call which is more reliable for proxying
+                result = await self.hass.services.async_call(
+                    "media_player",
+                    "browse_media",
+                    {
+                        "entity_id": target_entity_id,
+                        "media_content_type": media_content_type,
+                        "media_content_id": media_content_id,
+                    },
+                    blocking=True,
+                    return_response=True,
+                )
+                if result:
+                    return result
+            except Exception as err:
+                _LOGGER.error("Error proxying browse_media to %s: %s", target_entity_id, err)
 
         from homeassistant.components import media_source
         return await media_source.async_browse_media(
@@ -869,7 +875,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if is_global_source:
             self.hass.data["ags_media_player_source"] = source
-            actions_enabled = self.hass.data.get("switch.ags_actions", True)
+            state_obj = self.hass.states.get("switch.ags_actions")
+            actions_enabled = state_obj.state == "on" if state_obj else True
             if actions_enabled:
                 await ags_select_source(
                     self.ags_config,

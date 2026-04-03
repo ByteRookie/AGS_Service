@@ -670,21 +670,14 @@ class AGSPanel extends HTMLElement {
   renderDiagnostics(agsState) {
     const attributes = agsState?.attributes || {};
     const activeRooms = Array.isArray(attributes.active_rooms) ? attributes.active_rooms : [];
-    const activeSpeakers = Array.isArray(attributes.active_speakers)
-      ? attributes.active_speakers
-      : [];
-    const configuredRooms = Array.isArray(attributes.configured_rooms)
-      ? attributes.configured_rooms
-      : [];
-    const roomDiagnostics = Array.isArray(attributes.room_diagnostics)
-      ? attributes.room_diagnostics
-      : [];
+    const activeSpeakers = Array.isArray(attributes.active_speakers) ? attributes.active_speakers : [];
+    const configuredRooms = Array.isArray(attributes.configured_rooms) ? attributes.configured_rooms : [];
+    const roomDiagnostics = Array.isArray(attributes.room_diagnostics) ? attributes.room_diagnostics : [];
     const logicFlags = Array.isArray(attributes.logic_flags) ? attributes.logic_flags : [];
-    const speakerCandidates = Array.isArray(attributes.speaker_candidates)
-      ? attributes.speaker_candidates
-      : [];
-    const master = attributes.primary_speaker || "No primary speaker";
-    const dynamicTitle = attributes.dynamic_title || "AGS Media System";
+    const speakerCandidates = Array.isArray(attributes.speaker_candidates) ? attributes.speaker_candidates : [];
+    const master = attributes.primary_speaker || "None";
+    const dynamicTitle = attributes.dynamic_title || "AGS System";
+
     const includedCount = roomDiagnostics.filter((room) => room.included).length;
     const skippedCount = roomDiagnostics.filter((room) => room.state === "skipped").length;
     const blockedCount = roomDiagnostics.filter((room) => room.state === "blocked").length;
@@ -693,193 +686,124 @@ class AGSPanel extends HTMLElement {
     return `
       <div class="grid cols-2">
         <section class="panel-card hero-card">
-          <div class="eyebrow">Diagnostics</div>
-          <div class="hero-line">
+          <div class="eyebrow">Overview</div>
+          <div class="card-head" style="margin-bottom:12px;">
+            <h3 style="font-size:1.2rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(dynamicTitle)}</h3>
             ${this.renderStatusPill(attributes.ags_status)}
-            <span class="hero-title">${this.escapeHtml(dynamicTitle)}</span>
           </div>
-          <div class="metric-grid">
-            <div class="metric-card">
-              <div class="metric-label">Primary Speaker</div>
-              <div class="metric-value">${this.escapeHtml(master)}</div>
+          <div class="metric-grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));">
+            <div class="metric-card" style="padding:12px;">
+              <div class="metric-label" style="font-size:0.7rem;">Primary</div>
+              <div class="metric-value" style="font-size:0.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${this.escapeHtml(master.split('.').pop() || "None")}</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Active Rooms</div>
-              <div class="metric-value">${activeRooms.length}</div>
+            <div class="metric-card" style="padding:12px;">
+              <div class="metric-label" style="font-size:0.7rem;">Active</div>
+              <div class="metric-value" style="font-size:1.1rem;">${activeRooms.length}</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Grouped Speakers</div>
-              <div class="metric-value">${activeSpeakers.length}</div>
+            <div class="metric-card" style="padding:12px;">
+              <div class="metric-label" style="font-size:0.7rem;">Grouped</div>
+              <div class="metric-value" style="font-size:1.1rem;">${activeSpeakers.length}</div>
             </div>
-            <div class="metric-card">
-              <div class="metric-label">Configured Rooms</div>
-              <div class="metric-value">${configuredRooms.length}</div>
+            <div class="metric-card" style="padding:12px;">
+              <div class="metric-label" style="font-size:0.7rem;">Total</div>
+              <div class="metric-value" style="font-size:1.1rem;">${configuredRooms.length}</div>
             </div>
-          </div>
-          <div class="chip-row">
-            ${activeRooms.length
-              ? activeRooms
-                  .map((room) => `<span class="chip">${this.escapeHtml(room)}</span>`)
-                  .join("")
-              : '<span class="muted">No rooms are currently active.</span>'}
           </div>
         </section>
 
         <section class="panel-card">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Selection</div>
-              <h3>Current primary and active scope</h3>
-            </div>
-          </div>
-          <div class="stack">
-            <div class="logic-flag-card">
-              <div class="logic-flag-head">
-                <span class="list-title">Primary speaker</span>
-                ${this.renderTonePill(master, master && master !== "none" ? "good" : "warn")}
+          <div class="eyebrow">Logic State</div>
+          <div class="stack" style="margin-top:12px; gap:8px;">
+            ${logicFlags.map(flag => `
+              <div class="device-card" style="padding:8px 16px; margin:0; border-radius:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                  <div style="font-weight:800; font-size:0.85rem; white-space:nowrap;">${this.escapeHtml(flag.label)}</div>
+                  <div style="display:flex; align-items:center; gap:8px; overflow:hidden;">
+                    <span style="font-weight:800; color:var(--ags-primary); font-size:0.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(flag.value)}</span>
+                    ${this.renderTonePill(flag.value, flag.tone)}
+                  </div>
+                </div>
               </div>
-              <div class="list-subtitle">AGS currently routes control through the selected master device.</div>
-            </div>
-            <div class="logic-flag-card">
-              <div class="logic-flag-head">
-                <span class="list-title">Included rooms</span>
-                ${this.renderTonePill(String(includedCount), "info")}
-              </div>
-              <div class="list-subtitle">Active room switches that are currently participating in AGS.</div>
-            </div>
-            <div class="logic-flag-card">
-              <div class="logic-flag-head">
-                <span class="list-title">Grouped speakers</span>
-                ${this.renderTonePill(String(activeSpeakers.length), activeSpeakers.length ? "good" : "neutral")}
-              </div>
-              <div class="list-subtitle">Speakers actively being managed as part of the current session.</div>
-            </div>
+            `).join("")}
           </div>
         </section>
       </div>
 
-      <div class="grid cols-2 diagnostics-grid">
+      <div class="grid cols-2" style="margin-top:24px;">
         <section class="panel-card">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Room Logic</div>
-              <h3>Why rooms are included, skipped, or waiting</h3>
-            </div>
+          <div class="card-head" style="margin-bottom:12px;">
+            <div class="eyebrow">Room Logic</div>
           </div>
-          <div class="chip-row">
-            <span class="chip">${includedCount} included</span>
-            <span class="chip">${skippedCount} skipped</span>
-            <span class="chip">${blockedCount} blocked</span>
-            <span class="chip">${waitingCount} waiting</span>
+          <div style="display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap;">
+            <span class="status-pill active" style="font-size:0.6rem; padding:2px 6px;">${includedCount} IN</span>
+            <span class="status-pill info" style="font-size:0.6rem; padding:2px 6px;">${waitingCount} WAIT</span>
+            <span class="status-pill warn" style="font-size:0.6rem; padding:2px 6px;">${skippedCount} SKIP</span>
+            <span class="status-pill status-off" style="font-size:0.6rem; padding:2px 6px;">${blockedCount} BLOCK</span>
           </div>
-          <div class="stack">
-            ${roomDiagnostics.length
-              ? roomDiagnostics
-                  .map((room) => {
-                    return `
-                      <div class="diagnostic-card">
-                        <div>
-                          <div class="list-title">${this.escapeHtml(room.name)}</div>
-                          <div class="list-subtitle">${this.escapeHtml(room.reason)}</div>
-                        </div>
-                        <div class="diag-meta">
-                          ${this.renderTonePill(room.state, room.tone)}
-                          <span class="pill ${room.switch_on ? "pill-on" : ""}">
-                            ${room.switch_on ? "SWITCH ON" : "SWITCH OFF"}
-                          </span>
-                        </div>
-                        <div class="diagnostic-subrow">
-                          <span>${room.device_count} device(s)</span>
-                          <span>${room.speaker_count} speaker(s)</span>
-                          ${room.active_tv_names?.length ? `<span>TV: ${this.escapeHtml(room.active_tv_names.join(", "))}</span>` : ""}
-                        </div>
-                      </div>
-                    `;
-                  })
-                  .join("")
-              : '<div class="empty-state">Add your first room in the Rooms tab to start building the graph.</div>'}
+          <div class="stack" style="gap:8px;">
+            ${roomDiagnostics.map(r => `
+              <div class="device-card" style="padding:10px 14px; border-radius:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                  <div style="overflow:hidden;">
+                    <div style="font-weight:800; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(r.name)}</div>
+                    <div class="section-help" style="font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(r.reason)}</div>
+                  </div>
+                  ${this.renderTonePill(r.state, r.tone)}
+                </div>
+              </div>
+            `).join("")}
           </div>
         </section>
 
         <section class="panel-card">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Election Ranking</div>
-              <h3>Which speakers are winning and why</h3>
-            </div>
+          <div class="card-head" style="margin-bottom:12px;">
+            <div class="eyebrow">Election</div>
           </div>
-          <div class="stack">
-            ${speakerCandidates.length
-              ? speakerCandidates
-                  .map(
-                    (candidate) => `
-                      <div class="candidate-card ${candidate.selected ? "candidate-selected" : ""}">
-                        <div class="candidate-head">
-                          <div>
-                            <div class="list-title">#${candidate.rank} ${this.escapeHtml(candidate.friendly_name)}</div>
-                            <div class="list-subtitle">${this.escapeHtml(candidate.room)} · priority ${candidate.priority}</div>
-                          </div>
-                          <div class="diag-meta">
-                            ${candidate.selected ? this.renderTonePill("Primary", "good") : ""}
-                            ${candidate.preferred ? this.renderTonePill("Preferred", "info") : ""}
-                            ${this.renderTonePill(candidate.state, candidate.available ? "good" : "warn")}
-                          </div>
-                        </div>
-                        <div class="candidate-reason">${this.escapeHtml(candidate.reason)}</div>
-                        <div class="diagnostic-subrow">
-                          <span>${this.escapeHtml(candidate.entity_id)}</span>
-                          <span>Source: ${this.escapeHtml(candidate.source || "Unknown")}</span>
-                        </div>
-                      </div>
-                    `,
-                  )
-                  .join("")
-              : '<div class="empty-state">Turn on a room to see the speaker ranking and sticky-master logic.</div>'}
+          <div class="stack" style="gap:8px;">
+            ${speakerCandidates.slice(0,6).map(c => `
+              <div class="device-card ${c.selected ? 'candidate-selected' : ''}" style="padding:10px 14px; border-radius:12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                  <div style="display:flex; align-items:center; gap:8px; overflow:hidden;">
+                    <div style="width:20px; height:20px; border-radius:50%; background:${c.selected ? 'var(--ags-primary)' : 'rgba(var(--rgb-primary-text-color),0.1)'}; color:${c.selected ? '#fff' : 'inherit'}; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:900; flex-shrink:0;">${c.rank}</div>
+                    <div style="font-weight:800; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(c.friendly_name)}</div>
+                  </div>
+                  ${c.selected ? this.renderTonePill("Winner", "good") : this.renderTonePill(c.state, c.available ? "info" : "warn")}
+                </div>
+              </div>
+            `).join("")}
           </div>
         </section>
       </div>
 
-      <div class="grid">
-        <section class="panel-card">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Control Flags</div>
-              <h3>Home Assistant conditions affecting AGS right now</h3>
-            </div>
-          </div>
-          <div class="logic-flag-grid">
-            ${logicFlags.length
-              ? logicFlags
-                  .map(
-                    (flag) => `
-                      <div class="logic-flag-card">
-                        <div class="logic-flag-head">
-                          <span class="list-title">${this.escapeHtml(flag.label)}</span>
-                          ${this.renderTonePill(flag.value, flag.tone)}
-                        </div>
-                        <div class="list-subtitle">${this.escapeHtml(flag.detail)}</div>
-                      </div>
-                    `,
-                  )
-                  .join("")
-              : '<div class="empty-state">No live flags available.</div>'}
-          </div>
-        </section>
-      </div>
+      <section class="panel-card" style="margin-top:24px; padding:20px;">
+        <div class="card-head" style="margin-bottom:12px;">
+          <div class="eyebrow">Logs</div>
+          <button class="secondary-btn" style="padding:4px 12px; font-size:0.8rem;" onclick="this.getRootNode().host.fetchLogs()">Refresh</button>
+        </div>
+        <div class="log-view" style="max-height:200px; font-size:0.75rem; padding:12px;">
+          ${this.logs.slice(-20).map(line => `<div style="padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.05); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(line)}</div>`).join("")}
+        </div>
+      </section>
+    `;
+  }
 
-      <div class="grid">
-        <section class="panel-card">
-          <div class="card-head">
+  renderHome(agsState) {
+    const ags = this.getAgsState();
+    return `
+      <div class="grid home-grid" style="grid-template-columns: 400px 1fr; max-width: 1200px; margin: 0 auto; gap: 24px; align-items: stretch; height: calc(100vh - 240px);">
+
+        <section class="home-dashboard-wrap" style="display:flex; flex-direction:column; height: 100%;">
+          <ags-media-card class="embedded-dashboard" style="width:100%; flex: 1;"></ags-media-card>
+        </section>
+        <section class="panel-card" style="padding:20px; border-radius:24px; display:flex; flex-direction:column; height: 100%; overflow: hidden;">
+          <div class="card-head" style="margin-bottom:12px; flex-shrink: 0;">
             <div>
-              <div class="eyebrow">Service Logs</div>
-              <h3>Recent AGS activity</h3>
+              <div class="eyebrow">System Status</div>
+              <h3>Active Entities</h3>
             </div>
-            <button class="secondary-btn" onclick="this.getRootNode().host.fetchLogs()">Refresh</button>
           </div>
-          <div class="log-view full-width-log">
-            ${this.logs.length
-              ? this.logs.map((line) => `<div>${this.escapeHtml(line)}</div>`).join("")
-              : '<div class="muted">No AGS logs captured yet.</div>'}
+          <div style="flex: 1; overflow-y: auto; padding-right: 4px; scroll-behavior: smooth;">
+            ${this.renderEntitiesContent()}
           </div>
         </section>
       </div>
@@ -889,62 +813,37 @@ class AGSPanel extends HTMLElement {
   renderEntitiesContent() {
     const entities = Object.values(this.hass.states)
       .filter((entity) => {
-        if (entity.entity_id === "media_player.ags_media_player") {
-          return true;
-        }
-        if (entity.entity_id.includes("ags_")) {
-          return true;
-        }
+        if (entity.entity_id === "media_player.ags_media_player") return true;
+        if (entity.entity_id.includes("ags_")) return true;
         return entity.entity_id.startsWith("switch.") && entity.entity_id.endsWith("_media");
       })
       .sort((left, right) => left.entity_id.localeCompare(right.entity_id));
 
     return `
-      <section class="panel-card">
-        <div class="card-head">
-          <div>
-            <div class="eyebrow">Home Assistant Entities</div>
-            <h3>Everything AGS exposes</h3>
-          </div>
+      <div class="table">
+        <div class="table-row table-head" style="grid-template-columns: 1.5fr 1fr 80px; padding: 0 16px;">
+          <div>Entity ID</div>
+          <div>Status</div>
+          <div style="text-align:right;">Action</div>
         </div>
-        <div class="table">
-          <div class="table-row table-head">
-            <div>Entity</div>
-            <div>Friendly Name</div>
-            <div>State</div>
-            <div>Action</div>
-          </div>
-          ${entities
-            .map((entity) => {
-              const isToggle = entity.entity_id.startsWith("switch.");
-              return `
-                <div class="table-row">
-                  <div class="mono">${this.escapeHtml(entity.entity_id)}</div>
-                  <div>${this.escapeHtml(entity.attributes.friendly_name || entity.entity_id)}</div>
-                  <div>${this.renderStatusPill(entity.state)}</div>
-                  <div>
-                    ${
-                      isToggle
-                        ? `<button class="secondary-btn" onclick="this.getRootNode().host.hass.callService('switch', '${entity.state === "on" ? "turn_off" : "turn_on"}', { entity_id: '${entity.entity_id}' })">Toggle</button>`
-                        : '<span class="muted">Read only</span>'
-                    }
-                  </div>
+        ${entities
+          .map((entity) => {
+            const isToggle = entity.entity_id.startsWith("switch.");
+            return `
+              <div class="table-row" style="grid-template-columns: 1.5fr 1fr 80px; padding: 12px 16px; margin-bottom: 8px;">
+                <div class="mono" style="font-size:0.75rem; opacity:0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px;">${this.escapeHtml(entity.entity_id)}</div>
+                <div style="display: flex;">${this.renderStatusPill(entity.state)}</div>
+                <div style="text-align:right;">
+                  ${
+                    isToggle
+                      ? `<button class="secondary-btn" style="padding:4px 8px; font-size:0.7rem; min-width: 60px;" onclick="this.getRootNode().host.hass.callService('switch', '${entity.state === "on" ? "turn_off" : "turn_on"}', { entity_id: '${entity.entity_id}' })">Toggle</button>`
+                      : '<span class="muted" style="font-size:0.7rem;">Fixed</span>'
+                  }
                 </div>
-              `;
-            })
-            .join("")}
-        </div>
-      </section>
-    `;
-  }
-
-  renderHome(agsState) {
-    return `
-      <div class="grid cols-2 home-grid">
-        <section class="home-dashboard-wrap">
-          <ags-media-card class="embedded-dashboard"></ags-media-card>
-        </section>
-        ${this.renderEntitiesContent()}
+              </div>
+            `;
+          })
+          .join("")}
       </div>
     `;
   }
@@ -1078,97 +977,75 @@ class AGSPanel extends HTMLElement {
 
   renderDeviceCard(roomIndex, deviceIndex, device) {
     const stateObj = device.device_id ? this.hass.states[device.device_id] : null;
-    const stateText = stateObj?.state || "unconfigured";
-    const friendlyName =
-      stateObj?.attributes?.friendly_name || device.device_id || "Select an entity";
+    const stateText = stateObj?.state || "Unknown";
+    const friendlyName = stateObj?.attributes?.friendly_name || device.device_id || "Select Entity";
     const deviceKey = `${roomIndex}:${deviceIndex}`;
     const isEditing = this.editingDeviceKey === deviceKey;
 
     return `
-      <div class="device-card">
-        <div class="device-summary">
-          <div>
-            <div class="section-title">${this.escapeHtml(friendlyName)}</div>
-            <div class="section-help">${device.device_type === "tv" ? "TV device" : "Speaker device"} · priority ${device.priority || 1}</div>
+      <div class="device-card" style="border-radius:24px; background:rgba(var(--rgb-primary-text-color), 0.03);">
+        <div class="device-summary" style="align-items:center;">
+          <div style="display:flex; align-items:center; gap:16px;">
+            <div style="width:40px; height:40px; border-radius:10px; background:var(--ags-primary); display:flex; align-items:center; justify-content:center; color:#fff;">
+              <ha-icon icon="${device.device_type === 'tv' ? 'mdi:television' : 'mdi:speaker'}"></ha-icon>
+            </div>
+            <div>
+              <div class="section-title" style="margin:0; font-size:1.1rem;">${this.escapeHtml(friendlyName)}</div>
+              <div class="section-help">${this.escapeHtml(device.device_id)}</div>
+            </div>
           </div>
-          <div class="diag-meta">
+          <div class="header-meta">
             ${this.renderTonePill(stateText, stateObj ? "info" : "warn")}
-            <button class="secondary-btn" onclick="this.getRootNode().host.setEditingDevice('${deviceKey}')">${isEditing ? "Done" : "Edit"}</button>
-            <button class="danger-btn" onclick="this.getRootNode().host.removeAt('rooms.${roomIndex}.devices', ${deviceIndex})">Delete</button>
+            <button class="secondary-btn" style="padding:6px 14px; font-size:0.85rem;" onclick="this.getRootNode().host.setEditingDevice('${deviceKey}')">${isEditing ? "Close" : "Edit"}</button>
+            <button class="danger-btn" style="padding:6px 14px; font-size:0.85rem;" onclick="this.getRootNode().host.removeAt('rooms.${roomIndex}.devices', ${deviceIndex})">Remove</button>
           </div>
         </div>
 
-        <div class="diagnostic-subrow">
-          <span>${this.escapeHtml(device.device_id || "No entity selected")}</span>
-          ${stateObj?.attributes?.source ? `<span>Source: ${this.escapeHtml(stateObj.attributes.source)}</span>` : ""}
-        </div>
-
-        ${
-          isEditing
-            ? `
-              <div class="device-editor">
-                <div class="inline-grid auto-fit">
-                  ${this.renderEntityField(
-                    "Entity",
-                    `rooms.${roomIndex}.devices.${deviceIndex}.device_id`,
-                    device.device_id || "",
-                    ["media_player"],
-                  )}
-                  <div>
-                    <label>Type</label>
-                    <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.device_type', this.value); this.getRootNode().host.render();">
-                      <option value="speaker" ${device.device_type === "speaker" ? "selected" : ""}>Speaker</option>
-                      <option value="tv" ${device.device_type === "tv" ? "selected" : ""}>TV</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label>Priority</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value="${this.escapeHtml(device.priority || 1)}"
-                      onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.priority', parseInt(this.value, 10) || 1)"
-                    />
-                  </div>
+        ${isEditing ? `
+          <div style="margin-top:24px; padding-top:24px; border-top:1px solid var(--ags-border);">
+            <div class="grid cols-2" style="gap:20px;">
+              ${this.renderEntityField("Media Player Entity", `rooms.${roomIndex}.devices.${deviceIndex}.device_id`, device.device_id, ["media_player"])}
+              <div class="grid cols-2" style="gap:16px;">
+                <div>
+                  <label>Device Type</label>
+                  <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.device_type', this.value); this.getRootNode().host.render();">
+                    <option value="speaker" ${device.device_type === "speaker" ? "selected" : ""}>Speaker</option>
+                    <option value="tv" ${device.device_type === "tv" ? "selected" : ""}>Television</option>
+                  </select>
                 </div>
-
-                ${
-                  device.device_type === "tv"
-                    ? `
-                      <div class="inline-grid auto-fit">
-                        <div>
-                          <label>TV Mode</label>
-                          <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_mode', this.value)">
-                            <option value="tv_audio" ${device.tv_mode === "tv_audio" ? "selected" : ""}>TV Audio</option>
-                            <option value="no_music" ${device.tv_mode === "no_music" ? "selected" : ""}>No Music</option>
-                          </select>
-                        </div>
-                        ${this.renderEntityField(
-                          "Default OTT Player",
-                          `rooms.${roomIndex}.devices.${deviceIndex}.ott_device`,
-                          device.ott_device || "",
-                          ["media_player"],
-                        )}
-                      </div>
-                      ${this.renderOttMappings(roomIndex, deviceIndex, device)}
-                    `
-                    : ""
-                }
-
-                ${this.renderOverrides(roomIndex, deviceIndex, device)}
-
-                <div class="nested-section">
-                  <label>Legacy Auto-Switch Matcher</label>
-                  <input
-                    type="text"
-                    value="${this.escapeHtml(device.override_content || "")}"
-                    onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)"
-                  />
+                <div>
+                  <label>Election Priority</label>
+                  <input type="number" min="1" value="${device.priority}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.priority', parseInt(this.value, 10) || 1)" />
                 </div>
               </div>
-            `
-            : ""
-        }
+            </div>
+
+            ${device.device_type === "tv" ? `
+              <div class="grid cols-2" style="margin-top:20px; gap:20px;">
+                <div>
+                  <label>TV Behavior</label>
+                  <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_mode', this.value)">
+                    <option value="tv_audio" ${device.tv_mode === "tv_audio" ? "selected" : ""}>TV Audio (Include Room)</option>
+                    <option value="no_music" ${device.tv_mode === "no_music" ? "selected" : ""}>No Music (Isolate Room)</option>
+                  </select>
+                </div>
+                ${this.renderEntityField("Target OTT Player", `rooms.${roomIndex}.devices.${deviceIndex}.ott_device`, device.ott_device, ["media_player"], { helper: "Default player for this TV." })}
+              </div>
+              <div style="margin-top:20px;">
+                ${this.renderOttMappings(roomIndex, deviceIndex, device)}
+              </div>
+            ` : ""}
+
+            <div style="margin-top:24px;">
+              ${this.renderOverrides(roomIndex, deviceIndex, device)}
+            </div>
+
+            <div style="margin-top:24px;">
+              <label>Custom Matcher (Legacy)</label>
+              <input type="text" placeholder="Title/Source keyword to trigger override" value="${this.escapeHtml(device.override_content || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)" />
+            </div>
+          </div>
+        ` : ""}
       </div>
     `;
   }
@@ -1179,13 +1056,9 @@ class AGSPanel extends HTMLElement {
 
     return `
       <div class="room-layout">
-        <aside class="panel-card room-list">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Rooms</div>
-              <h3>Group and routing layout</h3>
-            </div>
-          </div>
+        <aside class="panel-card" style="padding:24px;">
+          <div class="eyebrow">House Map</div>
+          <h3 style="margin-bottom:20px;">Rooms</h3>
           <div class="stack">
             ${this.config.rooms.length
               ? this.config.rooms
@@ -1196,29 +1069,29 @@ class AGSPanel extends HTMLElement {
                         onclick="this.getRootNode().host.selectedRoomIdx=${index}; this.getRootNode().host.render();"
                       >
                         <span>${this.escapeHtml(entry.room)}</span>
-                        <span class="count-pill">${entry.devices.length}</span>
+                        <span class="status-pill ${index === this.selectedRoomIdx ? 'active' : 'status-off'}" style="padding:4px 10px; font-size:0.7rem;">${entry.devices.length}</span>
                       </button>
                     `,
                   )
                   .join("")
-              : '<div class="empty-state">No rooms configured yet.</div>'}
+              : '<div class="empty-state">No rooms yet.</div>'}
           </div>
-          <button class="primary-btn" onclick="this.getRootNode().host.addRoom()">Add Room</button>
+          <button class="primary-btn" style="width:100%; margin-top:20px;" onclick="this.getRootNode().host.addRoom()">+ Add Room</button>
         </aside>
 
-        <section class="panel-card room-detail">
+        <section class="panel-card">
           ${
             room
               ? `
                 <div class="card-head">
                   <div>
-                    <div class="eyebrow">Room Details</div>
-                    <h3>Switches, speakers, TVs, and overrides</h3>
+                    <div class="eyebrow">Configuration</div>
+                    <h3>${this.escapeHtml(room.room)} Details</h3>
                   </div>
                   <button class="danger-btn" onclick="this.getRootNode().host.deleteRoom(${this.selectedRoomIdx})">Delete Room</button>
                 </div>
 
-                <div class="inline-grid auto-fit">
+                <div class="inline-grid">
                   <div>
                     <label>Room Name</label>
                     <input
@@ -1228,11 +1101,12 @@ class AGSPanel extends HTMLElement {
                     />
                   </div>
                   <div>
-                    <label>Generated Switch Entity</label>
-                    <input type="text" value="switch.${this.escapeHtml(this.slugify(room.room))}_media" disabled />
+                    <label>Switch Entity</label>
+                    <div class="mono" style="background:rgba(var(--rgb-primary-text-color), 0.03); padding:12px; border-radius:12px; border:1px solid var(--ags-border);">switch.${this.escapeHtml(this.slugify(room.room))}_media</div>
                   </div>
                 </div>
 
+                <div class="eyebrow" style="margin:32px 0 16px;">Devices</div>
                 <div class="stack">
                   ${room.devices.length
                     ? room.devices
@@ -1240,14 +1114,14 @@ class AGSPanel extends HTMLElement {
                           this.renderDeviceCard(this.selectedRoomIdx, deviceIndex, device),
                         )
                         .join("")
-                    : '<div class="empty-state">Add a speaker or TV to this room to get started.</div>'}
+                    : '<div class="empty-state">No devices in this room.</div>'}
                 </div>
 
-                <button class="primary-btn" onclick="this.getRootNode().host.addDevice(${this.selectedRoomIdx})">Add Device</button>
+                <button class="primary-btn" style="margin-top:24px;" onclick="this.getRootNode().host.addDevice(${this.selectedRoomIdx})">+ Add Device</button>
               `
               : `
                 <div class="empty-state">
-                  Choose a room on the left, or create one to start modeling your house.
+                  Select a room to configure its speakers and TVs.
                 </div>
               `
           }
@@ -1261,116 +1135,88 @@ class AGSPanel extends HTMLElement {
       <section class="panel-card">
         <div class="card-head">
           <div>
-            <div class="eyebrow">Sources</div>
-            <h3>Global favorites and default playback targets</h3>
+            <div class="eyebrow">Library</div>
+            <h3>Music Sources</h3>
           </div>
-          <div class="card-actions-wrap">
-            <button class="secondary-btn" onclick="this.getRootNode().host.importSpeakerSourceList()">Import Inputs</button>
-            <button class="secondary-btn" onclick="this.getRootNode().host.browseMediaFavorites()">Browse Media</button>
-            <button class="primary-btn" onclick="this.getRootNode().host.addSource()">Add Source</button>
+          <div class="header-meta">
+            <button class="secondary-btn" onclick="this.getRootNode().host.importSpeakerSourceList()">Import</button>
+            <button class="secondary-btn" onclick="this.getRootNode().host.browseMediaFavorites()">Browse</button>
+            <button class="primary-btn" onclick="this.getRootNode().host.addSource()">+ New Source</button>
           </div>
         </div>
-        ${
-          this.favoriteBrowseError
-            ? `<div class="inline-alert">${this.escapeHtml(this.favoriteBrowseError)}</div>`
-            : ""
-        }
-        ${
-          this.browseItems.length || this.discoveredFavorites.length || this.browsePath.length
-            ? `
-              <div class="browse-results">
-                <div class="section-line">
-                  <div>
-                    <div class="section-title">Browsable media</div>
-                    <div class="section-help">${this.escapeHtml(this.browsePath.map((entry) => entry.title).join(" / ") || "Top level")}</div>
-                  </div>
-                  <button class="secondary-btn" onclick="this.getRootNode().host.browseBack()">${this.browsePath.length ? "Back" : "Clear"}</button>
-                </div>
-                <div class="stack">
-                  ${this.browseItems
-                    .map(
-                      (item, index) => `
-                        <div class="browse-row">
-                          <div>
-                            <div class="list-title">${this.escapeHtml(item.title || "Untitled")}</div>
-                            <div class="list-subtitle">${this.escapeHtml(item.media_content_type || "media")}</div>
-                          </div>
-                          <button class="secondary-btn" onclick="this.getRootNode().host.openBrowseItem(${index})">${item.can_expand ? "Open" : item.can_play ? "Add" : "View"}</button>
-                        </div>
-                      `,
-                    )
-                    .join("")}
-                </div>
-                <div class="section-title browse-subtitle">Playable items in this view</div>
-                <div class="stack">
-                  ${this.discoveredFavorites
-                    .map(
-                      (favorite, index) => `
-                        <div class="browse-row">
-                          <div>
-                            <div class="list-title">${this.escapeHtml(favorite.Source)}</div>
-                            <div class="list-subtitle">${this.escapeHtml(favorite.media_content_type)} · ${this.escapeHtml(favorite.Source_Value)}</div>
-                          </div>
-                          <button class="secondary-btn" onclick="this.getRootNode().host.addBrowsedFavorite(${index})">Add</button>
-                        </div>
-                      `,
-                    )
-                    .join("")}
-                </div>
+        
+        ${this.favoriteBrowseError ? `
+          <div class="status-pill status-warn" style="margin-bottom:20px; width:100%; display:block; text-align:center;">
+            ${this.escapeHtml(this.favoriteBrowseError)}
+          </div>
+        ` : ""}
+
+        ${this.browseItems.length || this.discoveredFavorites.length || this.browsePath.length ? `
+          <div class="panel-card" style="margin-bottom:32px; background:rgba(var(--rgb-primary-text-color), 0.02); border:2px dashed var(--ags-border); padding:24px;">
+            <div class="card-head" style="margin-bottom:16px;">
+              <div>
+                <div class="eyebrow">Browse Results</div>
+                <div class="section-help">${this.escapeHtml(this.browsePath.map(e => e.title).join(" / ") || "Top level")}</div>
               </div>
-            `
-            : ""
-        }
-        <div class="stack">
-          ${
-            this.config.Sources.length
-              ? this.config.Sources.map(
-                  (source, index) => `
-                    <div class="source-card">
-                      <div class="inline-grid auto-fit">
-                        <div>
-                          <label>Name</label>
-                          <input
-                            type="text"
-                            value="${this.escapeHtml(source.Source || "")}"
-                            onchange="this.getRootNode().host.updateConfig('Sources.${index}.Source', this.value)"
-                          />
-                        </div>
-                        <div>
-                          <label>Source Value / ID</label>
-                          <input
-                            type="text"
-                            value="${this.escapeHtml(source.Source_Value || "")}"
-                            onchange="this.getRootNode().host.updateConfig('Sources.${index}.Source_Value', this.value)"
-                          />
-                        </div>
-                        <div>
-                          <label>Media Type</label>
-                          <select onchange="this.getRootNode().host.updateConfig('Sources.${index}.media_content_type', this.value)">
-                            <option value="favorite_item_id" ${source.media_content_type === "favorite_item_id" ? "selected" : ""}>Sonos Favorite</option>
-                            <option value="playlist" ${source.media_content_type === "playlist" ? "selected" : ""}>Playlist</option>
-                            <option value="music" ${source.media_content_type === "music" ? "selected" : ""}>Music / URL</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label class="checkbox-row">
-                            <input
-                              type="checkbox"
-                              ${source.source_default ? "checked" : ""}
-                              onchange="this.getRootNode().host.config.Sources.forEach((entry, entryIndex) => { entry.source_default = entryIndex === ${index} ? this.checked : false; }); this.getRootNode().host.render();"
-                            />
-                            Default source
-                          </label>
-                        </div>
-                        <div class="compact-action">
-                          <button class="danger-btn" onclick="this.getRootNode().host.removeAt('Sources', ${index})">Delete</button>
-                        </div>
+              <button class="secondary-btn" onclick="this.getRootNode().host.browseBack()">${this.browsePath.length ? "Back" : "Clear"}</button>
+            </div>
+            <div class="grid cols-2" style="gap:12px;">
+              ${this.browseItems.map((item, index) => `
+                <div class="list-select" style="margin-bottom:0; padding:10px 14px; border-radius:12px;" onclick="this.getRootNode().host.openBrowseItem(${index})">
+                  <div style="display:flex; align-items:center; gap:12px; overflow:hidden;">
+                    ${item.thumbnail ? `<img src="${item.thumbnail}" style="width:40px; height:40px; border-radius:6px; object-fit:cover;" />` : `
+                      <div style="width:40px; height:40px; border-radius:6px; background:rgba(var(--rgb-primary-text-color), 0.05); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                        <ha-icon icon="${item.can_expand ? 'mdi:folder' : 'mdi:music-note'}"></ha-icon>
                       </div>
+                    `}
+                    <div style="overflow:hidden;">
+                      <div style="font-weight:700; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
+                      <div class="section-help" style="font-size:0.75rem;">${this.escapeHtml(item.media_content_type || "media")}</div>
                     </div>
-                  `,
-                ).join("")
-              : '<div class="empty-state">No global sources yet. Add one to power the dashboard card and News Mode routes.</div>'
-          }
+                  </div>
+                  <button class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0;">${item.can_expand ? "Open" : "Add"}</button>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
+
+        <div class="grid cols-2">
+          ${this.config.Sources.length ? this.config.Sources.map((source, index) => `
+            <div class="source-card" style="padding:20px; border-radius:20px;">
+              <div class="card-head" style="margin-bottom:16px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <div style="width:24px; height:24px; border-radius:6px; background:var(--ags-primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:900;">${index + 1}</div>
+                  <h4 style="margin:0; font-size:1rem; font-weight:800;">${this.escapeHtml(source.Source || "Unnamed Source")}</h4>
+                </div>
+                <button class="danger-btn" style="padding:4px 10px; font-size:0.75rem;" onclick="this.getRootNode().host.removeAt('Sources', ${index})">Delete</button>
+              </div>
+              <div class="stack" style="gap:16px;">
+                <div class="grid cols-2" style="gap:12px;">
+                  <div>
+                    <label style="font-size:0.75rem;">Label</label>
+                    <input type="text" style="padding:8px 12px; font-size:0.9rem;" value="${this.escapeHtml(source.Source)}" onchange="this.getRootNode().host.updateConfig('Sources.${index}.Source', this.value)" />
+                  </div>
+                  <div>
+                    <label style="font-size:0.75rem;">Type</label>
+                    <select style="padding:8px 12px; font-size:0.9rem;" onchange="this.getRootNode().host.updateConfig('Sources.${index}.media_content_type', this.value)">
+                      <option value="favorite_item_id" ${source.media_content_type === "favorite_item_id" ? "selected" : ""}>Sonos Fav</option>
+                      <option value="playlist" ${source.media_content_type === "playlist" ? "selected" : ""}>Playlist</option>
+                      <option value="music" ${source.media_content_type === "music" ? "selected" : ""}>Music/URL</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label style="font-size:0.75rem;">Value</label>
+                  <input type="text" style="padding:8px 12px; font-size:0.9rem;" value="${this.escapeHtml(source.Source_Value)}" onchange="this.getRootNode().host.updateConfig('Sources.${index}.Source_Value', this.value)" />
+                </div>
+                <label class="list-select" style="margin:0; border:none; background:rgba(var(--rgb-primary-text-color), 0.03); padding:8px 16px;">
+                  <span style="font-size:0.8rem; font-weight:700;">Set Default</span>
+                  <input type="checkbox" style="width:18px; height:18px;" ${source.source_default ? "checked" : ""} onchange="this.getRootNode().host.config.Sources.forEach((s, idx) => { s.source_default = idx === ${index}; }); this.getRootNode().host.render();" />
+                </label>
+              </div>
+            </div>
+          `).join("") : '<div class="empty-state">No sources defined yet.</div>'}
         </div>
       </section>
     `;
@@ -1385,186 +1231,124 @@ class AGSPanel extends HTMLElement {
         <section class="panel-card">
           <div class="card-head">
             <div>
-              <div class="eyebrow">System</div>
-              <h3>Core AGS behavior</h3>
+              <div class="eyebrow">Core</div>
+              <h3>System Settings</h3>
             </div>
           </div>
           <div class="stack">
-            <div class="setting-row">
-              <div>
-                <div class="list-title">Static player name</div>
-                <div class="list-subtitle">Keeps the AGS player entity stable for Apple Home and dashboards.</div>
-              </div>
+            <div>
+              <label>AGS Display Name</label>
               <input
-                class="setting-input"
                 type="text"
+                placeholder="e.g. Whole Home Audio"
                 value="${this.escapeHtml(this.config.static_name || "")}"
                 onchange="this.getRootNode().host.updateConfig('static_name', this.value)"
               />
+              <div class="section-help" style="margin-top:8px;">Sets the name of the primary AGS media player.</div>
             </div>
 
-            <div class="nested-section">
+            <div style="margin-top:24px;">
               ${this.renderEntityField(
-                "HomeKit Player",
+                "HomeKit Bridge Player",
                 "homekit_player",
                 this.config.homekit_player || "",
                 ["media_player"],
-                {
-                  helper:
-                    "Optional media_player entity to mirror for HomeKit-facing behavior.",
-                },
+                { helper: "Mirror this entity for Apple Home integration." }
               )}
             </div>
 
-            <label class="toggle-row">
-              <div>
-                <div class="list-title">Default on</div>
-                <div class="list-subtitle">Start AGS automatically after Home Assistant boots.</div>
-              </div>
-              <input type="checkbox" ${this.config.default_on ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('default_on', this.checked)" />
-            </label>
+            <div class="grid" style="margin-top:32px; gap:12px;">
+              <label class="list-select" style="margin:0;">
+                <span>Default enabled on boot</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.default_on ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('default_on', this.checked)" />
+              </label>
 
-            <label class="toggle-row">
-              <div>
-                <div class="list-title">Expose AGS sensors</div>
-                <div class="list-subtitle">Create helper sensors and the AGS actions switch.</div>
-              </div>
-              <input type="checkbox" ${this.config.create_sensors ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('create_sensors', this.checked)" />
-            </label>
+              <label class="list-select" style="margin:0;">
+                <span>Expose diagnostic sensors</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.create_sensors ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('create_sensors', this.checked)" />
+              </label>
 
-            <label class="toggle-row">
-              <div>
-                <div class="list-title">Batch unjoin</div>
-                <div class="list-subtitle">Ungroup all speakers in a single action when AGS shuts down.</div>
-              </div>
-              <input type="checkbox" ${this.config.batch_unjoin ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('batch_unjoin', this.checked)" />
-            </label>
+              <label class="list-select" style="margin:0;">
+                <span>Enable batch ungrouping</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.batch_unjoin ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('batch_unjoin', this.checked)" />
+              </label>
 
-            <label class="toggle-row">
-              <div>
-                <div class="list-title">Ignore zone.home occupancy</div>
-                <div class="list-subtitle">Keep AGS active even when nobody is home.</div>
-              </div>
-              <input type="checkbox" ${this.config.disable_zone ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_zone', this.checked)" />
-            </label>
+              <label class="list-select" style="margin:0;">
+                <span>Ignore occupancy (zone.home)</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_zone ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_zone', this.checked)" />
+              </label>
 
-            <label class="toggle-row">
-              <div>
-                <div class="list-title">Do not force TV input on idle TV rooms</div>
-                <div class="list-subtitle">Leave speakers alone instead of pushing them back to the TV source.</div>
-              </div>
-              <input type="checkbox" ${this.config.disable_Tv_Source ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_Tv_Source', this.checked)" />
-            </label>
+              <label class="list-select" style="margin:0;">
+                <span>Persistent TV source</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_Tv_Source ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_Tv_Source', this.checked)" />
+              </label>
+            </div>
           </div>
         </section>
 
         <section class="panel-card">
           <div class="card-head">
             <div>
-              <div class="eyebrow">Automation</div>
-              <h3>Home Assistant schedules and source switching</h3>
+              <div class="eyebrow">Automations</div>
+              <h3>Schedules</h3>
             </div>
           </div>
           <div class="stack">
-            <div class="nested-section">
-              <div class="section-line">
+            <div class="device-card" style="padding:24px;">
+              <div class="card-head" style="margin-bottom:16px;">
                 <div>
-                  <div class="section-title">Media System Schedule</div>
-                  <div class="section-help">Use a schedule or input_boolean to disable AGS at certain times.</div>
+                  <div style="font-weight:800; font-size:1.1rem;">Media System Schedule</div>
+                  <div class="section-help">Disable AGS during specific hours.</div>
                 </div>
                 <button class="secondary-btn" onclick="this.getRootNode().host.ensureScheduleEntity(); this.getRootNode().host.render();">
                   ${schedule ? "Edit" : "Enable"}
                 </button>
               </div>
-              ${
-                schedule
-                  ? `
-                    <div class="stack">
-                      ${this.renderEntityField(
-                        "Schedule Entity",
-                        "schedule_entity.entity_id",
-                        schedule.entity_id || "",
-                        ["schedule", "input_boolean"],
-                      )}
-                      <div class="inline-grid auto-fit">
-                        <div>
-                          <label>On State</label>
-                          <input
-                            type="text"
-                            value="${this.escapeHtml(schedule.on_state || "on")}"
-                            onchange="this.getRootNode().host.updateConfig('schedule_entity.on_state', this.value)"
-                          />
-                        </div>
-                        <div>
-                          <label>Off State</label>
-                          <input
-                            type="text"
-                            value="${this.escapeHtml(schedule.off_state || "off")}"
-                            onchange="this.getRootNode().host.updateConfig('schedule_entity.off_state', this.value)"
-                          />
-                        </div>
-                      </div>
-                      <label class="checkbox-row">
-                        <input
-                          type="checkbox"
-                          ${schedule.schedule_override ? "checked" : ""}
-                          onchange="this.getRootNode().host.updateConfig('schedule_entity.schedule_override', this.checked)"
-                        />
-                        Let users manually turn AGS back on after the schedule shuts it off
-                      </label>
-                      <button class="danger-btn" onclick="this.getRootNode().host.config.schedule_entity = null; this.getRootNode().host.render();">Remove Schedule</button>
+              ${schedule ? `
+                <div class="stack">
+                  ${this.renderEntityField("Schedule Entity", "schedule_entity.entity_id", schedule.entity_id || "", ["schedule", "input_boolean"])}
+                  <div class="inline-grid" style="margin:0;">
+                    <div>
+                      <label>On State</label>
+                      <input type="text" value="${this.escapeHtml(schedule.on_state || "on")}" onchange="this.getRootNode().host.updateConfig('schedule_entity.on_state', this.value)" />
                     </div>
-                  `
-                  : '<div class="muted">No schedule is attached to AGS right now.</div>'
-              }
+                    <div>
+                      <label>Off State</label>
+                      <input type="text" value="${this.escapeHtml(schedule.off_state || "off")}" onchange="this.getRootNode().host.updateConfig('schedule_entity.off_state', this.value)" />
+                    </div>
+                  </div>
+                  <label class="list-select" style="margin-top:12px; border:none; background:transparent; padding:0;">
+                    <span style="font-size:0.9rem;">Allow manual override when off</span>
+                    <input type="checkbox" style="width:20px; height:20px;" ${schedule.schedule_override ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('schedule_entity.schedule_override', this.checked)" />
+                  </label>
+                  <button class="danger-btn" style="margin-top:12px;" onclick="this.getRootNode().host.config.schedule_entity = null; this.getRootNode().host.render();">Remove</button>
+                </div>
+              ` : ''}
             </div>
 
-            <div class="nested-section">
-              <div class="section-line">
+            <div class="device-card" style="padding:24px; margin-top:24px;">
+              <div class="card-head" style="margin-bottom:16px;">
                 <div>
-                  <div class="section-title">Default Source Schedule</div>
-                  <div class="section-help">Override the default source when a schedule is active.</div>
+                  <div style="font-weight:800; font-size:1.1rem;">Default Source Schedule</div>
+                  <div class="section-help">Switch music based on time of day.</div>
                 </div>
                 <button class="secondary-btn" onclick="this.getRootNode().host.ensureDefaultSourceSchedule(); this.getRootNode().host.render();">
                   ${defaultSourceSchedule ? "Edit" : "Enable"}
                 </button>
               </div>
-              ${
-                defaultSourceSchedule
-                  ? `
-                    <div class="stack">
-                      ${this.renderEntityField(
-                        "Schedule Entity",
-                        "default_source_schedule.entity_id",
-                        defaultSourceSchedule.entity_id || "",
-                        ["schedule", "input_boolean"],
-                      )}
-                      <div>
-                        <label>Target Source</label>
-                        <select onchange="this.getRootNode().host.updateConfig('default_source_schedule.source_name', this.value)">
-                          <option value="">Select source</option>
-                          ${this.config.Sources.map(
-                            (source) => `
-                              <option value="${this.escapeHtml(source.Source)}" ${source.Source === defaultSourceSchedule.source_name ? "selected" : ""}>
-                                ${this.escapeHtml(source.Source)}
-                              </option>
-                            `,
-                          ).join("")}
-                        </select>
-                      </div>
-                      <div>
-                        <label>Trigger State</label>
-                        <input
-                          type="text"
-                          value="${this.escapeHtml(defaultSourceSchedule.on_state || "on")}"
-                          onchange="this.getRootNode().host.updateConfig('default_source_schedule.on_state', this.value)"
-                        />
-                      </div>
-                      <button class="danger-btn" onclick="this.getRootNode().host.config.default_source_schedule = null; this.getRootNode().host.render();">Remove Source Schedule</button>
-                    </div>
-                  `
-                  : '<div class="muted">No default source automation is configured.</div>'
-              }
+              ${defaultSourceSchedule ? `
+                <div class="stack">
+                  ${this.renderEntityField("Trigger Entity", "default_source_schedule.entity_id", defaultSourceSchedule.entity_id || "", ["schedule", "input_boolean"])}
+                  <div>
+                    <label>Target Favorite</label>
+                    <select onchange="this.getRootNode().host.updateConfig('default_source_schedule.source_name', this.value)">
+                      <option value="">Select source</option>
+                      ${this.config.Sources.map(s => `<option value="${this.escapeHtml(s.Source)}" ${s.Source === defaultSourceSchedule.source_name ? "selected" : ""}>${this.escapeHtml(s.Source)}</option>`).join("")}
+                    </select>
+                  </div>
+                  <button class="danger-btn" style="margin-top:12px;" onclick="this.getRootNode().host.config.default_source_schedule = null; this.getRootNode().host.render();">Remove</button>
+                </div>
+              ` : ''}
             </div>
           </div>
         </section>
@@ -1592,18 +1376,20 @@ class AGSPanel extends HTMLElement {
     const agsState = this.getAgsState();
     const attributes = agsState?.attributes || {};
     const status = attributes.ags_status || "OFF";
-    const primaryRoom = attributes.primary_speaker_room || "No active room";
+    const activeRooms = Array.isArray(attributes.active_rooms) ? attributes.active_rooms : [];
+    const headerInfo = activeRooms.length > 0 ? `Active in ${activeRooms[0]}${activeRooms.length > 1 ? ` + ${activeRooms.length-1}` : ''}` : 'System Idle';
 
     this.shadowRoot.innerHTML = `
       <style>
         :host {
           display: block;
-          min-height: 100%;
-          background:
-            radial-gradient(circle at top left, rgba(var(--rgb-primary-color), 0.08), transparent 32%),
-            linear-gradient(180deg, var(--primary-background-color), var(--secondary-background-color, var(--primary-background-color)));
+          min-height: 100vh;
+          background: var(--primary-background-color);
           color: var(--primary-text-color);
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
+          --ags-primary: var(--primary-color);
+          --ags-glass: rgba(var(--rgb-card-background-color), 0.6);
+          --ags-border: rgba(var(--rgb-primary-text-color), 0.08);
         }
 
         * {
@@ -1611,373 +1397,280 @@ class AGSPanel extends HTMLElement {
         }
 
         .shell {
-          max-width: 1240px;
+          max-width: 1400px;
           margin: 0 auto;
-          padding: 24px 24px 96px;
+          padding: 24px 32px 100px;
+          min-height: 100vh;
         }
 
         .page-header {
           display: flex;
           flex-wrap: wrap;
-          align-items: flex-end;
+          align-items: center;
           justify-content: space-between;
-          gap: 16px;
-          margin-bottom: 20px;
+          gap: 20px;
+          margin-bottom: 24px;
         }
 
         .title-block h1 {
           margin: 0;
-          font-size: 2rem;
-          line-height: 1.1;
-          letter-spacing: -0.02em;
+          font-size: 2.2rem;
+          font-weight: 900;
+          line-height: 1;
+          letter-spacing: -0.04em;
+          background: linear-gradient(135deg, var(--ags-primary), rgba(var(--rgb-primary-color), 0.6));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
 
         .title-block p {
           margin: 8px 0 0;
           color: var(--secondary-text-color);
+          font-size: 1rem;
+          font-weight: 600;
+          max-width: 600px;
         }
 
         .header-meta {
           display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
+          gap: 12px;
           align-items: center;
         }
 
         .tabs {
           display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          margin-bottom: 24px;
+          gap: 8px;
+          margin-bottom: 32px;
+          overflow-x: auto;
+          padding-bottom: 8px;
+          scrollbar-width: none;
         }
 
-        .tab-btn,
-        .primary-btn,
-        .secondary-btn,
-        .danger-btn,
-        .list-select {
-          border: 1px solid var(--divider-color);
-          border-radius: 999px;
-          background: var(--card-background-color);
+        .tabs::-webkit-scrollbar { display: none; }
+
+        .tab-btn {
+          border: 1px solid var(--ags-border);
+          border-radius: 12px;
+          background: var(--ags-glass);
           color: var(--primary-text-color);
           cursor: pointer;
           font: inherit;
-          transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+          padding: 12px 20px;
+          font-weight: 700;
+          white-space: nowrap;
+          transition: all 0.2s ease;
         }
 
-        .tab-btn:hover,
-        .primary-btn:hover,
-        .secondary-btn:hover,
-        .danger-btn:hover,
-        .list-select:hover {
-          border-color: rgba(var(--rgb-primary-color), 0.4);
-        }
-
-        .tab-btn {
-          padding: 10px 16px;
-          font-weight: 600;
+        .tab-btn:hover {
+          background: rgba(var(--rgb-primary-text-color), 0.05);
+          border-color: rgba(var(--rgb-primary-color), 0.3);
         }
 
         .tab-btn.active {
-          border-color: rgba(var(--rgb-primary-color), 0.38);
-          background: rgba(var(--rgb-primary-color), 0.12);
-          color: var(--primary-color);
-        }
-
-        .primary-btn,
-        .secondary-btn,
-        .danger-btn {
-          padding: 10px 16px;
-          font-weight: 600;
+          background: var(--ags-primary);
+          color: #fff;
+          border-color: var(--ags-primary);
+          box-shadow: 0 8px 20px rgba(var(--rgb-primary-color), 0.25);
         }
 
         .primary-btn {
-          background: var(--primary-color);
-          border-color: var(--primary-color);
-          color: var(--text-primary-color, #fff);
+          background: var(--ags-primary);
+          color: #fff;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 12px;
+          font-weight: 800;
+          cursor: pointer;
+          box-shadow: 0 8px 20px rgba(var(--rgb-primary-color), 0.3);
+          transition: all 0.2s ease;
         }
 
-        .secondary-btn {
-          background: rgba(var(--rgb-primary-color), 0.08);
-          border-color: rgba(var(--rgb-primary-color), 0.18);
+        .primary-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(var(--rgb-primary-color), 0.4);
+        }
+
+        .secondary-btn, .danger-btn {
+          padding: 10px 18px;
+          border-radius: 10px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          border: 1px solid var(--ags-border);
+          background: var(--ags-glass);
+          color: var(--primary-text-color);
+        }
+
+        .secondary-btn:hover {
+          background: rgba(var(--rgb-primary-text-color), 0.05);
         }
 
         .danger-btn {
           color: var(--error-color);
-          border-color: rgba(var(--rgb-error-color, 211, 47, 47), 0.22);
-          background: rgba(var(--rgb-error-color, 211, 47, 47), 0.06);
+          border-color: rgba(var(--rgb-error-color), 0.2);
+        }
+
+        .danger-btn:hover {
+          background: rgba(var(--rgb-error-color), 0.1);
         }
 
         .save-bar {
-          position: sticky;
-          bottom: 16px;
-          margin-top: 24px;
+          position: fixed;
+          bottom: 0;
+          right: 0;
+          left: 0;
           display: flex;
-          justify-content: flex-end;
-          z-index: 2;
+          justify-content: center;
+          padding: 24px;
+          background: linear-gradient(0deg, var(--primary-background-color) 0%, transparent 100%);
+          z-index: 100;
+          pointer-events: none;
+        }
+
+        .save-bar .primary-btn {
+          pointer-events: auto;
+          padding: 16px 48px;
+          border-radius: 24px;
+          font-size: 1.1rem;
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255,255,255,0.1);
         }
 
         .panel-card {
-          background: var(--card-background-color);
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
-          border-radius: 24px;
-          padding: 22px;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-        }
-
-        .hero-card {
-          background:
-            linear-gradient(135deg, rgba(var(--rgb-primary-color), 0.12), rgba(var(--rgb-primary-color), 0.03)),
-            var(--card-background-color);
+          background: var(--ags-glass);
+          backdrop-filter: blur(20px);
+          border: 1px solid var(--ags-border);
+          border-radius: 28px;
+          padding: 32px;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
         }
 
         .grid {
           display: grid;
-          gap: 20px;
-        }
-
-        .grid > *,
-        .cols-2 > *,
-        .room-layout > *,
-        .home-grid > *,
-        .diagnostics-grid > * {
-          min-width: 0;
+          gap: 24px;
         }
 
         .cols-2 {
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          margin-bottom: 20px;
         }
 
         .home-grid {
-          grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+          grid-template-columns: 1fr 1fr;
+          align-items: start;
         }
 
         .room-layout {
           display: grid;
-          grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-          gap: 20px;
+          grid-template-columns: 320px 1fr;
+          gap: 32px;
         }
 
-        .card-head,
-        .section-line,
-        .hero-line {
+        .card-head {
           display: flex;
-          flex-wrap: wrap;
-          align-items: center;
+          align-items: flex-start;
           justify-content: space-between;
-          gap: 12px;
+          gap: 20px;
+          margin-bottom: 24px;
         }
 
         .card-head h3 {
           margin: 4px 0 0;
-          font-size: 1.2rem;
+          font-size: 1.5rem;
+          font-weight: 800;
+          letter-spacing: -0.02em;
         }
 
         .eyebrow {
           text-transform: uppercase;
-          letter-spacing: 0.08em;
-          font-size: 0.72rem;
-          font-weight: 700;
-          color: var(--secondary-text-color);
-        }
-
-        .hero-title {
-          font-size: 1.1rem;
-          font-weight: 700;
+          letter-spacing: 0.1em;
+          font-size: 0.8rem;
+          font-weight: 800;
+          color: var(--ags-primary);
         }
 
         .metric-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-          margin-top: 18px;
+          gap: 16px;
+          margin-top: 24px;
         }
 
-        .metric-card,
-        .device-card,
-        .source-card,
-        .override-card,
-        .nested-section {
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
-          border-radius: 18px;
-          padding: 16px;
-          background: rgba(var(--rgb-primary-text-color), 0.015);
+        .metric-card {
+          background: rgba(var(--rgb-primary-text-color), 0.03);
+          border: 1px solid var(--ags-border);
+          border-radius: 20px;
+          padding: 20px;
         }
 
-        .metric-label,
-        .list-subtitle,
-        .section-help,
-        .muted {
+        .metric-label {
           color: var(--secondary-text-color);
+          font-size: 0.85rem;
+          font-weight: 700;
+          text-transform: uppercase;
         }
 
         .metric-value {
-          font-size: 1.35rem;
-          font-weight: 700;
-          margin-top: 6px;
-        }
-
-        .chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 16px;
-        }
-
-        .chip,
-        .pill,
-        .count-pill,
-        .status-pill,
-        .tone-pill {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 999px;
-          padding: 6px 10px;
-          font-size: 0.8rem;
-          font-weight: 700;
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.1);
-          background: rgba(var(--rgb-primary-text-color), 0.04);
-          max-width: 100%;
-          overflow-wrap: anywhere;
-          word-break: break-word;
+          font-size: 1.5rem;
+          font-weight: 900;
+          margin-top: 4px;
+          color: var(--ags-primary);
         }
 
         .status-pill {
-          background: rgba(var(--rgb-primary-color), 0.12);
-          border-color: rgba(var(--rgb-primary-color), 0.18);
+          padding: 8px 16px;
+          border-radius: 12px;
+          font-weight: 800;
+          font-size: 0.85rem;
+          text-transform: uppercase;
+          background: rgba(var(--rgb-primary-color), 0.1);
           color: var(--primary-color);
-        }
-
-        .status-on-tv {
-          color: var(--info-color);
-          border-color: rgba(var(--rgb-info-color, 3, 169, 244), 0.2);
-          background: rgba(var(--rgb-info-color, 3, 169, 244), 0.1);
-        }
-
-        .status-override {
-          color: var(--warning-color);
-          border-color: rgba(var(--rgb-warning-color, 255, 152, 0), 0.2);
-          background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.1);
+          border: 1px solid rgba(var(--rgb-primary-color), 0.2);
         }
 
         .status-off {
+          background: rgba(var(--rgb-primary-text-color), 0.05);
           color: var(--secondary-text-color);
-        }
-
-        .tone-pill {
-          background: rgba(var(--rgb-primary-text-color), 0.04);
-        }
-
-        .tone-good {
-          color: var(--success-color);
-          border-color: rgba(var(--rgb-success-color, 67, 160, 71), 0.22);
-          background: rgba(var(--rgb-success-color, 67, 160, 71), 0.1);
-        }
-
-        .tone-warn {
-          color: var(--warning-color);
-          border-color: rgba(var(--rgb-warning-color, 255, 152, 0), 0.22);
-          background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.1);
-        }
-
-        .tone-info {
-          color: var(--info-color);
-          border-color: rgba(var(--rgb-info-color, 3, 169, 244), 0.22);
-          background: rgba(var(--rgb-info-color, 3, 169, 244), 0.1);
-        }
-
-        .tone-neutral {
-          color: var(--secondary-text-color);
-        }
-
-        .pill-on {
-          color: var(--success-color);
-          border-color: rgba(var(--rgb-success-color, 67, 160, 71), 0.2);
-          background: rgba(var(--rgb-success-color, 67, 160, 71), 0.1);
-        }
-
-        .step-list,
-        .stack {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .step {
-          display: grid;
-          grid-template-columns: 34px 1fr;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 14px;
-          border-radius: 16px;
-          background: rgba(var(--rgb-primary-text-color), 0.02);
-          opacity: 0.72;
-        }
-
-        .step.active {
-          opacity: 1;
-          background: rgba(var(--rgb-primary-color), 0.08);
-        }
-
-        .step-index {
-          width: 34px;
-          height: 34px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: rgba(var(--rgb-primary-text-color), 0.08);
-          font-weight: 700;
-        }
-
-        .step.active .step-index {
-          background: var(--primary-color);
-          color: var(--text-primary-color, #fff);
+          border-color: var(--ags-border);
         }
 
         .table {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 0 12px;
         }
 
         .table-row {
           display: grid;
-          grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(120px, 0.8fr) minmax(100px, 0.7fr);
-          gap: 12px;
+          grid-template-columns: 1.5fr 1fr 100px 100px;
+          gap: 16px;
           align-items: center;
-          padding: 14px 12px;
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
+          padding: 16px 24px;
+          background: rgba(var(--rgb-primary-text-color), 0.02);
+          border: 1px solid var(--ags-border);
           border-radius: 16px;
-          background: rgba(var(--rgb-primary-text-color), 0.015);
+          transition: all 0.2s ease;
         }
 
-        .table-row > * {
-          min-width: 0;
+        .table-row:hover {
+          background: rgba(var(--rgb-primary-text-color), 0.04);
+          transform: scale(1.01);
         }
 
         .table-head {
-          background: transparent;
-          border: none;
-          padding: 0 12px 4px;
-          font-size: 0.76rem;
+          background: transparent !important;
+          border: none !important;
+          padding: 0 24px;
+          font-weight: 800;
+          font-size: 0.8rem;
           text-transform: uppercase;
-          letter-spacing: 0.08em;
           color: var(--secondary-text-color);
         }
 
         .mono {
-          font-family: var(--code-font-family, "SFMono-Regular", Consolas, monospace);
-          font-size: 0.85rem;
-          overflow-wrap: anywhere;
-          word-break: break-word;
-        }
-
-        .room-list,
-        .room-detail {
-          min-height: 560px;
+          font-family: var(--code-font-family, monospace);
+          font-size: 0.9rem;
+          color: var(--ags-primary);
+          font-weight: 600;
         }
 
         .list-select {
@@ -1985,323 +1678,103 @@ class AGSPanel extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 12px 14px;
+          padding: 16px 20px;
           border-radius: 16px;
           text-align: left;
+          background: rgba(var(--rgb-primary-text-color), 0.02);
+          border: 1px solid var(--ags-border);
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font-weight: 700;
+          margin-bottom: 8px;
+          transition: all 0.2s ease;
         }
 
         .list-select.active {
-          background: rgba(var(--rgb-primary-color), 0.12);
-          border-color: rgba(var(--rgb-primary-color), 0.24);
-          color: var(--primary-color);
+          background: rgba(var(--rgb-primary-color), 0.1);
+          border-color: var(--ags-primary);
+          color: var(--ags-primary);
         }
 
-        .count-pill {
-          min-width: 28px;
-          padding-inline: 8px;
-        }
-
-        .list-row,
-        .setting-row,
-        .toggle-row {
-          display: flex;
-          gap: 16px;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .list-title,
-        .section-title {
-          font-weight: 700;
-          overflow-wrap: anywhere;
-          word-break: break-word;
-        }
-
-        .list-subtitle,
-        .section-help,
-        .entity-helper,
-        .diagnostic-subrow,
-        .hero-title,
-        .title-block p {
-          overflow-wrap: anywhere;
-          word-break: break-word;
-        }
-
-        .inline-grid {
-          display: grid;
-          gap: 14px;
-          margin-top: 14px;
-        }
-
-        .auto-fit {
-          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        }
-
-        .compact-action {
-          display: flex;
-          align-items: flex-end;
-        }
-
-        .card-actions-wrap {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 10px;
-          min-width: 0;
-        }
-
-        label {
-          display: block;
-          margin-bottom: 6px;
-          font-size: 0.84rem;
-          font-weight: 600;
-        }
-
-        input,
-        select,
-        ha-entity-picker {
-          width: 100%;
-        }
-
-        input,
-        select,
-        .setting-input {
-          min-height: 44px;
-          padding: 10px 12px;
-          border-radius: 14px;
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.12);
+        .device-card, .source-card {
           background: rgba(var(--rgb-primary-text-color), 0.02);
-          color: var(--primary-text-color);
-          font: inherit;
-        }
-
-        input[disabled] {
-          color: var(--secondary-text-color);
-        }
-
-        .checkbox-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          min-height: 44px;
-          margin: 0;
-        }
-
-        .checkbox-row input,
-        .toggle-row input {
-          width: 18px;
-          height: 18px;
-          margin: 0;
-        }
-
-        .setting-input {
-          max-width: 220px;
-        }
-
-        .entity-field {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .entity-fallback {
-          font-family: var(--code-font-family, "SFMono-Regular", Consolas, monospace);
-          font-size: 0.9rem;
-        }
-
-        .entity-helper {
-          margin-top: 6px;
-          color: var(--secondary-text-color);
-          font-size: 0.78rem;
-        }
-
-        .inline-alert {
-          margin: 14px 0;
-          padding: 12px 14px;
-          border-radius: 14px;
-          border: 1px solid rgba(var(--rgb-warning-color, 255, 152, 0), 0.22);
-          background: rgba(var(--rgb-warning-color, 255, 152, 0), 0.08);
-          color: var(--warning-color);
-        }
-
-        .browse-results {
+          border: 1px solid var(--ags-border);
+          border-radius: 20px;
+          padding: 24px;
           margin-bottom: 16px;
-          padding: 16px;
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
-          border-radius: 18px;
-          background: rgba(var(--rgb-primary-text-color), 0.02);
-        }
-
-        .browse-row {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 0;
-          border-top: 1px solid rgba(var(--rgb-primary-text-color), 0.06);
-        }
-
-        .browse-row > * {
-          min-width: 0;
-        }
-
-        .browse-row:first-of-type {
-          border-top: 0;
-          padding-top: 0;
-        }
-
-        .log-view {
-          min-height: 280px;
-          max-height: 360px;
-          overflow: auto;
-          border-radius: 18px;
-          padding: 14px;
-          background: #11161d;
-          color: #d9f8d7;
-          font-family: var(--code-font-family, "SFMono-Regular", Consolas, monospace);
-          font-size: 0.82rem;
-          line-height: 1.45;
-        }
-
-        .empty-state {
-          padding: 28px 20px;
-          border-radius: 18px;
-          border: 1px dashed rgba(var(--rgb-primary-text-color), 0.16);
-          color: var(--secondary-text-color);
-          text-align: center;
-        }
-
-        .diagnostics-grid {
-          align-items: start;
-        }
-
-        .home-grid {
-          align-items: start;
-        }
-
-        .home-dashboard-wrap,
-        .embedded-dashboard {
-          display: block;
-          min-width: 0;
-        }
-
-        .diagnostic-card,
-        .candidate-card,
-        .logic-flag-card {
-          border: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
-          border-radius: 18px;
-          padding: 14px 16px;
-          background: rgba(var(--rgb-primary-text-color), 0.02);
-        }
-
-        .candidate-selected {
-          border-color: rgba(var(--rgb-primary-color), 0.24);
-          background: rgba(var(--rgb-primary-color), 0.08);
-        }
-
-        .diag-meta,
-        .candidate-head,
-        .logic-flag-head {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .diag-meta > *,
-        .candidate-head > *,
-        .logic-flag-head > *,
-        .device-summary > *,
-        .card-head > *,
-        .page-header > *,
-        .header-meta > * {
-          min-width: 0;
-        }
-
-        .diagnostic-subrow,
-        .candidate-reason {
-          margin-top: 10px;
-        }
-
-        .diagnostic-subrow {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          color: var(--secondary-text-color);
-          font-size: 0.84rem;
-        }
-
-        .candidate-reason {
-          font-weight: 600;
         }
 
         .device-summary {
           display: flex;
-          gap: 12px;
-          align-items: flex-start;
           justify-content: space-between;
+          align-items: flex-start;
+          gap: 16px;
         }
 
-        .device-editor {
-          margin-top: 16px;
-          padding-top: 16px;
-          border-top: 1px solid rgba(var(--rgb-primary-text-color), 0.08);
+        .section-title {
+          font-size: 1.2rem;
+          font-weight: 800;
+          margin-bottom: 4px;
         }
 
-        .logic-flag-grid {
+        .section-help {
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
+
+        input, select {
+          width: 100%;
+          background: rgba(var(--rgb-primary-text-color), 0.03);
+          border: 1px solid var(--ags-border);
+          border-radius: 12px;
+          padding: 12px 16px;
+          color: var(--primary-text-color);
+          font: inherit;
+          font-weight: 600;
+          transition: all 0.2s ease;
+        }
+
+        input:focus, select:focus {
+          outline: none;
+          border-color: var(--ags-primary);
+          background: rgba(var(--rgb-primary-text-color), 0.05);
+        }
+
+        .inline-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          gap: 20px;
+          margin: 20px 0;
         }
 
-        .full-width-log {
-          max-height: 440px;
-        }
-
-        .loading,
-        .error {
-          padding: 32px 24px;
-          text-align: center;
+        label {
+          display: block;
+          margin-bottom: 8px;
+          font-size: 0.85rem;
+          font-weight: 800;
+          text-transform: uppercase;
           color: var(--secondary-text-color);
         }
 
-        .error {
-          color: var(--error-color);
+        .log-view {
+          background: #0d1117;
+          color: #e6edf3;
+          padding: 24px;
+          border-radius: 20px;
+          font-family: var(--code-font-family, monospace);
+          font-size: 0.9rem;
+          line-height: 1.6;
+          max-height: 500px;
+          overflow-y: auto;
+          border: 1px solid var(--ags-border);
         }
 
-        @media (max-width: 960px) {
-          .cols-2,
-          .room-layout,
-          .table-row,
-          .logic-flag-grid,
-          .home-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .table-head {
-            display: none;
-          }
-
-          .panel-card {
-            padding: 18px;
-            border-radius: 20px;
-          }
-
-          .shell {
-            padding: 18px 16px 88px;
-          }
-
-          .browse-row,
-          .device-summary {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-
-          .diag-meta,
-          .card-actions-wrap,
-          .header-meta {
-            width: 100%;
-          }
+        @media (max-width: 1024px) {
+          .shell { padding: 24px 16px 100px; }
+          .home-grid, .cols-2, .room-layout { grid-template-columns: 1fr; }
+          .table-row { grid-template-columns: 1fr 1fr; }
+          .table-head { display: none; }
         }
       </style>
 
@@ -2309,11 +1782,10 @@ class AGSPanel extends HTMLElement {
         <div class="page-header">
           <div class="title-block">
             <h1>AGS Service</h1>
-            <p>Manage whole-home grouping, sources, and TV routing with Home Assistant-native controls.</p>
+            <p>${this.escapeHtml(headerInfo)}</p>
           </div>
           <div class="header-meta">
             ${this.renderStatusPill(status)}
-            <span class="pill">${this.escapeHtml(primaryRoom)}</span>
           </div>
         </div>
 

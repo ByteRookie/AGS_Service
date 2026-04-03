@@ -167,6 +167,7 @@ async def update_ags_sensors(ags_config, hass):
         get_preferred_primary_speaker(rooms, hass)
         determine_primary_speaker(ags_config, hass)
         get_inactive_tv_speakers(rooms, hass)
+        get_browsing_fallback_speaker(rooms, hass)
         new_status = hass.data.get('ags_status')
         
         # FIX 7: Startup "Resume" Trigger
@@ -1112,17 +1113,32 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         )
             else:
                 _LOGGER.debug("tv_mode set to no_music - skipping TV commands")
-        else:
-            if actions_enabled and (
-                state.state != "playing" or state.attributes.get("source") == "TV"
-            ):
-                _LOGGER.info("Initiating music source selection on %s", calculated)
-                # Only select the configured music source when the speaker is
-                # idle or currently set to the TV source.
+        elif new_status == "ON":
+            if actions_enabled:
+                _LOGGER.info("Verifying music source on %s after transition/group change", calculated)
+                # Force source selection to ensure music starts even if we were already "ON"
+                # but the group just changed or playback was stalled.
                 await ags_select_source(ags_config, hass)
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
+
+def get_browsing_fallback_speaker(rooms, hass):
+    """Pick the highest priority speaker across all rooms for browsing when idle."""
+    all_speakers = []
+    for room in rooms:
+        for device in room['devices']:
+            if device.get('device_type') == 'speaker':
+                all_speakers.append(device)
+    
+    if not all_speakers:
+        hass.data['browsing_fallback_speaker'] = "none"
+        return "none"
+        
+    sorted_spks = sorted(all_speakers, key=lambda x: x.get('priority', 999))
+    res = sorted_spks[0]['device_id']
+    hass.data['browsing_fallback_speaker'] = res
+    return res
 
 
 
