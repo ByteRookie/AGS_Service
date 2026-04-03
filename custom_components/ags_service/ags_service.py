@@ -837,8 +837,7 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
 
     except Exception as e:
         _LOGGER.error("Error in ags_select_source: %s", str(e))
-
-    return
+        return
 
 
 
