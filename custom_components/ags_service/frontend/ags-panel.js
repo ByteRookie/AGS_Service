@@ -580,24 +580,15 @@ class AGSPanel extends HTMLElement {
   }
 
   renderEntityField(label, path, value, domains = ["media_player"], options = {}) {
-    const encodedValue = this.escapeHtml(value || "");
-    const encodedLabel = this.escapeHtml(label);
-    const encodedDomains = this.escapeHtml(JSON.stringify(domains));
-    const helper = options.helper
-      ? `<div class="entity-helper">${this.escapeHtml(options.helper)}</div>`
-      : "";
-
     return `
       <div>
-        <label>${encodedLabel}</label>
-        <div class="entity-field">
-          <ha-entity-picker
-            data-path="${this.escapeHtml(path)}"
-            data-value="${encodedValue}"
-            include-domains='${encodedDomains}'
-          ></ha-entity-picker>
-        </div>
-        ${helper}
+        <label>${this.escapeHtml(label)}</label>
+        <ha-entity-picker
+          hass="${this.hass}"
+          data-path="${path}"
+          ${domains.length ? `include-domains='${this.escapeHtml(JSON.stringify(domains))}'` : ""}
+          value="${this.escapeHtml(value || "")}"
+        ></ha-entity-picker>
       </div>
     `;
   }
