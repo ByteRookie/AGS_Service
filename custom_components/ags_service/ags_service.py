@@ -3,6 +3,7 @@ import logging
 import asyncio
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 
 CONF_TV_MODE = 'tv_mode'
 TV_MODE_TV_AUDIO = 'tv_audio'
@@ -11,7 +12,7 @@ TV_MODE_NO_MUSIC = 'no_music'
 SONOS_FAVORITE_PREFIX = "FV:"
 
 # Ghost TV ignore list
-TV_IGNORE_STATES = ['off', 'unavailable', 'unknown', 'standby', 'idle', 'paused', 'buffering', 'none', 'power_off', 'sleeping']
+TV_IGNORE_STATES = ['off', 'unavailable', 'unknown', 'standby', 'none', 'power_off', 'sleeping']
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -219,6 +220,8 @@ def get_active_rooms(rooms, hass):
 
     for room in rooms:
         safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        while "__" in safe_room_id:
+            safe_room_id = safe_room_id.replace("__", "_")
         room_key = f"switch.{safe_room_id}_media"
         if not hass.data.get(room_key):
             continue
@@ -253,9 +256,9 @@ def update_ags_status(ags_config, hass):
     # Default status to OFF
     ags_status = "OFF"
 
-    # If the zone is disabled and the state of 'zone.home' is '0', set status to "OFF"
+    # If the off_override is disabled (standard behavior) and the state of 'zone.home' is '0', set status to "OFF"
     zone_state = hass.states.get('zone.home')
-    if not ags_config.get('disable_zone', False):
+    if not ags_config.get('off_override', False):
         if zone_state is None:
             _LOGGER.warning("zone.home entity not found; skipping zone check")
         elif zone_state.state == '0':
@@ -265,6 +268,22 @@ def update_ags_status(ags_config, hass):
 
     # Prepare a dictionary of device states
     device_states = {device['device_id']: hass.states.get(device['device_id']) for room in rooms for device in room['devices']}
+
+    # OFF OVERRIDE LOGIC: If off_override is enabled AND any speaker is playing, force system ON
+    if ags_config.get('off_override', False):
+        any_playing = False
+        for room in rooms:
+            for device in room['devices']:
+                if device.get('device_type') == 'speaker':
+                    state = device_states.get(device['device_id'])
+                    if state and state.state.lower() not in TV_IGNORE_STATES:
+                        any_playing = True
+                        break
+            if any_playing:
+                break
+        
+        if any_playing:
+            hass.data['switch_media_system_state'] = True
 
     # Check for override on any device
     all_devices = [device for room in rooms for device in room['devices']]
@@ -365,6 +384,8 @@ def update_ags_status(ags_config, hass):
     active_tv_mode = None
     for room in rooms:
         safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        while "__" in safe_room_id:
+            safe_room_id = safe_room_id.replace("__", "_")
         room_key = f"switch.{safe_room_id}_media"
         if not hass.data.get(room_key):
             continue
@@ -659,184 +680,207 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
     source is selected while playback is active.
     """
 
-    sources_list = []
-    if control_device_state := hass.states.get(control_device_id):
-        sources_list = control_device_state.attributes.get('source_list', [])
-        # Fix IndexError by checking if sources_list is not empty
-        if sources_list:
-            fallback_source = sources_list[0]["Source"]
-        actions_enabled = state_obj.state == "on" if state_obj else True
+    try:
+        actions_switch = hass.states.get("switch.ags_actions")
+        actions_enabled = actions_switch.state == "on" if actions_switch else True
         if not actions_enabled:
             return
 
-        source = hass.data.get('ags_media_player_source')
-        
+        configured_sources = hass.data.get("ags_service", {}).get("Sources", [])
+        source = hass.data.get("ags_media_player_source")
+
         if source is None:
-            sources_list = hass.data['ags_service']['Sources']
-            
-            # Check default source schedule override
             sched_cfg = ags_config.get("default_source_schedule")
             if sched_cfg and sched_cfg.get("entity_id") and sched_cfg.get("source_name"):
-                state_obj = hass.states.get(sched_cfg["entity_id"])
-                if state_obj and state_obj.state == sched_cfg.get("on_state", "on"):
+                schedule_state = hass.states.get(sched_cfg["entity_id"])
+                if schedule_state and schedule_state.state == sched_cfg.get("on_state", "on"):
                     source = sched_cfg["source_name"]
-            
-            # Normal default
-            if source is None:
-                source = next((src["Source"] for src in sources_list if src.get("source_default") is True), None)
-            if source is None and sources_list:
-                source = sources_list[0]["Source"]
-                
-            if source is not None:
-                hass.data['ags_media_player_source'] = source
-        status = hass.data.get('ags_status', "OFF")
-        primary_speaker_entity_id_raw = get_control_device_id(ags_config, hass)
 
-        # Phase 3: Dead Master Failsafe Refinement
-        # Ensure we have a functional device BEFORE evaluating overrides
-        primary_speaker_entity_id = primary_speaker_entity_id_raw
-        if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
-            primary_speaker_entity_id = hass.data.get('preferred_primary_speaker', "")
-        
-        state = hass.states.get(primary_speaker_entity_id)
-        if state is None or state.state == "unavailable":
-             _LOGGER.warning("Primary master %s is unavailable, searching for failover", primary_speaker_entity_id)
-             active_speakers = hass.data.get('active_speakers', [])
-             failover_found = False
-             for spk in active_speakers:
-                 s = hass.states.get(spk)
-                 if s and s.state != "unavailable":
-                     primary_speaker_entity_id = spk
-                     hass.data['primary_speaker'] = spk
-                     failover_found = True
-                     _LOGGER.info("Failover elected: %s", spk)
-                     break
-             if not failover_found:
-                 _LOGGER.error("No available speakers found for source selection")
-                 return
+        if source is None:
+            source = next(
+                (
+                    src["Source"]
+                    for src in configured_sources
+                    if src.get("source_default") is True
+                ),
+                None,
+            )
 
-        # Re-fetch state for the elected (or failover) device
-        state = hass.states.get(primary_speaker_entity_id)
-        if state is None or state.state == "unavailable":
+        if source is None and configured_sources:
+            source = configured_sources[0]["Source"]
+
+        if not source:
             return
 
-        # Phase 3: Cascading Source Overrides
-        # Find the device entry in the config to check for overrides
+        hass.data["ags_media_player_source"] = source
+        status = hass.data.get("ags_status", "OFF")
+
+        primary_speaker_entity_id = get_control_device_id(ags_config, hass)
+        if not primary_speaker_entity_id or primary_speaker_entity_id == "none":
+            primary_speaker_entity_id = hass.data.get("preferred_primary_speaker", "")
+
+        state = hass.states.get(primary_speaker_entity_id)
+        if state is None or state.state == "unavailable":
+            _LOGGER.warning(
+                "Primary master %s is unavailable, searching for failover",
+                primary_speaker_entity_id,
+            )
+            for spk in hass.data.get("active_speakers", []):
+                speaker_state = hass.states.get(spk)
+                if speaker_state and speaker_state.state != "unavailable":
+                    primary_speaker_entity_id = spk
+                    hass.data["primary_speaker"] = spk
+                    state = speaker_state
+                    _LOGGER.info("Failover elected: %s", spk)
+                    break
+
+        if (
+            not primary_speaker_entity_id
+            or primary_speaker_entity_id == "none"
+            or state is None
+            or state.state == "unavailable"
+        ):
+            _LOGGER.error("No available speakers found for source selection")
+            return
+
         target_device_entry = None
-        target_room = None
-        for room in ags_config['rooms']:
-            for device in room['devices']:
-                if device['device_id'] == primary_speaker_entity_id:
+        for room in ags_config["rooms"]:
+            for device in room["devices"]:
+                if device["device_id"] == primary_speaker_entity_id:
                     target_device_entry = device
-                    target_room = room
                     break
             if target_device_entry:
                 break
-        
-        tv_is_on = False
+
         active_tvs = []
-        for room in ags_config['rooms']:
-            for device in room['devices']:
-                if device['device_type'] == 'tv':
-                    s = hass.states.get(device['device_id'])
-                    if s and s.state.lower() not in TV_IGNORE_STATES:
-                        active_tvs.append(device['device_id'])
-                        tv_is_on = True
-        
+        for room in ags_config["rooms"]:
+            for device in room["devices"]:
+                if device["device_type"] != "tv":
+                    continue
+                tv_state = hass.states.get(device["device_id"])
+                if tv_state and tv_state.state.lower() not in TV_IGNORE_STATES:
+                    active_tvs.append(device["device_id"])
+
+        tv_is_on = bool(active_tvs)
         script_vars = {
             "target_device": primary_speaker_entity_id,
             "tv_is_on": tv_is_on,
             "active_tvs": active_tvs,
-            "active_speakers": hass.data.get('active_speakers', []),
+            "active_speakers": hass.data.get("active_speakers", []),
         }
 
-        async def execute_override(override):
-            if override['mode'] == 'script':
-                await hass.services.async_call("script", override['script_entity'].split('.')[-1], script_vars)
+        async def execute_override(override: dict) -> bool:
+            if override.get("mode") == "script" and override.get("script_entity"):
+                await hass.services.async_call(
+                    "script",
+                    override["script_entity"].split(".")[-1],
+                    script_vars,
+                )
                 return True
-            elif override['mode'] == 'source':
-                await enqueue_media_action(hass, 'select_source', {"source": override['source_value'], "entity_id": primary_speaker_entity_id})
+            if override.get("mode") == "source" and override.get("source_value"):
+                await enqueue_media_action(
+                    hass,
+                    "select_source",
+                    {
+                        "source": override["source_value"],
+                        "entity_id": primary_speaker_entity_id,
+                    },
+                )
                 return True
             return False
 
-        # Step A (TV Override)
         if tv_is_on:
             for tv_id in active_tvs:
-                # Find TV device config
-                tv_cfg = None
-                for room in ags_config['rooms']:
-                    for device in room['devices']:
-                        if device['device_id'] == tv_id:
-                            tv_cfg = device
-                            break
-                    if tv_cfg: break
-                
-                if tv_cfg and 'source_overrides' in tv_cfg:
-                    for override in tv_cfg['source_overrides']:
-                        if override['source_name'] == source:
-                            if await execute_override(override): return
+                tv_cfg = next(
+                    (
+                        device
+                        for room in ags_config["rooms"]
+                        for device in room["devices"]
+                        if device["device_id"] == tv_id
+                    ),
+                    None,
+                )
+                for override in (tv_cfg or {}).get("source_overrides", []):
+                    if override.get("source_name") == source and await execute_override(override):
+                        return
 
-        # Step B (Speaker Fallback)
-        if target_device_entry and 'source_overrides' in target_device_entry:
-            for override in target_device_entry['source_overrides']:
-                if override['source_name'] == source:
-                    if not tv_is_on or override.get('run_when_tv_off', False) is False:
-                         if await execute_override(override): return
+        for override in (target_device_entry or {}).get("source_overrides", []):
+            if override.get("source_name") != source:
+                continue
+            if tv_is_on and override.get("run_when_tv_off", False):
+                continue
+            if await execute_override(override):
+                return
 
-        # Step C (Global Fallback)
-        # Convert the list of sources to a dictionary for faster lookups
-        sources_list = hass.data['ags_service']['Sources'] 
-        source_dict = {src["Source"]: {"value": src["Source_Value"], "type": src.get("media_content_type")} for src in sources_list}
-
-
-        disable_tv_source = ags_config.get('disable_Tv_Source', False)
+        source_dict = {
+            src["Source"]: {
+                "value": src["Source_Value"],
+                "type": src.get("media_content_type") or "music",
+            }
+            for src in configured_sources
+        }
+        disable_tv_source = ags_config.get("disable_tv_source", False)
 
         if source == "TV":
             await enqueue_media_action(
                 hass,
-                'select_source',
+                "select_source",
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
-        elif status == "ON TV" and disable_tv_source is False and source != "Unknown":
+            return
+
+        if status == "ON TV" and not disable_tv_source and source != "Unknown":
             await enqueue_media_action(
                 hass,
-                'select_source',
+                "select_source",
                 {"source": source, "entity_id": primary_speaker_entity_id},
             )
+            return
 
-        elif source != "Unknown" and status == "ON":
-            if (
-                not ignore_playing
-                and state.state == "playing"
-                and state.attributes.get("source") != "TV"
-            ):
-                return
+        if source == "Unknown" or status != "ON":
+            return
 
-            source_info = source_dict.get(source)
+        if (
+            not ignore_playing
+            and state.state == "playing"
+            and state.attributes.get("source") != "TV"
+        ):
+            return
 
-            if source_info:
-                media_id = source_info["value"]
-                media_type = source_info["type"]
+        source_info = source_dict.get(source)
+        if not source_info:
+            _LOGGER.warning("Source %s was selected but is not configured", source)
+            return
 
-                # FIX 3: Sonos Favorites Bug (Entity Registry)
-                if media_type == "favorite_item_id" and not media_id.startswith(SONOS_FAVORITE_PREFIX):
-                    registry = hass.helpers.entity_registry.async_get(hass)
-                    entry = registry.async_get(primary_speaker_entity_id)
-                    if entry and entry.platform == "sonos":
-                         media_id = f"{SONOS_FAVORITE_PREFIX}{media_id}"
+        media_id = str(source_info["value"])
+        media_type = source_info["type"]
 
-                await enqueue_media_action(
-                    hass,
-                    'play_media',
-                    {
-                        'entity_id': primary_speaker_entity_id,
-                        'media_content_id': media_id,
-                        'media_content_type': media_type,
-                    },
-                )
+        if not media_id or not media_type:
+            _LOGGER.warning("Source %s is missing media_id or media_type", source)
+            return
 
-    except Exception as e:
-        _LOGGER.error("Error in ags_select_source: %s", str(e))
+        if (
+            media_type == "favorite_item_id"
+            and media_id
+            and not media_id.startswith(SONOS_FAVORITE_PREFIX)
+        ):
+            registry = er.async_get(hass)
+            entry = registry.async_get(primary_speaker_entity_id)
+            if entry and entry.platform == "sonos":
+                media_id = f"{SONOS_FAVORITE_PREFIX}{media_id}"
+
+        await enqueue_media_action(
+            hass,
+            "play_media",
+            {
+                "entity_id": primary_speaker_entity_id,
+                "media_content_id": media_id,
+                "media_content_type": media_type,
+            },
+        )
+
+    except Exception as exc:  # pragma: no cover - safety net
+        _LOGGER.exception("Error in ags_select_source: %s", exc)
         return
 
 
@@ -936,7 +980,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
 
             for spk in tv_speakers:
                 state = device_states.get(spk)
-                if state and state.state != "unavailable" and not ags_config.get("disable_Tv_Source"):
+                if state and state.state != "unavailable" and not ags_config.get("disable_tv_source"):
                     await enqueue_media_action(
                         hass, "select_source", {"entity_id": spk, "source": "TV"}
                     )
@@ -1002,7 +1046,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                             "Skipped media_stop for %s – state unavailable", spk
                         )
                         continue
-                    if tv_map.get(spk) and not ags_config.get("disable_Tv_Source"):
+                    if tv_map.get(spk) and not ags_config.get("disable_tv_source"):
                         await enqueue_media_action(
                             hass, "select_source", {"entity_id": spk, "source": "TV"}
                         )
@@ -1081,7 +1125,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 if not state or state.state == "unavailable":
                     _LOGGER.debug("Skipped media_stop for %s – state unavailable", spk)
                     continue
-                if tv_map.get(spk) and not ags_config.get("disable_Tv_Source"):
+                if tv_map.get(spk) and not ags_config.get("disable_tv_source"):
                     await enqueue_media_action(
                         hass, "select_source", {"entity_id": spk, "source": "TV"}
                     )
@@ -1141,6 +1185,5 @@ def get_browsing_fallback_speaker(rooms, hass):
     res = sorted_spks[0]['device_id']
     hass.data['browsing_fallback_speaker'] = res
     return res
-
 
 

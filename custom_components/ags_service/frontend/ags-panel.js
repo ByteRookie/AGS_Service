@@ -74,7 +74,7 @@ class AGSPanel extends HTMLElement {
     const normalized = {
       rooms: Array.isArray(config?.rooms) ? config.rooms : [],
       Sources: Array.isArray(config?.Sources) ? config.Sources : [],
-      disable_zone: Boolean(config?.disable_zone),
+      off_override: Boolean(config?.off_override),
       homekit_player: normalizeEntityValue(config?.homekit_player || "") || null,
       create_sensors: config?.create_sensors !== false,
       default_on: Boolean(config?.default_on),
@@ -139,14 +139,8 @@ class AGSPanel extends HTMLElement {
 
               return normalizedDevice;
             })
-            .sort((left, right) => {
-              if (left.priority !== right.priority) {
-                return left.priority - right.priority;
-              }
-              return left.__sortIndex - right.__sortIndex;
-            })
-            .map((device, index) => {
-              const normalizedDevice = { ...device, priority: index + 1 };
+            .map((device) => {
+              const normalizedDevice = { ...device };
               delete normalizedDevice.__sortIndex;
               return normalizedDevice;
             })
@@ -494,6 +488,26 @@ class AGSPanel extends HTMLElement {
       }
 
       this.error = "";
+
+      // Re-sort and re-index devices by priority before saving
+      normalizedConfig.rooms.forEach((room) => {
+        room.devices.sort((a, b) => a.priority - b.priority);
+        room.devices.forEach((device, index) => {
+          device.priority = index + 1;
+        });
+      });
+
+      // Sanitize schedule objects to be null if empty
+      if (normalizedConfig.schedule_entity && !normalizedConfig.schedule_entity.entity_id) {
+        normalizedConfig.schedule_entity = null;
+      }
+      if (
+        normalizedConfig.default_source_schedule &&
+        !normalizedConfig.default_source_schedule.entity_id
+      ) {
+        normalizedConfig.default_source_schedule = null;
+      }
+
       await this.hass.callWS({
         type: "ags_service/config/save",
         config: normalizedConfig,
@@ -566,47 +580,59 @@ class AGSPanel extends HTMLElement {
   }
 
   bindEmbeddedDashboard() {
-    const dashboard = this.shadowRoot.querySelector(".embedded-dashboard");
-    if (!dashboard || typeof dashboard.setConfig !== "function") {
-      return;
-    }
+   const dashboard = this.shadowRoot.querySelector(".embedded-dashboard");
+   if (!dashboard || typeof dashboard.setConfig !== "function") {
+     return;
+   }
 
-    dashboard.setConfig({
-      entity: "media_player.ags_media_player",
-      sections: ["player", "favorites", "rooms", "volumes"],
-      start_section: "player",
-    });
-    dashboard.hass = this.hass;
+   const ags = this.getAgsState();
+   if (!ags) {
+     console.warn("Could not find AGS entity for embedded dashboard");
+     return;
+   }
+
+   dashboard.setConfig({
+     entity: ags.entity_id,
+     sections: ["player", "favorites", "rooms", "volumes"],
+     start_section: "player",
+   });
+   dashboard.hass = this.hass;
   }
-
   renderEntityField(label, path, value, domains = ["media_player"], options = {}) {
     return `
       <div>
         <label>${this.escapeHtml(label)}</label>
         <ha-entity-picker
-          hass="${this.hass}"
           data-path="${path}"
           ${domains.length ? `include-domains='${this.escapeHtml(JSON.stringify(domains))}'` : ""}
-          value="${this.escapeHtml(value || "")}"
+          data-value="${this.escapeHtml(value || "")}"
         ></ha-entity-picker>
       </div>
     `;
   }
 
   getBrowseEntityId() {
-    const ags = this.getAgsState();
-    // browse_entity_id is always a speaker (never TV/OTT), falls back to highest-priority
-    // configured speaker even when system is idle — safe for music library browsing
-    const browseEid = ags?.attributes?.browse_entity_id;
-    if (browseEid && browseEid !== "none" && this.hass.states[browseEid]) {
-      return browseEid;
-    }
-    // Fall back to primary_speaker (also always a speaker)
-    const primary = ags?.attributes?.primary_speaker;
-    if (primary && primary !== "none" && this.hass.states[primary]) {
-      return primary;
-    }
-    return null;
+    if (!this.config?.rooms) return null;
+
+    // Find all speakers across all rooms
+    const allSpeakers = [];
+    this.config.rooms.forEach(room => {
+      if (room.devices) {
+        room.devices.forEach(device => {
+          if (device.device_type === 'speaker' && device.device_id) {
+            allSpeakers.push(device);
+          }
+        });
+      }
+    });
+
+    if (allSpeakers.length === 0) return null;
+
+    // Sort by priority and return the device_id of the first one
+    allSpeakers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+    const targetId = allSpeakers[0].device_id;
+    
+    return this.hass.states[targetId] ? targetId : null;
   }
 
   mergeSources(sourceEntries) {
@@ -1047,10 +1073,10 @@ class AGSPanel extends HTMLElement {
       <div class="nested-section">
         <div class="section-line">
           <div>
-            <div class="section-title">Source Overrides</div>
+            <div class="section-title">Source Modes</div>
             <div class="section-help">Set source-specific fallback behavior for TVs or speakers.</div>
           </div>
-          <button class="secondary-btn" onclick="this.getRootNode().host.addOverride(${roomIndex}, ${deviceIndex})">Add Route</button>
+          <button class="secondary-btn" onclick="this.getRootNode().host.addOverride(${roomIndex}, ${deviceIndex})">Add Mode</button>
         </div>
         ${overrides.length
           ? overrides
@@ -1117,7 +1143,7 @@ class AGSPanel extends HTMLElement {
                 `,
               )
               .join("")
-          : '<div class="muted">No source overrides configured for this device.</div>'}
+          : '<div class="muted">No source modes configured for this device.</div>'}
       </div>
     `;
   }
@@ -1188,7 +1214,7 @@ class AGSPanel extends HTMLElement {
             </div>
 
             <div style="margin-top:24px;">
-              <label>Off Override</label>
+              <label>Off Overrides (Playback Matcher)</label>
               <input type="text" placeholder="Title/Source keyword to trigger override" value="${this.escapeHtml(device.override_content || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)" />
             </div>
           </div>
@@ -1421,13 +1447,13 @@ class AGSPanel extends HTMLElement {
               </label>
 
               <label class="list-select" style="margin:0;">
-                <span>Ignore occupancy (zone.home)</span>
-                <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_zone ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_zone', this.checked)" />
+                <span>Master Off Override (Playback forces ON)</span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.off_override ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('off_override', this.checked)" />
               </label>
 
               <label class="list-select" style="margin:0;">
                 <span>Persistent TV source</span>
-                <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_Tv_Source ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_Tv_Source', this.checked)" />
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_tv_source ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_tv_source', this.checked)" />
               </label>
             </div>
           </div>

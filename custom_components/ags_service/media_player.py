@@ -145,6 +145,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
         self.browsing_fallback_speaker = self.hass.data.get('browsing_fallback_speaker', None)
+        self.primary_speaker_room = None
+        self.primary_speaker_state = None
 
         selected_source = self.hass.data.get('ags_media_player_source')
         if selected_source is None:
@@ -264,6 +266,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         safe_room_id = "".join(
             c for c in room_name.lower().replace(" ", "_") if c.isalnum() or c == "_"
         )
+        while "__" in safe_room_id:
+            safe_room_id = safe_room_id.replace("__", "_")
         return f"switch.{safe_room_id}_media" if safe_room_id else None
 
     def _get_global_block_reason(self) -> str | None:
@@ -273,7 +277,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         zone_state = self.hass.states.get("zone.home")
         if (
-            not self.ags_config.get("disable_zone", False)
+            not self.ags_config.get("off_override", False)
             and zone_state is not None
             and zone_state.state == "0"
         ):
@@ -308,18 +312,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "detail": "Join and source actions follow the AGS Actions switch",
             },
             {
-                "label": "Zone",
+                "label": "Off Override",
                 "value": (
-                    "Ignored"
-                    if self.ags_config.get("disable_zone", False)
+                    "Enabled"
+                    if self.ags_config.get("off_override", False)
                     else (
                         f"Home: {zone_state.state}"
                         if zone_state is not None
                         else "zone.home missing"
                     )
                 ),
-                "tone": "neutral" if self.ags_config.get("disable_zone", False) else "info",
-                "detail": "Occupancy can pause AGS when zone checking is enabled",
+                "tone": "neutral" if self.ags_config.get("off_override", False) else "info",
+                "detail": "Playback can force the system ON when Off Override is enabled",
             },
             {
                 "label": "Schedule",
@@ -748,7 +752,39 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MediaPlayerEntityFeature.TURN_OFF
             | MediaPlayerEntityFeature.GROUPING
             | MediaPlayerEntityFeature.BROWSE_MEDIA
+            | MediaPlayerEntityFeature.PLAY_MEDIA
         )
+
+    async def async_play_media(self, media_content_type, media_content_id, **kwargs):
+        """Play media on the primary speaker."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'play_media', {
+                'entity_id': self.primary_speaker_entity_id,
+                'media_content_id': media_content_id,
+                'media_content_type': media_content_type,
+                **kwargs
+            })
+            await self.async_update()
+
+    async def async_join_media(self, group_members):
+        """Join speakers to the primary speaker's group."""
+        if self.primary_speaker_entity_id:
+            await self.hass.services.async_call('media_player', 'join', {
+                'entity_id': self.primary_speaker_entity_id,
+                'group_members': group_members
+            })
+            await self.async_update()
+
+    async def async_unjoin_media(self):
+        """Unjoin this player from any group."""
+        # When unjoin is called on the AGS player, we unjoin all active speakers
+        # because the AGS player represents the whole group.
+        active_speakers = self.hass.data.get('active_speakers', [])
+        if active_speakers:
+            await self.hass.services.async_call('media_player', 'unjoin', {
+                'entity_id': active_speakers
+            })
+            await self.async_update()
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Proxy media browsing through the current AGS control speaker."""

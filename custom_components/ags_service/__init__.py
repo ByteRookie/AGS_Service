@@ -1,5 +1,6 @@
 """Main module for the AGS Service integration."""
 import asyncio
+import copy
 import logging
 import voluptuous as vol
 
@@ -31,12 +32,12 @@ CONF_DEVICE_ID = 'device_id'
 CONF_DEVICE_TYPE = 'device_type'
 CONF_PRIORITY = 'priority'
 CONF_OVERRIDE_CONTENT = 'override_content'
-CONF_DISABLE_ZONE = 'disable_zone'
+CONF_OFF_OVERRIDE = 'off_override'
 CONF_HOMEKIT_PLAYER = 'homekit_player'
 CONF_CREATE_SENSORS = 'create_sensors'
 CONF_DEFAULT_ON = 'default_on'
 CONF_STATIC_NAME = 'static_name'
-CONF_DISABLE_TV_SOURCE = 'disable_Tv_Source'
+CONF_DISABLE_TV_SOURCE = 'disable_tv_source'
 CONF_INTERVAL_SYNC = 'interval_sync'
 CONF_SCHEDULE_ENTITY = 'schedule_entity'
 CONF_OTT_DEVICE = 'ott_device'
@@ -92,6 +93,7 @@ SOURCE_SCHEMA = vol.Schema(
         vol.Required("Source_Value"): cv.string,
         vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
         vol.Optional(CONF_SOURCE_DEFAULT, default=False): cv.boolean,
+        vol.Optional("priority"): cv.positive_int,
     }, extra=vol.ALLOW_EXTRA
 )
 
@@ -99,27 +101,131 @@ CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional("rooms"): vol.All(cv.ensure_list, [ROOM_SCHEMA]),
         vol.Optional("Sources"): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
-        vol.Optional(CONF_DISABLE_ZONE, default=False): cv.boolean,
-        vol.Optional(CONF_HOMEKIT_PLAYER, default=None): cv.string,
+        vol.Optional(CONF_OFF_OVERRIDE, default=False): cv.boolean,
+        vol.Optional(CONF_HOMEKIT_PLAYER, default=None): vol.Any(None, cv.string),
         vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
         vol.Optional(CONF_DEFAULT_ON, default=False): cv.boolean,
         vol.Optional(CONF_STATIC_NAME, default=""): vol.Any(cv.string, None),
         vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
         vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
-        vol.Optional(CONF_SCHEDULE_ENTITY): vol.Schema({
+        vol.Optional(CONF_SCHEDULE_ENTITY, default=None): vol.Any(None, vol.Schema({
             vol.Required('entity_id'): cv.entity_id,
             vol.Optional('on_state', default='on'): cv.string,
             vol.Optional('off_state', default='off'): cv.string,
             vol.Optional('schedule_override', default=False): cv.boolean,
-        }, extra=vol.ALLOW_EXTRA),
-        vol.Optional("default_source_schedule"): vol.Schema({
+        }, extra=vol.ALLOW_EXTRA)),
+        vol.Optional("default_source_schedule", default=None): vol.Any(None, vol.Schema({
             vol.Required("entity_id"): cv.entity_id,
             vol.Required("source_name"): cv.string,
             vol.Optional("on_state", default="on"): cv.string,
-        }, extra=vol.ALLOW_EXTRA),
+        }, extra=vol.ALLOW_EXTRA)),
         vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
     }, extra=vol.ALLOW_EXTRA)
 }, extra=vol.ALLOW_EXTRA)
+
+
+def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
+    """Normalize runtime config and auto-fix safe conflicts."""
+    cfg = copy.deepcopy(raw_cfg or {})
+
+    normalized_rooms = []
+    seen_devices: set[str] = set()
+
+    for room in cfg.get("rooms", []) or []:
+        room_name = str(room.get("room", "")).strip() or "Room"
+        devices_with_order = []
+
+        for original_index, device in enumerate(room.get("devices", []) or []):
+            device_id = str(device.get("device_id", "")).strip()
+            if not device_id:
+                continue
+            if device_id in seen_devices:
+                raise vol.Invalid(f"Duplicate device entity configured: {device_id}")
+            seen_devices.add(device_id)
+
+            normalized_device = copy.deepcopy(device)
+            normalized_device["device_id"] = device_id
+            normalized_device["device_type"] = (
+                "tv" if normalized_device.get("device_type") == "tv" else "speaker"
+            )
+            try:
+                priority = int(normalized_device.get("priority", original_index + 1) or 1)
+            except (TypeError, ValueError):
+                priority = original_index + 1
+            normalized_device["priority"] = max(1, priority)
+
+            if normalized_device["device_type"] == "tv":
+                normalized_device.setdefault(CONF_TV_MODE, TV_MODE_TV_AUDIO)
+                normalized_device[CONF_OTT_DEVICES] = [
+                    mapping
+                    for mapping in normalized_device.get(CONF_OTT_DEVICES, []) or []
+                    if mapping.get("ott_device") or mapping.get("tv_input")
+                ]
+            else:
+                normalized_device.pop(CONF_OTT_DEVICE, None)
+                normalized_device.pop(CONF_OTT_DEVICES, None)
+                normalized_device.pop(CONF_TV_MODE, None)
+
+            devices_with_order.append((original_index, normalized_device))
+
+        ordered_devices = [
+            device
+            for _, device in sorted(
+                devices_with_order,
+                key=lambda pair: (pair[1].get("priority", 999), pair[0]),
+            )
+        ]
+        for index, device in enumerate(ordered_devices, start=1):
+            device["priority"] = index
+
+        normalized_rooms.append(
+            {
+                **copy.deepcopy(room),
+                "room": room_name,
+                "devices": ordered_devices,
+            }
+        )
+
+    normalized_sources = []
+    seen_source_names: set[str] = set()
+    default_assigned = False
+
+    for source in cfg.get("Sources", []) or []:
+        source_name = str(source.get("Source", "")).strip()
+        source_value = str(source.get("Source_Value", "")).strip()
+
+        if not source_name or not source_value:
+            continue
+
+        normalized_key = source_name.casefold()
+        if normalized_key in seen_source_names:
+            raise vol.Invalid(f"Duplicate source name configured: {source_name}")
+        seen_source_names.add(normalized_key)
+
+        normalized_source = copy.deepcopy(source)
+        normalized_source["Source"] = source_name
+        normalized_source["Source_Value"] = source_value
+        is_default = bool(normalized_source.get(CONF_SOURCE_DEFAULT)) and not default_assigned
+        normalized_source[CONF_SOURCE_DEFAULT] = is_default
+        default_assigned = default_assigned or is_default
+        normalized_sources.append(normalized_source)
+
+    valid_source_names = {source["Source"] for source in normalized_sources}
+    default_source_schedule = cfg.get("default_source_schedule")
+    if default_source_schedule and default_source_schedule.get("source_name") not in valid_source_names:
+        default_source_schedule = None
+
+    homekit_player = cfg.get(CONF_HOMEKIT_PLAYER)
+    if homekit_player == "":
+        homekit_player = None
+
+    return {
+        **cfg,
+        "rooms": normalized_rooms,
+        "Sources": normalized_sources,
+        CONF_HOMEKIT_PLAYER: homekit_player,
+        "default_source_schedule": default_source_schedule,
+    }
 
 # Add a custom logging handler to capture AGS specific logs
 class AGSLogHandler(logging.Handler):
@@ -169,13 +275,14 @@ async def async_setup(hass: HomeAssistant, config: dict):
             stored_config = {
                 "rooms": [],
                 "Sources": [],
-                "disable_zone": False,
+                "off_override": False,
                 "create_sensors": True,
                 "interval_sync": 30
             }
 
     # Internal helper to apply config to hass.data
     def apply_config(cfg):
+        cfg = sanitize_runtime_config(cfg)
         # Validate device-specific constraints
         for room in cfg.get('rooms', []):
             for device in room.get('devices', []):
@@ -189,7 +296,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
         hass.data[DOMAIN].update({
             'rooms': cfg.get('rooms', []),
             'Sources': cfg.get('Sources', []),
-            'disable_zone': cfg.get(CONF_DISABLE_ZONE, False),
+            'off_override': cfg.get(CONF_OFF_OVERRIDE, False),
             'homekit_player': cfg.get(CONF_HOMEKIT_PLAYER, None),
             'create_sensors': cfg.get(CONF_CREATE_SENSORS, False),
             'default_on': cfg.get(CONF_DEFAULT_ON, False),
@@ -259,12 +366,12 @@ def ws_get_config(hass, connection, msg):
     data = {
         "rooms": config.get("rooms", []),
         "Sources": config.get("Sources", []),
-        "disable_zone": config.get("disable_zone", False),
+        "off_override": config.get("off_override", False),
         "homekit_player": config.get("homekit_player", None),
         "create_sensors": config.get("create_sensors", False),
         "default_on": config.get("default_on", False),
         "static_name": config.get("static_name", ""),
-        "disable_Tv_Source": config.get("disable_Tv_Source", False),
+        "disable_tv_source": config.get("disable_tv_source", False),
         "schedule_entity": config.get("schedule_entity", None),
         "default_source_schedule": config.get("default_source_schedule", None),
         "batch_unjoin": config.get("batch_unjoin", False),
@@ -283,6 +390,7 @@ def ws_save_config(hass, connection, msg):
     # Phase 2: Configuration Validation
     try:
         validated_config = CONFIG_SCHEMA({DOMAIN: new_config})[DOMAIN]
+        validated_config = sanitize_runtime_config(validated_config)
     except vol.Invalid as err:
         connection.send_error(msg["id"], "invalid_config", str(err))
         return

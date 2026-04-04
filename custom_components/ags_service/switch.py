@@ -45,6 +45,8 @@ async def async_setup_platform(
         
         for room in rooms:
             safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+            while "__" in safe_room_id:
+                safe_room_id = safe_room_id.replace("__", "_")
             unique_id = f"switch.{safe_room_id}_media"
             if unique_id not in added_room_switches:
                 new_entities.append(RoomSwitch(hass, room))
@@ -78,6 +80,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         
         # Use a safe slugified version for internal keys and force the entity_id
         safe_room_id = "".join(c for c in room['room'].lower().replace(' ', '_') if c.isalnum() or c == '_')
+        while "__" in safe_room_id:
+            safe_room_id = safe_room_id.replace("__", "_")
         self.entity_id = f"switch.{safe_room_id}_media"
         self._attr_unique_id = self.entity_id
 
