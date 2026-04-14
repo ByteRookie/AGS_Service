@@ -11,6 +11,7 @@ class AGSPanel extends HTMLElement {
     this.selectedRoomIdx = 0;
     this.loading = false;
     this.error = "";
+    this._lastThemeSignature = "";
     this.discoveredFavorites = [];
     this.favoriteBrowseError = "";
     this.browseItems = [];
@@ -29,8 +30,14 @@ class AGSPanel extends HTMLElement {
 
     if (hass && this.config) {
       const nextSignature = this.getAgsStateSignature();
+      const nextThemeSignature = this.getThemeSignature();
 
       if (!this._hasRendered) {
+        this.render();
+        return;
+      }
+
+      if (nextThemeSignature !== this._lastThemeSignature) {
         this.render();
         return;
       }
@@ -44,6 +51,7 @@ class AGSPanel extends HTMLElement {
       }
 
       this._lastAgsSignature = nextSignature;
+      this._lastThemeSignature = nextThemeSignature;
     }
   }
 
@@ -281,6 +289,13 @@ class AGSPanel extends HTMLElement {
     });
   }
 
+  getThemeSignature(hass = this.hass) {
+    return JSON.stringify({
+      darkMode: Boolean(hass?.themes?.darkMode),
+      selectedTheme: hass?.selectedTheme?.theme || hass?.themes?.default_theme || "",
+    });
+  }
+
   updateLiveHeader() {
     if (!this.shadowRoot) {
       return;
@@ -341,6 +356,176 @@ class AGSPanel extends HTMLElement {
       return this.hass.hassUrl(raw.startsWith("/") ? raw : `/${raw}`);
     }
     return raw;
+  }
+
+  clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  getCssColorValue(names, fallback = "") {
+    const styles = getComputedStyle(this);
+    for (const name of names) {
+      const value = styles.getPropertyValue(name)?.trim();
+      if (value) return value;
+    }
+    return fallback;
+  }
+
+  parseColor(value, fallback = [17, 24, 39, 1]) {
+    const raw = String(value || "").trim();
+    if (!raw) return fallback;
+
+    if (raw.startsWith("#")) {
+      const hex = raw.slice(1);
+      const normalized = hex.length === 3 || hex.length === 4
+        ? hex.split("").map((char) => char + char).join("")
+        : hex;
+      if (normalized.length === 6 || normalized.length === 8) {
+        return [
+          parseInt(normalized.slice(0, 2), 16),
+          parseInt(normalized.slice(2, 4), 16),
+          parseInt(normalized.slice(4, 6), 16),
+          normalized.length === 8 ? parseInt(normalized.slice(6, 8), 16) / 255 : 1,
+        ];
+      }
+    }
+
+    const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgbMatch) {
+      const parts = rgbMatch[1].split(",").map((part) => part.trim());
+      if (parts.length >= 3) {
+        return [
+          this.clamp(Number(parts[0]), 0, 255),
+          this.clamp(Number(parts[1]), 0, 255),
+          this.clamp(Number(parts[2]), 0, 255),
+          parts[3] !== undefined ? this.clamp(Number(parts[3]), 0, 1) : 1,
+        ];
+      }
+    }
+
+    return fallback;
+  }
+
+  toOpaque(color, background = [255, 255, 255]) {
+    const [r, g, b, alpha = 1] = color;
+    if (alpha >= 0.999) {
+      return [Math.round(r), Math.round(g), Math.round(b)];
+    }
+    return [r, g, b].map((channel, index) =>
+      Math.round((channel * alpha) + (background[index] * (1 - alpha))),
+    );
+  }
+
+  mixColors(first, second, amount = 0.5) {
+    const weight = this.clamp(amount, 0, 1);
+    return [0, 1, 2].map((index) =>
+      Math.round(first[index] + ((second[index] - first[index]) * weight)),
+    );
+  }
+
+  getLuminance(color) {
+    const normalized = color.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return (0.2126 * normalized[0]) + (0.7152 * normalized[1]) + (0.0722 * normalized[2]);
+  }
+
+  getContrastRatio(first, second) {
+    const lighter = Math.max(this.getLuminance(first), this.getLuminance(second));
+    const darker = Math.min(this.getLuminance(first), this.getLuminance(second));
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  getReadableTextColor(background, preferred = null) {
+    const candidates = [];
+    if (preferred) candidates.push(preferred);
+    candidates.push([15, 23, 42], [255, 255, 255]);
+
+    let best = candidates[0];
+    let bestRatio = 0;
+    for (const candidate of candidates) {
+      const ratio = this.getContrastRatio(background, candidate);
+      if (ratio > bestRatio) {
+        best = candidate;
+        bestRatio = ratio;
+      }
+    }
+    return best;
+  }
+
+  rgb(color) {
+    return `rgb(${color.map((channel) => Math.round(channel)).join(", ")})`;
+  }
+
+  rgba(color, alpha) {
+    return `rgba(${color.map((channel) => Math.round(channel)).join(", ")}, ${alpha})`;
+  }
+
+  getThemePalette() {
+    const background = this.toOpaque(
+      this.parseColor(
+        this.getCssColorValue(
+          ["--primary-background-color", "--lovelace-background", "--app-header-background-color"],
+          "#f5f7fb",
+        ),
+        [245, 247, 251, 1],
+      ),
+      [255, 255, 255],
+    );
+    const surface = this.toOpaque(
+      this.parseColor(
+        this.getCssColorValue(["--card-background-color", "--ha-card-background"], "#ffffff"),
+        [255, 255, 255, 1],
+      ),
+      background,
+    );
+    const primary = this.toOpaque(
+      this.parseColor(this.getCssColorValue(["--primary-color", "--accent-color"], "#2563eb"), [37, 99, 235, 1]),
+      surface,
+    );
+    const text = this.getReadableTextColor(
+      surface,
+      this.toOpaque(
+        this.parseColor(this.getCssColorValue(["--primary-text-color"], "#111827"), [17, 24, 39, 1]),
+        surface,
+      ),
+    );
+    const muted = this.getReadableTextColor(
+      surface,
+      this.toOpaque(
+        this.parseColor(this.getCssColorValue(["--secondary-text-color"], "#475569"), [71, 85, 105, 1]),
+        surface,
+      ),
+    );
+    const isDark = this.getLuminance(background) < 0.42;
+    const surfaceSoft = this.mixColors(surface, background, isDark ? 0.14 : 0.38);
+    const surfaceElevated = this.mixColors(surface, background, isDark ? 0.08 : 0.18);
+    const onPrimary = this.getReadableTextColor(primary, text);
+
+    return {
+      colorScheme: isDark ? "dark" : "light",
+      shellBg: this.rgb(this.mixColors(background, primary, isDark ? 0.06 : 0.025)),
+      chromeBg: `linear-gradient(180deg, ${this.rgba(surface, isDark ? 0.96 : 0.92)} 0%, ${this.rgba(surfaceElevated, isDark ? 0.9 : 0.78)} 82%, ${this.rgba(background, 0)} 100%)`,
+      surface: this.rgba(surface, isDark ? 0.82 : 0.9),
+      surfaceSoft: this.rgba(surfaceSoft, isDark ? 0.7 : 0.82),
+      glass: this.rgba(surfaceElevated, isDark ? 0.66 : 0.78),
+      border: this.rgba(text, isDark ? 0.18 : 0.12),
+      borderStrong: this.rgba(primary, isDark ? 0.26 : 0.22),
+      text: this.rgb(text),
+      muted: this.rgb(muted),
+      primary: this.rgb(primary),
+      primarySoft: this.rgba(primary, isDark ? 0.18 : 0.12),
+      primaryStrong: this.rgba(primary, isDark ? 0.28 : 0.18),
+      onPrimary: this.rgb(onPrimary),
+      subtle: this.rgba(text, isDark ? 0.08 : 0.04),
+      subtleStrong: this.rgba(text, isDark ? 0.12 : 0.06),
+      errorSoft: this.getCssColorValue(["--error-color"], "#b91c1c"),
+      errorBg: this.rgba(this.toOpaque(this.parseColor(this.getCssColorValue(["--error-color"], "#b91c1c"), [185, 28, 28, 1]), surface), isDark ? 0.18 : 0.1),
+      shadow: isDark ? "0 18px 48px rgba(2, 6, 23, 0.34)" : "0 18px 48px rgba(15, 23, 42, 0.12)",
+      logBg: this.rgb(this.mixColors(surface, isDark ? [2, 6, 23] : [226, 232, 240], isDark ? 0.24 : 0.42)),
+      logText: this.rgb(this.getReadableTextColor(this.mixColors(surface, isDark ? [2, 6, 23] : [226, 232, 240], isDark ? 0.24 : 0.42), text)),
+    };
   }
 
   getConfigIssues(config = this.config) {
@@ -1032,7 +1217,7 @@ class AGSPanel extends HTMLElement {
               <div class="device-card ${c.selected ? 'candidate-selected' : ''}" style="padding:10px 14px; border-radius:12px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
                   <div style="display:flex; align-items:center; gap:8px; overflow:hidden;">
-                    <div style="width:20px; height:20px; border-radius:50%; background:${c.selected ? 'var(--ags-primary)' : 'rgba(var(--rgb-primary-text-color),0.1)'}; color:${c.selected ? '#fff' : 'inherit'}; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:900; flex-shrink:0;">${c.rank}</div>
+                    <div style="width:20px; height:20px; border-radius:50%; background:${c.selected ? 'var(--ags-primary)' : 'var(--ags-subtle-strong)'}; color:${c.selected ? 'var(--ags-on-primary)' : 'inherit'}; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:900; flex-shrink:0;">${c.rank}</div>
                     <div style="font-weight:800; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(c.friendly_name)}</div>
                   </div>
                   ${c.selected ? this.renderTonePill("Winner", "good") : this.renderTonePill(c.state, c.available ? "info" : "warn")}
@@ -1049,7 +1234,7 @@ class AGSPanel extends HTMLElement {
           <button class="secondary-btn" style="padding:4px 12px; font-size:0.8rem;" onclick="this.getRootNode().host.fetchLogs()">Refresh</button>
         </div>
         <div class="log-view" style="max-height:200px; font-size:0.75rem; padding:12px;">
-          ${this.logs.slice(-20).map(line => `<div style="padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.05); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(line)}</div>`).join("")}
+          ${this.logs.slice(-20).map(line => `<div style="padding:2px 0; border-bottom:1px solid var(--ags-border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(line)}</div>`).join("")}
         </div>
       </section>
     `;
@@ -1057,24 +1242,55 @@ class AGSPanel extends HTMLElement {
 
   renderHome(agsState) {
     return `
-      <div class="grid home-grid" style="grid-template-columns: 400px 1fr; max-width: 1200px; margin: 0 auto; gap: 24px; align-items: stretch; height: calc(100vh - 240px);">
-
-        <section class="home-dashboard-wrap" style="display:flex; flex-direction:column; height: 100%;">
+      <div class="grid home-grid">
+        <section class="home-dashboard-wrap">
           <ags-media-card class="embedded-dashboard" style="width:100%; flex: 1;"></ags-media-card>
         </section>
-        <section class="panel-card" style="padding:20px; border-radius:24px; display:flex; flex-direction:column; height: 100%; overflow: hidden;">
-          <div class="card-head" style="margin-bottom:12px; flex-shrink: 0;">
+        <section class="panel-card home-entities-panel">
+          <div class="card-head home-entities-head">
             <div>
               <div class="eyebrow">System Status</div>
               <h3>Active Entities</h3>
             </div>
           </div>
-          <div style="flex: 1; overflow-y: auto; padding-right: 4px; scroll-behavior: smooth;">
+          <div class="home-entities-scroll">
             <div class="home-entities-content">${this.renderEntitiesContent()}</div>
           </div>
         </section>
       </div>
     `;
+  }
+
+  navigate(path, replace = false) {
+    if (!path) {
+      return;
+    }
+    if (replace) {
+      window.history.replaceState(null, "", path);
+    } else {
+      window.history.pushState(null, "", path);
+    }
+    window.dispatchEvent(new Event("location-changed", { bubbles: true, composed: true }));
+  }
+
+  exitPortal() {
+    try {
+      if (document.referrer) {
+        const referrer = new URL(document.referrer, window.location.origin);
+        if (
+          referrer.origin === window.location.origin &&
+          !referrer.pathname.includes("/ags-service") &&
+          window.history.length > 1
+        ) {
+          window.history.back();
+          return;
+        }
+      }
+    } catch (error) {
+      // Ignore malformed referrer and fall through to the HA root route.
+    }
+
+    this.navigate("/");
   }
 
   renderEntitiesContent() {
@@ -1088,7 +1304,7 @@ class AGSPanel extends HTMLElement {
 
     return `
       <div class="table">
-        <div class="table-row table-head" style="grid-template-columns: 1.5fr 1fr 80px; padding: 0 16px;">
+        <div class="table-row table-head entities-head">
           <div>Entity ID</div>
           <div>Status</div>
           <div style="text-align:right;">Action</div>
@@ -1097,8 +1313,8 @@ class AGSPanel extends HTMLElement {
           .map((entity) => {
             const isToggle = entity.entity_id.startsWith("switch.");
             return `
-              <div class="table-row" style="grid-template-columns: 1.5fr 1fr 80px; padding: 12px 16px; margin-bottom: 8px;">
-                <div class="mono" style="font-size:0.75rem; opacity:0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px;">${this.escapeHtml(entity.entity_id)}</div>
+              <div class="table-row entities-row">
+                <div class="mono" style="font-size:0.75rem; opacity:0.8; padding-right: 8px;">${this.escapeHtml(entity.entity_id)}</div>
                 <div style="display: flex;">${this.renderStatusPill(entity.state)}</div>
                 <div style="text-align:right;">
                   ${
@@ -1250,10 +1466,10 @@ class AGSPanel extends HTMLElement {
     const isEditing = this.editingDeviceKey === deviceKey;
 
     return `
-      <div class="device-card" style="border-radius:24px; background:rgba(var(--rgb-primary-text-color), 0.03);">
+      <div class="device-card" style="border-radius:24px; background:var(--ags-subtle);">
         <div class="device-summary" style="align-items:center;">
           <div style="display:flex; align-items:center; gap:16px;">
-            <div style="width:40px; height:40px; border-radius:10px; background:var(--ags-primary); display:flex; align-items:center; justify-content:center; color:#fff;">
+            <div style="width:40px; height:40px; border-radius:10px; background:var(--ags-primary); display:flex; align-items:center; justify-content:center; color:var(--ags-on-primary);">
               <ha-icon icon="${device.device_type === 'tv' ? 'mdi:television' : 'mdi:speaker'}"></ha-icon>
             </div>
             <div>
@@ -1369,7 +1585,7 @@ class AGSPanel extends HTMLElement {
                   </div>
                   <div>
                     <label>Switch Entity</label>
-                    <div class="mono" style="background:rgba(var(--rgb-primary-text-color), 0.03); padding:12px; border-radius:12px; border:1px solid var(--ags-border);">switch.${this.escapeHtml(this.slugify(room.room))}_media</div>
+                    <div class="mono" style="background:var(--ags-subtle); padding:12px; border-radius:12px; border:1px solid var(--ags-border);">switch.${this.escapeHtml(this.slugify(room.room))}_media</div>
                   </div>
                 </div>
 
@@ -1419,7 +1635,7 @@ class AGSPanel extends HTMLElement {
         ` : ""}
 
         ${this.browseItems.length || this.discoveredFavorites.length || this.browsePath.length ? `
-          <div class="panel-card" style="margin-bottom:32px; background:rgba(var(--rgb-primary-text-color), 0.02); border:2px dashed var(--ags-border); padding:24px;">
+          <div class="panel-card" style="margin-bottom:32px; background:var(--ags-subtle); border:2px dashed var(--ags-border); padding:24px;">
             <div class="card-head" style="margin-bottom:16px;">
               <div>
                 <div class="eyebrow">Browse Results</div>
@@ -1429,10 +1645,10 @@ class AGSPanel extends HTMLElement {
             </div>
             <div class="browse-results-grid">
               ${this.browseItems.map((item, index) => `
-                <div class="browse-result-card" onclick="this.getRootNode().host.openBrowseItem(${index})">
+                <button type="button" class="browse-result-card" aria-label="${item.can_expand ? `Open ${this.escapeHtml(item.title || "Untitled")}` : `Add ${this.escapeHtml(item.title || "Untitled")}`}" onclick="this.getRootNode().host.openBrowseItem(${index})">
                   <div class="browse-result-art">
                     ${item.thumbnail ? `<img src="${this.resolveMediaUrl(item.thumbnail)}" style="width:100%; height:100%; object-fit:cover;" />` : `
-                      <div style="width:100%; height:100%; background:rgba(var(--rgb-primary-text-color), 0.05); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                      <div style="width:100%; height:100%; background:var(--ags-subtle-strong); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                         <ha-icon icon="${item.can_expand ? 'mdi:folder' : 'mdi:music-note'}"></ha-icon>
                       </div>
                     `}
@@ -1441,8 +1657,8 @@ class AGSPanel extends HTMLElement {
                     <div style="font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
                     <div class="section-help" style="font-size:0.78rem;">${this.escapeHtml(item.media_content_type || "media")}</div>
                   </div>
-                  <button class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0;">${item.can_expand ? "Open" : "Add"}</button>
-                </div>
+                  <span class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0; pointer-events:none;">${item.can_expand ? "Open" : "Add"}</span>
+                </button>
               `).join("")}
             </div>
           </div>
@@ -1453,7 +1669,7 @@ class AGSPanel extends HTMLElement {
             <div class="source-card" style="padding:20px; border-radius:20px;">
               <div class="card-head" style="margin-bottom:16px;">
                 <div style="display:flex; align-items:center; gap:10px;">
-                  <div style="width:24px; height:24px; border-radius:6px; background:var(--ags-primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:900;">${index + 1}</div>
+                  <div style="width:24px; height:24px; border-radius:6px; background:var(--ags-primary); color:var(--ags-on-primary); display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:900;">${index + 1}</div>
                   <h4 style="margin:0; font-size:1rem; font-weight:800;">${this.escapeHtml(source.Source || "Unnamed Source")}</h4>
                 </div>
                 <button class="danger-btn" style="padding:4px 10px; font-size:0.75rem;" onclick="this.getRootNode().host.removeAt('Sources', ${index})">Delete</button>
@@ -1477,7 +1693,7 @@ class AGSPanel extends HTMLElement {
                   <label style="font-size:0.75rem;">Value</label>
                   <input type="text" style="padding:8px 12px; font-size:0.9rem;" value="${this.escapeHtml(source.Source_Value)}" onchange="this.getRootNode().host.updateConfig('Sources.${index}.Source_Value', this.value)" />
                 </div>
-                <label class="list-select" style="margin:0; border:none; background:rgba(var(--rgb-primary-text-color), 0.03); padding:8px 16px;">
+                <label class="list-select" style="margin:0; border:none; background:var(--ags-subtle); padding:8px 16px;">
                   <span style="font-size:0.8rem; font-weight:700;">Set Default</span>
                   <input type="checkbox" style="width:18px; height:18px;" ${source.source_default ? "checked" : ""} onchange="this.getRootNode().host.setSourceDefault(${index}, this.checked)" />
                 </label>
@@ -1642,26 +1858,45 @@ class AGSPanel extends HTMLElement {
   render() {
     const agsState = this.getAgsState();
     const { headerInfo, status } = this.getHeaderSummary(agsState);
+    const theme = this.getThemePalette();
 
     this.shadowRoot.innerHTML = `
       <style>
         :host {
           display: block;
           min-height: 100vh;
-          background: rgba(17, 24, 39, 1);
-          color: var(--primary-text-color, #111827);
+          background: ${theme.shellBg};
+          color: ${theme.text};
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
-          --ags-primary: var(--primary-color, #ff9800);
-          --ags-surface: rgba(var(--rgb-card-background-color), 0.82);
-          --ags-surface-soft: rgba(var(--rgb-card-background-color), 0.64);
-          --ags-glass: rgba(var(--rgb-card-background-color), 0.5);
-          --ags-border: rgba(var(--rgb-primary-text-color), 0.12);
-          --ags-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
-          --ags-muted: var(--secondary-text-color, #6b7280);
+          color-scheme: ${theme.colorScheme};
+          --ags-primary: ${theme.primary};
+          --ags-primary-soft: ${theme.primarySoft};
+          --ags-primary-strong: ${theme.primaryStrong};
+          --ags-on-primary: ${theme.onPrimary};
+          --ags-panel-bg: ${theme.shellBg};
+          --ags-top-chrome: ${theme.chromeBg};
+          --ags-surface: ${theme.surface};
+          --ags-surface-soft: ${theme.surfaceSoft};
+          --ags-glass: ${theme.glass};
+          --ags-border: ${theme.border};
+          --ags-border-strong: ${theme.borderStrong};
+          --ags-shadow: ${theme.shadow};
+          --ags-muted: ${theme.muted};
+          --ags-subtle: ${theme.subtle};
+          --ags-subtle-strong: ${theme.subtleStrong};
+          --ags-error-color: ${theme.errorSoft};
+          --ags-error-bg: ${theme.errorBg};
+          --ags-log-bg: ${theme.logBg};
+          --ags-log-text: ${theme.logText};
+          --ags-focus-ring: 0 0 0 3px var(--ags-primary-soft);
         }
 
         * {
           box-sizing: border-box;
+        }
+
+        button {
+          font: inherit;
         }
 
         .shell {
@@ -1669,6 +1904,16 @@ class AGSPanel extends HTMLElement {
           margin: 0 auto;
           padding: 24px 32px 100px;
           min-height: 100vh;
+        }
+
+        .top-chrome {
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          margin: -24px -32px 24px;
+          padding: calc(env(safe-area-inset-top, 0px) + 24px) 32px 12px;
+          background: var(--ags-top-chrome);
+          backdrop-filter: blur(18px);
         }
 
         .page-header {
@@ -1686,7 +1931,7 @@ class AGSPanel extends HTMLElement {
           font-weight: 900;
           line-height: 1;
           letter-spacing: -0.04em;
-          background: linear-gradient(135deg, var(--ags-primary), rgba(var(--rgb-primary-color), 0.6));
+          background: linear-gradient(135deg, var(--ags-primary), var(--ags-primary-strong));
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
@@ -1709,7 +1954,7 @@ class AGSPanel extends HTMLElement {
         .tabs {
           display: flex;
           gap: 8px;
-          margin-bottom: 32px;
+          margin-bottom: 0;
           overflow-x: auto;
           padding-bottom: 8px;
           scrollbar-width: none;
@@ -1725,43 +1970,52 @@ class AGSPanel extends HTMLElement {
           cursor: pointer;
           font: inherit;
           padding: 12px 20px;
+          min-height: 46px;
           font-weight: 700;
           white-space: nowrap;
           transition: all 0.2s ease;
         }
 
         .tab-btn:hover {
-          background: rgba(var(--rgb-primary-text-color), 0.05);
-          border-color: rgba(var(--rgb-primary-color), 0.3);
+          background: var(--ags-subtle-strong);
+          border-color: var(--ags-border-strong);
         }
 
         .tab-btn.active {
           background: var(--ags-primary);
-          color: #fff;
+          color: var(--ags-on-primary);
           border-color: var(--ags-primary);
-          box-shadow: 0 8px 20px rgba(var(--rgb-primary-color), 0.25);
+          box-shadow: 0 8px 20px var(--ags-primary-soft);
+        }
+
+        .nav-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
         }
 
         .primary-btn {
           background: var(--ags-primary);
-          color: #fff;
+          color: var(--ags-on-primary);
           border: none;
           padding: 12px 24px;
           border-radius: 12px;
+          min-height: 46px;
           font-weight: 800;
           cursor: pointer;
-          box-shadow: 0 8px 20px rgba(var(--rgb-primary-color), 0.3);
+          box-shadow: 0 8px 20px var(--ags-primary-soft);
           transition: all 0.2s ease;
         }
 
         .primary-btn:hover {
           transform: translateY(-2px);
-          box-shadow: 0 10px 25px rgba(var(--rgb-primary-color), 0.4);
+          box-shadow: 0 10px 25px var(--ags-primary-strong);
         }
 
         .secondary-btn, .danger-btn {
           padding: 10px 18px;
           border-radius: 10px;
+          min-height: 44px;
           font-weight: 700;
           cursor: pointer;
           transition: all 0.2s ease;
@@ -1771,16 +2025,16 @@ class AGSPanel extends HTMLElement {
         }
 
         .secondary-btn:hover {
-          background: rgba(var(--rgb-primary-text-color), 0.05);
+          background: var(--ags-subtle-strong);
         }
 
         .danger-btn {
-          color: var(--error-color);
-          border-color: rgba(var(--rgb-error-color), 0.2);
+          color: var(--ags-error-color);
+          border-color: var(--ags-error-bg);
         }
 
         .danger-btn:hover {
-          background: rgba(var(--rgb-error-color), 0.1);
+          background: var(--ags-error-bg);
         }
 
         .save-bar {
@@ -1791,7 +2045,7 @@ class AGSPanel extends HTMLElement {
           display: flex;
           justify-content: center;
           padding: 24px;
-          background: linear-gradient(0deg, var(--primary-background-color) 0%, transparent 100%);
+          background: linear-gradient(0deg, var(--ags-panel-bg) 0%, transparent 100%);
           z-index: 100;
           pointer-events: none;
         }
@@ -1802,7 +2056,7 @@ class AGSPanel extends HTMLElement {
           border-radius: 24px;
           font-size: 1.1rem;
           backdrop-filter: blur(20px);
-          border: 1px solid rgba(255,255,255,0.1);
+          border: 1px solid var(--ags-border);
         }
 
         .panel-card {
@@ -1812,6 +2066,7 @@ class AGSPanel extends HTMLElement {
           border-radius: 28px;
           padding: 32px;
           box-shadow: var(--ags-shadow);
+          min-width: 0;
         }
 
         .grid {
@@ -1824,11 +2079,39 @@ class AGSPanel extends HTMLElement {
         }
 
         .home-grid {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
           align-items: start;
+          max-width: 1200px;
+          margin: 0 auto;
+          min-height: min(900px, calc(100vh - 240px));
         }
 
         .home-dashboard-wrap {
+          min-height: 0;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .home-entities-panel {
+          padding: 20px;
+          border-radius: 24px;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        .home-entities-head {
+          margin-bottom: 12px;
+          flex-shrink: 0;
+        }
+
+        .home-entities-scroll {
+          flex: 1;
+          overflow-y: auto;
+          padding-right: 4px;
+          scroll-behavior: smooth;
           min-height: 0;
         }
 
@@ -1869,10 +2152,11 @@ class AGSPanel extends HTMLElement {
         }
 
         .metric-card {
-          background: rgba(var(--rgb-primary-text-color), 0.03);
+          background: var(--ags-subtle);
           border: 1px solid var(--ags-border);
           border-radius: 20px;
           padding: 20px;
+          min-width: 0;
         }
 
         .metric-label {
@@ -1895,13 +2179,13 @@ class AGSPanel extends HTMLElement {
           font-weight: 800;
           font-size: 0.85rem;
           text-transform: uppercase;
-          background: rgba(var(--rgb-primary-color), 0.1);
-          color: var(--primary-color);
-          border: 1px solid rgba(var(--rgb-primary-color), 0.2);
+          background: var(--ags-primary-soft);
+          color: var(--primary-text-color);
+          border: 1px solid var(--ags-primary-strong);
         }
 
         .status-off {
-          background: rgba(var(--rgb-primary-text-color), 0.05);
+          background: var(--ags-subtle-strong);
           color: var(--ags-muted);
           border-color: var(--ags-border);
         }
@@ -1918,15 +2202,26 @@ class AGSPanel extends HTMLElement {
           gap: 16px;
           align-items: center;
           padding: 16px 24px;
-          background: rgba(var(--rgb-primary-text-color), 0.02);
+          background: var(--ags-subtle);
           border: 1px solid var(--ags-border);
           border-radius: 16px;
           transition: all 0.2s ease;
         }
 
         .table-row:hover {
-          background: rgba(var(--rgb-primary-text-color), 0.04);
+          background: var(--ags-subtle-strong);
           transform: scale(1.01);
+        }
+
+        .entities-head {
+          grid-template-columns: 1.5fr 1fr 80px;
+          padding: 0 16px;
+        }
+
+        .entities-row {
+          grid-template-columns: 1.5fr 1fr 80px;
+          padding: 12px 16px;
+          margin-bottom: 8px;
         }
 
         .table-head {
@@ -1944,6 +2239,8 @@ class AGSPanel extends HTMLElement {
           font-size: 0.9rem;
           color: var(--ags-primary);
           font-weight: 600;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
 
         .list-select {
@@ -1952,9 +2249,10 @@ class AGSPanel extends HTMLElement {
           align-items: center;
           justify-content: space-between;
           padding: 16px 20px;
+          min-height: 52px;
           border-radius: 16px;
           text-align: left;
-          background: rgba(var(--rgb-primary-text-color), 0.02);
+          background: var(--ags-subtle);
           border: 1px solid var(--ags-border);
           color: var(--primary-text-color);
           cursor: pointer;
@@ -1964,17 +2262,18 @@ class AGSPanel extends HTMLElement {
         }
 
         .list-select.active {
-          background: rgba(var(--rgb-primary-color), 0.1);
+          background: var(--ags-primary-soft);
           border-color: var(--ags-primary);
-          color: var(--ags-primary);
+          color: var(--primary-text-color);
         }
 
         .device-card, .source-card {
-          background: rgba(var(--rgb-primary-text-color), 0.02);
+          background: var(--ags-subtle);
           border: 1px solid var(--ags-border);
           border-radius: 20px;
           padding: 24px;
           margin-bottom: 16px;
+          min-width: 0;
         }
 
         .device-summary {
@@ -1994,6 +2293,7 @@ class AGSPanel extends HTMLElement {
           color: var(--ags-muted);
           font-size: 0.9rem;
           font-weight: 500;
+          overflow-wrap: anywhere;
         }
 
         input, select {
@@ -2002,6 +2302,7 @@ class AGSPanel extends HTMLElement {
           border: 1px solid var(--ags-border);
           border-radius: 12px;
           padding: 12px 16px;
+          min-height: 46px;
           color: var(--primary-text-color);
           font: inherit;
           font-weight: 600;
@@ -2011,7 +2312,17 @@ class AGSPanel extends HTMLElement {
         input:focus, select:focus {
           outline: none;
           border-color: var(--ags-primary);
-          background: rgba(var(--rgb-primary-text-color), 0.05);
+          background: var(--ags-subtle-strong);
+        }
+
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        .list-select:focus-visible,
+        ha-switch:focus-visible {
+          outline: none;
+          box-shadow: var(--ags-focus-ring);
+          border-color: var(--ags-border-strong);
         }
 
         .inline-grid {
@@ -2055,9 +2366,9 @@ class AGSPanel extends HTMLElement {
         }
 
         .error {
-          color: var(--error-color);
-          border-color: rgba(var(--rgb-error-color), 0.24);
-          background: rgba(var(--rgb-error-color), 0.08);
+          color: var(--ags-error-color);
+          border-color: var(--ags-error-bg);
+          background: var(--ags-error-bg);
         }
 
         .browse-results-grid {
@@ -2076,11 +2387,25 @@ class AGSPanel extends HTMLElement {
           border: 1px solid var(--ags-border);
           cursor: pointer;
           transition: transform 0.2s ease, border-color 0.2s ease;
+          min-width: 0;
+          text-align: left;
+          font: inherit;
+        }
+
+        .grid > *,
+        .inline-grid > * {
+          min-width: 0;
         }
 
         .browse-result-card:hover {
           transform: translateY(-2px);
-          border-color: rgba(var(--rgb-primary-color), 0.28);
+          border-color: var(--ags-border-strong);
+        }
+
+        .browse-result-card:focus-visible {
+          outline: none;
+          box-shadow: var(--ags-focus-ring);
+          border-color: var(--ags-border-strong);
         }
 
         .browse-result-art {
@@ -2088,8 +2413,8 @@ class AGSPanel extends HTMLElement {
           overflow: hidden;
           border-radius: 16px;
           background:
-            linear-gradient(140deg, rgba(var(--rgb-primary-color), 0.18), rgba(var(--rgb-primary-text-color), 0.04)),
-            rgba(var(--rgb-primary-text-color), 0.04);
+            linear-gradient(140deg, var(--ags-primary-soft), var(--ags-subtle)),
+            var(--ags-subtle);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2100,8 +2425,8 @@ class AGSPanel extends HTMLElement {
         }
 
         .log-view {
-          background: #0d1117;
-          color: #e6edf3;
+          background: var(--ags-log-bg);
+          color: var(--ags-log-text);
           padding: 24px;
           border-radius: 20px;
           font-family: var(--code-font-family, monospace);
@@ -2114,10 +2439,16 @@ class AGSPanel extends HTMLElement {
 
         @media (max-width: 1024px) {
           .shell { padding: 24px 16px 100px; }
+          .top-chrome {
+            margin: -24px -16px 20px;
+            padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px 10px;
+          }
           .home-grid, .cols-2, .room-layout { grid-template-columns: 1fr; }
           .table-row { grid-template-columns: 1fr 1fr; }
+          .entities-row,
+          .entities-head { grid-template-columns: 1fr 1fr; }
           .table-head { display: none; }
-          .home-grid { height: auto !important; }
+          .home-grid { min-height: 0; }
           .home-dashboard-wrap { min-height: 540px; }
         }
 
@@ -2145,12 +2476,27 @@ class AGSPanel extends HTMLElement {
           }
           .header-meta {
             width: 100%;
+            justify-content: stretch;
+          }
+          .tabs {
+            padding-bottom: 6px;
+          }
+          .home-entities-panel {
+            overflow: visible;
+          }
+          .home-entities-scroll {
+            overflow: visible;
+            padding-right: 0;
           }
         }
 
         @media (max-width: 560px) {
           .shell {
             padding: 16px 12px 92px;
+          }
+          .top-chrome {
+            margin: -16px -12px 16px;
+            padding: calc(env(safe-area-inset-top, 0px) + 16px) 12px 8px;
           }
           .panel-card,
           .device-card,
@@ -2168,46 +2514,56 @@ class AGSPanel extends HTMLElement {
           .danger-btn {
             width: 100%;
           }
-          .tabs {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
-            overflow: visible;
+          .tabs .tab-btn,
+          .header-meta .secondary-btn {
+            width: auto;
+            flex: 0 0 auto;
+          }
+          .header-meta > * {
+            min-width: 0;
           }
           .table-row {
             grid-template-columns: 1fr;
             gap: 8px;
           }
+          .entities-row,
+          .entities-head { grid-template-columns: 1fr; }
         }
       </style>
 
       <div class="shell">
-        <div class="page-header">
-          <div class="title-block">
-            <h1>AGS Service</h1>
-            <p class="live-header-info">${this.escapeHtml(headerInfo)}</p>
+        <div class="top-chrome">
+          <div class="page-header">
+            <div class="title-block">
+              <h1>AGS Service</h1>
+              <p class="live-header-info">${this.escapeHtml(headerInfo)}</p>
+            </div>
+            <div class="header-meta">
+              <button class="secondary-btn nav-btn" onclick="this.getRootNode().host.exitPortal()">
+                <ha-icon icon="mdi:arrow-left"></ha-icon>
+                <span>Back</span>
+              </button>
+              <div class="page-status-slot">${this.renderStatusPill(status)}</div>
+            </div>
           </div>
-          <div class="header-meta">
-            <div class="page-status-slot">${this.renderStatusPill(status)}</div>
-          </div>
-        </div>
 
-        <div class="tabs">
-          ${[
-            ["home", "Home"],
-            ["diagnostics", "Diagnostics"],
-            ["rooms", "Rooms"],
-            ["sources", "Sources"],
-            ["settings", "Settings"],
-          ]
-            .map(
-              ([key, label]) => `
-                <button class="tab-btn ${this.activeTab === key ? "active" : ""}" onclick="this.getRootNode().host.setTab('${key}')">
-                  ${label}
-                </button>
-              `,
-            )
-            .join("")}
+          <div class="tabs">
+            ${[
+              ["home", "Home"],
+              ["diagnostics", "Diagnostics"],
+              ["rooms", "Rooms"],
+              ["sources", "Sources"],
+              ["settings", "Settings"],
+            ]
+              .map(
+                ([key, label]) => `
+                  <button class="tab-btn ${this.activeTab === key ? "active" : ""}" onclick="this.getRootNode().host.setTab('${key}')">
+                    ${label}
+                  </button>
+                `,
+              )
+              .join("")}
+          </div>
         </div>
 
         ${

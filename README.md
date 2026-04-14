@@ -1,4 +1,4 @@
-# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.2)
+# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.3)
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FByteRookie%2FAGS_Service%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fags_news_mode.yaml)
 
@@ -74,6 +74,14 @@ type: custom:ags-media-card
 4. Restart Home Assistant.
 
 ## Changelog
+
+### v2.0.3
+- **Core Logic Stability**: Restored the broader `v2.0.1` TV/music decision behavior for switched-on rooms while keeping the faster grouping timing improvements from `v2.0.2`.
+- **Less Input Thrash**: Reduced unnecessary `TV` source resets when speakers leave or rejoin groups, helping music and TV inputs stay stable as you move through rooms.
+- **Theme-Aware UI**: Updated the panel and Lovelace media card to properly follow Home Assistant light/dark theme settings instead of forcing a dark shell.
+- **Accessibility Improvements**: Improved contrast across both modes, added visible keyboard focus states, better touch target sizing, screen-reader labels, and proper button/menu semantics for interactive controls.
+- **Media Card Polish**: Modernized the power, transport, source, browse, and volume controls for smoother mobile use and a cleaner responsive layout.
+- **Live Volume Feedback**: Volume sliders now update live while dragging with short debounced service calls for better responsiveness without excessive churn.
 
 ### v2.0.2
 - **Performance Improvements**: Reduced startup lag for source playback and tightened room add/remove grouping responsiveness.

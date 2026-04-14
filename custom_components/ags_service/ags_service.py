@@ -13,6 +13,7 @@ SONOS_FAVORITE_PREFIX = "FV:"
 
 # Ghost TV ignore list
 TV_IGNORE_STATES = ['off', 'unavailable', 'unknown', 'standby', 'none', 'power_off', 'sleeping']
+TV_ACTIVE_IGNORE_STATES = TV_IGNORE_STATES + ['idle', 'paused']
 
 SHORT_ACTION_DELAY = 0.15
 GROUP_SETTLE_DELAY = 0.35
@@ -21,6 +22,15 @@ GROUP_TIMEOUT = 2.5
 
 
 _LOGGER = logging.getLogger(__name__)
+
+def is_active_tv_state(state_obj) -> bool:
+    """Return True when a TV media_player should count as actively driving TV mode."""
+    return state_obj is not None and state_obj.state.lower() not in TV_ACTIVE_IGNORE_STATES
+
+
+def is_tv_mode_state(state_obj) -> bool:
+    """Return True when a TV should participate in the core AGS TV/music logic."""
+    return state_obj is not None and state_obj.state.lower() not in TV_IGNORE_STATES
 
 async def _action_worker(hass: HomeAssistant) -> None:
     """Process queued media_player actions sequentially."""
@@ -237,7 +247,7 @@ def get_active_rooms(rooms, hass):
                 continue
             state = hass.states.get(device['device_id'])
             # FIX 6: Ghost TV expansion
-            if state and state.state.lower() not in TV_IGNORE_STATES:
+            if is_tv_mode_state(state):
                 if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
                     skip_room = False
                     break
@@ -384,7 +394,9 @@ def update_ags_status(ags_config, hass):
         return ags_status
 
 
-    # Check for TV in active rooms and determine global tv_mode
+    # Check switched-on rooms for TV and determine global tv_mode.
+    # This intentionally matches the broader V2.0.1 behavior so TV mode
+    # continues to hold when the room itself is enabled.
     tv_found = False
     active_tv_mode = None
     for room in rooms:
@@ -402,8 +414,7 @@ def update_ags_status(ags_config, hass):
             # FIX 6: Ghost TV expansion
             if (
                 device.get('device_type') == 'tv'
-                and device_state
-                and device_state.state.lower() not in TV_IGNORE_STATES
+                and is_tv_mode_state(device_state)
             ):
                 room_tv_on = True
                 if device.get('tv_mode', TV_MODE_TV_AUDIO) == TV_MODE_TV_AUDIO:
@@ -416,8 +427,9 @@ def update_ags_status(ags_config, hass):
             elif active_tv_mode != TV_MODE_TV_AUDIO and active_tv_mode is None:
                 active_tv_mode = TV_MODE_NO_MUSIC
 
+    hass.data['current_tv_mode'] = active_tv_mode if tv_found else None
+
     if tv_found:
-        hass.data['current_tv_mode'] = active_tv_mode
         if active_tv_mode != TV_MODE_NO_MUSIC:
             ags_status = "ON TV"
             _handle_status_transition(prev_status, ags_status, hass)
@@ -483,7 +495,11 @@ def check_primary_speaker_logic(ags_config, hass):
                     for room in rooms:
                         if any(d['device_id'] == current_primary for d in room['devices']):
                             # FIX 6: Ghost TV
-                            if any(d['device_type'] == 'tv' and (s := hass.states.get(d['device_id'])) and s.state.lower() not in TV_IGNORE_STATES for d in room['devices']):
+                            if any(
+                                d['device_type'] == 'tv'
+                                and is_tv_mode_state(hass.states.get(d['device_id']))
+                                for d in room['devices']
+                            ):
                                 is_rogue = True
                             break
                 
@@ -506,7 +522,7 @@ def check_primary_speaker_logic(ags_config, hass):
                 for device in sorted_devices:
                     device_state = hass.states.get(device['device_id'])
                     # FIX 6: Ghost TV
-                    if device['device_type'] == 'tv' and device_state is not None and device_state.state.lower() not in TV_IGNORE_STATES:
+                    if device['device_type'] == 'tv' and is_tv_mode_state(device_state):
                         tv_on = True
                         break
 
@@ -772,7 +788,7 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
                 if device["device_type"] != "tv":
                     continue
                 tv_state = hass.states.get(device["device_id"])
-                if tv_state and tv_state.state.lower() not in TV_IGNORE_STATES:
+                if is_tv_mode_state(tv_state):
                     active_tvs.append(device["device_id"])
 
         tv_is_on = bool(active_tvs)
@@ -995,9 +1011,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             for spk in tv_speakers:
                 state = device_states.get(spk)
                 if state and state.state != "unavailable" and not ags_config.get("disable_tv_source"):
-                    await enqueue_media_action(
-                        hass, "select_source", {"entity_id": spk, "source": "TV"}
-                    )
+                    if state.attributes.get("source") != "TV":
+                        await enqueue_media_action(
+                            hass, "select_source", {"entity_id": spk, "source": "TV"}
+                        )
 
             for spk in regular_speakers:
                 state = device_states.get(spk)
@@ -1030,7 +1047,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     if device.get('device_type') == 'tv' and device.get('tv_mode') == TV_MODE_NO_MUSIC:
                         s = hass.states.get(device['device_id'])
                         # FIX 6: Ghost TV
-                        if s and s.state.lower() not in TV_IGNORE_STATES:
+                        if is_tv_mode_state(s):
                             room_tv_no_music = True
                             break
                 
@@ -1140,9 +1157,10 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     _LOGGER.debug("Skipped media_stop for %s – state unavailable", spk)
                     continue
                 if tv_map.get(spk) and not ags_config.get("disable_tv_source"):
-                    await enqueue_media_action(
-                        hass, "select_source", {"entity_id": spk, "source": "TV"}
-                    )
+                    if state.attributes.get("source") != "TV":
+                        await enqueue_media_action(
+                            hass, "select_source", {"entity_id": spk, "source": "TV"}
+                        )
                 else:
                     await enqueue_media_action(
                         hass, "media_stop", {"entity_id": spk}

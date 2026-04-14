@@ -347,13 +347,13 @@ async def async_setup(hass: HomeAssistant, config: dict):
         webcomponent_name="ags-panel",
         sidebar_title="AGS Service",
         sidebar_icon="mdi:account-group",
-        module_url="/ags-static/ags-panel.js?v=2.0.2",
+        module_url="/ags-static/ags-panel.js?v=2.0.3",
         embed_iframe=False,
         trust_external=False,
     )
 
     # Register Lovelace Custom Card
-    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.2")
+    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.3")
 
     return True
 

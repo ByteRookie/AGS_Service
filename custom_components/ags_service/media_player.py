@@ -16,6 +16,7 @@ from .ags_service import (
     TV_MODE_TV_AUDIO,
     TV_MODE_NO_MUSIC,
     TV_IGNORE_STATES,
+    is_tv_mode_state,
 )
 
 import logging
@@ -410,8 +411,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                     speaker_states.append(state)
                 if (
                     device.get("device_type") == "tv"
-                    and state
-                    and state.state.lower() not in TV_IGNORE_STATES
+                    and is_tv_mode_state(state)
                 ):
                     active_tv_names.append(
                         state.attributes.get("friendly_name", device["device_id"])
@@ -492,8 +492,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             tv_active = any(
                 (
                     device.get("device_type") == "tv"
-                    and (state := self.hass.states.get(device["device_id"]))
-                    and state.state.lower() not in TV_IGNORE_STATES
+                    and is_tv_mode_state(self.hass.states.get(device["device_id"]))
                 )
                 for device in room.get("devices", [])
             )
@@ -578,8 +577,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 device_type = device.get("device_type", "speaker")
                 if (
                     device_type == "tv"
-                    and state
-                    and state.state.lower() not in TV_IGNORE_STATES
+                    and is_tv_mode_state(state)
                 ):
                     tv_active = True
 
