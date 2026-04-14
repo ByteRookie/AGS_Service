@@ -3,6 +3,8 @@ class AGSPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._hass = null;
+    this._hasRendered = false;
+    this._lastAgsSignature = "";
     this.config = null;
     this.logs = [];
     this.activeTab = "home";
@@ -26,7 +28,22 @@ class AGSPanel extends HTMLElement {
     }
 
     if (hass && this.config) {
-      this.render();
+      const nextSignature = this.getAgsStateSignature();
+
+      if (!this._hasRendered) {
+        this.render();
+        return;
+      }
+
+      if (this.activeTab === "home") {
+        this.updateLiveHeader();
+        this.updateHomeEntitiesContent();
+        this.bindEmbeddedDashboard();
+      } else if (this.activeTab === "diagnostics" && nextSignature !== this._lastAgsSignature) {
+        this.render();
+      }
+
+      this._lastAgsSignature = nextSignature;
     }
   }
 
@@ -79,7 +96,7 @@ class AGSPanel extends HTMLElement {
       create_sensors: config?.create_sensors !== false,
       default_on: Boolean(config?.default_on),
       static_name: config?.static_name || "",
-      disable_Tv_Source: Boolean(config?.disable_Tv_Source),
+      disable_tv_source: Boolean(config?.disable_tv_source ?? config?.disable_Tv_Source),
       schedule_entity: config?.schedule_entity || null,
       default_source_schedule: config?.default_source_schedule || null,
       batch_unjoin: Boolean(config?.batch_unjoin),
@@ -218,6 +235,79 @@ class AGSPanel extends HTMLElement {
       ) ||
       null
     );
+  }
+
+  getHeaderSummary(agsState = this.getAgsState()) {
+    const attributes = agsState?.attributes || {};
+    const status = attributes.ags_status || "OFF";
+    const activeRooms = Array.isArray(attributes.active_rooms) ? attributes.active_rooms : [];
+    const headerInfo =
+      activeRooms.length > 0
+        ? `Active in ${activeRooms[0]}${activeRooms.length > 1 ? ` + ${activeRooms.length - 1}` : ""}`
+        : "System Idle";
+
+    return { headerInfo, status };
+  }
+
+  getAgsStateSignature(hass = this.hass) {
+    if (!hass) {
+      return "missing-hass";
+    }
+
+    const agsState =
+      hass.states["media_player.ags_media_player"] ||
+      Object.values(hass.states).find((stateObj) => stateObj?.attributes?.ags_status !== undefined) ||
+      null;
+
+    if (!agsState) {
+      return "missing-ags";
+    }
+
+    const attributes = agsState.attributes || {};
+    return JSON.stringify({
+      entity_id: agsState.entity_id,
+      state: agsState.state,
+      ags_status: attributes.ags_status,
+      active_rooms: attributes.active_rooms || [],
+      active_speakers: attributes.active_speakers || [],
+      primary_speaker: attributes.primary_speaker,
+      preferred_primary_speaker: attributes.preferred_primary_speaker,
+      selected_source_name: attributes.selected_source_name,
+      dynamic_title: attributes.dynamic_title,
+      room_details: attributes.room_details || [],
+      room_diagnostics: attributes.room_diagnostics || [],
+      logic_flags: attributes.logic_flags || [],
+      speaker_candidates: attributes.speaker_candidates || [],
+    });
+  }
+
+  updateLiveHeader() {
+    if (!this.shadowRoot) {
+      return;
+    }
+
+    const { headerInfo, status } = this.getHeaderSummary();
+    const infoNode = this.shadowRoot.querySelector(".live-header-info");
+    const statusNode = this.shadowRoot.querySelector(".page-status-slot");
+
+    if (infoNode) {
+      infoNode.textContent = headerInfo;
+    }
+
+    if (statusNode) {
+      statusNode.innerHTML = this.renderStatusPill(status);
+    }
+  }
+
+  updateHomeEntitiesContent() {
+    if (!this.shadowRoot || this.activeTab !== "home") {
+      return;
+    }
+
+    const container = this.shadowRoot.querySelector(".home-entities-content");
+    if (container) {
+      container.innerHTML = this.renderEntitiesContent();
+    }
   }
 
   escapeHtml(value) {
@@ -591,11 +681,16 @@ class AGSPanel extends HTMLElement {
      return;
    }
 
-   dashboard.setConfig({
+   const config = {
      entity: ags.entity_id,
      sections: ["player", "favorites", "rooms", "volumes"],
      start_section: "player",
-   });
+   };
+   const configKey = JSON.stringify(config);
+   if (dashboard.__agsConfigKey !== configKey) {
+     dashboard.setConfig(config);
+     dashboard.__agsConfigKey = configKey;
+   }
    dashboard.hass = this.hass;
   }
   renderEntityField(label, path, value, domains = ["media_player"], options = {}) {
@@ -961,7 +1056,6 @@ class AGSPanel extends HTMLElement {
   }
 
   renderHome(agsState) {
-    const ags = this.getAgsState();
     return `
       <div class="grid home-grid" style="grid-template-columns: 400px 1fr; max-width: 1200px; margin: 0 auto; gap: 24px; align-items: stretch; height: calc(100vh - 240px);">
 
@@ -976,7 +1070,7 @@ class AGSPanel extends HTMLElement {
             </div>
           </div>
           <div style="flex: 1; overflow-y: auto; padding-right: 4px; scroll-behavior: smooth;">
-            ${this.renderEntitiesContent()}
+            <div class="home-entities-content">${this.renderEntitiesContent()}</div>
           </div>
         </section>
       </div>
@@ -1547,10 +1641,7 @@ class AGSPanel extends HTMLElement {
 
   render() {
     const agsState = this.getAgsState();
-    const attributes = agsState?.attributes || {};
-    const status = attributes.ags_status || "OFF";
-    const activeRooms = Array.isArray(attributes.active_rooms) ? attributes.active_rooms : [];
-    const headerInfo = activeRooms.length > 0 ? `Active in ${activeRooms[0]}${activeRooms.length > 1 ? ` + ${activeRooms.length-1}` : ''}` : 'System Idle';
+    const { headerInfo, status } = this.getHeaderSummary(agsState);
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1612,6 +1703,7 @@ class AGSPanel extends HTMLElement {
           display: flex;
           gap: 12px;
           align-items: center;
+          flex-wrap: wrap;
         }
 
         .tabs {
@@ -1734,6 +1826,10 @@ class AGSPanel extends HTMLElement {
         .home-grid {
           grid-template-columns: 1fr 1fr;
           align-items: start;
+        }
+
+        .home-dashboard-wrap {
+          min-height: 0;
         }
 
         .room-layout {
@@ -2021,6 +2117,67 @@ class AGSPanel extends HTMLElement {
           .home-grid, .cols-2, .room-layout { grid-template-columns: 1fr; }
           .table-row { grid-template-columns: 1fr 1fr; }
           .table-head { display: none; }
+          .home-grid { height: auto !important; }
+          .home-dashboard-wrap { min-height: 540px; }
+        }
+
+        @media (max-width: 720px) {
+          .page-header,
+          .card-head,
+          .device-summary {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .panel-card {
+            padding: 20px;
+          }
+          .title-block h1 {
+            font-size: 1.8rem;
+          }
+          .save-bar {
+            padding: 16px;
+          }
+          .save-bar .primary-btn {
+            width: 100%;
+            max-width: 100%;
+            padding: 14px 20px;
+            border-radius: 18px;
+          }
+          .header-meta {
+            width: 100%;
+          }
+        }
+
+        @media (max-width: 560px) {
+          .shell {
+            padding: 16px 12px 92px;
+          }
+          .panel-card,
+          .device-card,
+          .source-card {
+            padding: 16px;
+            border-radius: 20px;
+          }
+          .inline-grid,
+          .browse-results-grid {
+            grid-template-columns: 1fr;
+          }
+          .tab-btn,
+          .primary-btn,
+          .secondary-btn,
+          .danger-btn {
+            width: 100%;
+          }
+          .tabs {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            overflow: visible;
+          }
+          .table-row {
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
         }
       </style>
 
@@ -2028,10 +2185,10 @@ class AGSPanel extends HTMLElement {
         <div class="page-header">
           <div class="title-block">
             <h1>AGS Service</h1>
-            <p>${this.escapeHtml(headerInfo)}</p>
+            <p class="live-header-info">${this.escapeHtml(headerInfo)}</p>
           </div>
           <div class="header-meta">
-            ${this.renderStatusPill(status)}
+            <div class="page-status-slot">${this.renderStatusPill(status)}</div>
           </div>
         </div>
 
@@ -2067,6 +2224,8 @@ class AGSPanel extends HTMLElement {
       </div>
     `;
 
+    this._hasRendered = true;
+    this._lastAgsSignature = this.getAgsStateSignature();
     this.bindEntityPickers();
     this.bindEmbeddedDashboard();
   }

@@ -301,6 +301,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
             'create_sensors': cfg.get(CONF_CREATE_SENSORS, False),
             'default_on': cfg.get(CONF_DEFAULT_ON, False),
             'static_name': cfg.get(CONF_STATIC_NAME, ""),
+            'disable_tv_source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
             'disable_Tv_Source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
             'schedule_entity': cfg.get(CONF_SCHEDULE_ENTITY),
             'default_source_schedule': cfg.get("default_source_schedule"),
@@ -346,13 +347,13 @@ async def async_setup(hass: HomeAssistant, config: dict):
         webcomponent_name="ags-panel",
         sidebar_title="AGS Service",
         sidebar_icon="mdi:account-group",
-        module_url="/ags-static/ags-panel.js?v=2.2.0",
+        module_url="/ags-static/ags-panel.js?v=2.0.2",
         embed_iframe=False,
         trust_external=False,
     )
 
     # Register Lovelace Custom Card
-    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=1.1.0")
+    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.2")
 
     return True
 

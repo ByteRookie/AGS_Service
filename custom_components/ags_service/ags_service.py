@@ -14,6 +14,11 @@ SONOS_FAVORITE_PREFIX = "FV:"
 # Ghost TV ignore list
 TV_IGNORE_STATES = ['off', 'unavailable', 'unknown', 'standby', 'none', 'power_off', 'sleeping']
 
+SHORT_ACTION_DELAY = 0.15
+GROUP_SETTLE_DELAY = 0.35
+UNGROUP_TIMEOUT = 3
+GROUP_TIMEOUT = 2.5
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -619,12 +624,15 @@ def get_control_device_id(ags_config, hass):
     """Return the device that should receive control commands."""
     ags_status = hass.data.get('ags_status')
     primary_speaker = hass.data.get('primary_speaker')
+    homekit_player = hass.data.get(DOMAIN, {}).get("homekit_player")
 
     if not primary_speaker or primary_speaker == 'none':
         primary_speaker = hass.data.get('preferred_primary_speaker')
         hass.data['primary_speaker'] = primary_speaker
 
     if not primary_speaker or primary_speaker == 'none':
+        if homekit_player and hass.states.get(homekit_player) is not None:
+            return homekit_player
         return None
 
     primary_room = None
@@ -661,6 +669,12 @@ def get_control_device_id(ags_config, hass):
                 return ott_devices[0]['ott_device']
                 
             return tv_device.get('ott_device', tv_device['device_id'])
+
+    if primary_speaker and hass.states.get(primary_speaker) is not None:
+        return primary_speaker
+
+    if homekit_player and hass.states.get(homekit_player) is not None:
+        return homekit_player
 
     return primary_speaker
 
@@ -963,9 +977,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     for spk in all_speakers:
                         await enqueue_media_action(hass, "unjoin", {"entity_id": spk})
                 await enqueue_media_action(
-                    hass, "wait_ungrouped", {"entity_id": all_speakers, "timeout": 5}
+                    hass, "wait_ungrouped", {"entity_id": all_speakers, "timeout": UNGROUP_TIMEOUT}
                 )
-                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
 
             tv_speakers: list[str] = []
             regular_speakers: list[str] = []
@@ -1036,9 +1050,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             if extras and actions_enabled:
                 await enqueue_media_action(hass, "unjoin", {"entity_id": extras})
                 await enqueue_media_action(
-                    hass, "wait_ungrouped", {"entity_id": extras, "timeout": 3}
+                    hass, "wait_ungrouped", {"entity_id": extras, "timeout": UNGROUP_TIMEOUT}
                 )
-                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
                 for spk in extras:
                     state = hass.states.get(spk)
                     if not state or state.state == "unavailable":
@@ -1054,7 +1068,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         await enqueue_media_action(
                             hass, "media_stop", {"entity_id": spk}
                         )
-                    await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                    await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
             return
 
         state = hass.states.get(calculated)
@@ -1098,7 +1112,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                         "volume_level": master_state.attributes["volume_level"]
                     }
                 )
-                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
 
             # Join using only the followers (exclude the master from group_members)
             followers = [spk for spk in active_speakers if spk != calculated]
@@ -1109,7 +1123,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     {"entity_id": calculated, "group_members": followers},
                 )
                 # Short delay to let Sonos settle the group
-                await enqueue_media_action(hass, "delay", {"seconds": 1.0})
+                await enqueue_media_action(hass, "delay", {"seconds": GROUP_SETTLE_DELAY})
             else:
                 _LOGGER.debug("No followers to join to %s", calculated)
 
@@ -1117,9 +1131,9 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
             _LOGGER.info("AGS unjoining extra speakers from %s: %s", calculated, extra)
             await enqueue_media_action(hass, "unjoin", {"entity_id": extra})
             await enqueue_media_action(
-                hass, "wait_ungrouped", {"entity_id": extra, "timeout": 3}
+                hass, "wait_ungrouped", {"entity_id": extra, "timeout": UNGROUP_TIMEOUT}
             )
-            await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+            await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
             for spk in extra:
                 state = hass.states.get(spk)
                 if not state or state.state == "unavailable":
@@ -1133,7 +1147,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                     await enqueue_media_action(
                         hass, "media_stop", {"entity_id": spk}
                     )
-                await enqueue_media_action(hass, "delay", {"seconds": 0.5})
+                await enqueue_media_action(hass, "delay", {"seconds": SHORT_ACTION_DELAY})
 
         if (missing or extra) and actions_enabled:
             await wait_for_actions(hass)
@@ -1141,6 +1155,7 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 hass,
                 calculated,
                 active_speakers,
+                timeout=GROUP_TIMEOUT,
             )
             # Refresh the speaker state after grouping changes so the playback
             # check below evaluates the latest status.
@@ -1161,10 +1176,15 @@ async def handle_ags_status_change(hass, ags_config, new_status, old_status):
                 _LOGGER.debug("tv_mode set to no_music - skipping TV commands")
         elif new_status == "ON":
             if actions_enabled:
-                _LOGGER.info("Verifying music source on %s after transition/group change", calculated)
-                # Force source selection to ensure music starts even if we were already "ON"
-                # but the group just changed or playback was stalled.
-                await ags_select_source(ags_config, hass)
+                should_restore_music = old_status != "ON" or state.attributes.get("source") == "TV"
+                if should_restore_music:
+                    _LOGGER.info("Restoring music source on %s after status transition", calculated)
+                    await ags_select_source(ags_config, hass)
+                else:
+                    _LOGGER.debug(
+                        "Skipping source restore for %s because AGS stayed in music mode",
+                        calculated,
+                    )
 
     except Exception as exc:  # pragma: no cover - safety net
         _LOGGER.warning("Error handling AGS status change: %s", exc)
@@ -1185,5 +1205,3 @@ def get_browsing_fallback_speaker(rooms, hass):
     res = sorted_spks[0]['device_id']
     hass.data['browsing_fallback_speaker'] = res
     return res
-
-

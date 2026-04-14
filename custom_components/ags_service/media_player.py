@@ -5,7 +5,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
 )
 from homeassistant.const import STATE_IDLE
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 import asyncio
@@ -20,6 +20,8 @@ from .ags_service import (
 
 import logging
 _LOGGER = logging.getLogger(__name__)
+
+STATE_REFRESH_DEBOUNCE = 0.15
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the media player platform."""
@@ -104,6 +106,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
+        self._pending_refresh_unsub = None
+
+    async def async_will_remove_from_hass(self):
+        """Cancel scheduled refresh callbacks."""
+        if self._pending_refresh_unsub:
+            self._pending_refresh_unsub()
+            self._pending_refresh_unsub = None
+        await super().async_will_remove_from_hass()
 
     def _schedule_media_call(self, service: str, data: dict) -> None:
         """Safely fire a media_player service from any thread."""
@@ -223,6 +233,28 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
 
+    def _get_homekit_player_entity_id(self):
+        """Return the configured HomeKit bridge player when available."""
+        entity_id = self.hass.data.get(DOMAIN, {}).get("homekit_player")
+        if not entity_id:
+            return None
+        return entity_id if self.hass.states.get(entity_id) is not None else None
+
+    def _get_homekit_player_state(self):
+        """Return the configured HomeKit bridge entity state."""
+        entity_id = self._get_homekit_player_entity_id()
+        return self.hass.states.get(entity_id) if entity_id else None
+
+    def _get_reference_player_state(self):
+        """Return the best state object for metadata and command fallbacks."""
+        return self.primary_speaker_state or self._get_homekit_player_state()
+
+    def _get_command_target_entity_id(self):
+        """Return the entity that should receive direct transport commands."""
+        if self.primary_speaker_entity_id and self.hass.states.get(self.primary_speaker_entity_id):
+            return self.primary_speaker_entity_id
+        return self._get_homekit_player_entity_id()
+
 
 
     async def async_primary_speaker_changed(self, event):
@@ -245,9 +277,18 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 if not source_changed:
                     return
 
-        await update_ags_sensors(self.ags_config, self.hass)
-        self._refresh_from_data()
-        self.async_schedule_update_ha_state(True)
+        if self._pending_refresh_unsub:
+            self._pending_refresh_unsub()
+
+        async def _refresh(_now):
+            self._pending_refresh_unsub = None
+            await update_ags_sensors(self.ags_config, self.hass)
+            self._refresh_from_data()
+            self.async_schedule_update_ha_state(True)
+
+        self._pending_refresh_unsub = async_call_later(
+            self.hass, STATE_REFRESH_DEBOUNCE, _refresh
+        )
 
     def _build_source_details(self):
         """Expose AGS-configured sources for richer frontend rendering."""
@@ -608,7 +649,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "selected_source_name": self.hass.data.get("ags_media_player_source"),
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or [],
             "primary_speaker_room": self.primary_speaker_room,
-            "control_device_id": self.primary_speaker_entity_id,
+            "control_device_id": self._get_command_target_entity_id(),
+            "homekit_player_id": self._get_homekit_player_entity_id(),
             "browse_entity_id": self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else (self.preferred_primary_speaker if self.preferred_primary_speaker and self.preferred_primary_speaker != "none" else self.browsing_fallback_speaker),
             "current_tv_mode": self.hass.data.get("current_tv_mode"),
             "ags_sources": self._build_source_details(),
@@ -661,27 +703,31 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             
             # Return the state of the primary speaker
             return self.primary_speaker_state.state
-        else:
-            return STATE_IDLE
+
+        reference_state = self._get_homekit_player_state()
+        if reference_state is not None:
+            return reference_state.state
+
+        return STATE_IDLE
 
     @property
     def media_title(self):
-        
-        return self.primary_speaker_state.attributes.get('media_title') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_title') if reference_state else None
 
     @property
     def media_artist(self):
-        
-        return self.primary_speaker_state.attributes.get('media_artist') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_artist') if reference_state else None
 
     @property
     def entity_picture(self):
-        
-        return self.primary_speaker_state.attributes.get('entity_picture') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('entity_picture') if reference_state else None
     @property
     def is_volume_muted(self):
-        
-        return self.primary_speaker_state.attributes.get('is_volume_muted') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('is_volume_muted') if reference_state else None
 
     async def async_set_volume_level(self, volume):
         """Set the volume level for all active speakers."""
@@ -712,28 +758,28 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def media_content_type(self):
-        
-        return self.primary_speaker_state.attributes.get('media_content_type') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_content_type') if reference_state else None
     @property
     def media_duration(self):
-        
-        return self.primary_speaker_state.attributes.get('media_duration') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_duration') if reference_state else None
     @property
     def media_position(self):
-        
-        return self.primary_speaker_state.attributes.get('media_position') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_position') if reference_state else None
     @property
     def queue_size(self):
-        
-        return self.primary_speaker_state.attributes.get('queue_size') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('queue_size') if reference_state else None
 
 
 
 
     @property
     def media_position_updated_at(self):
-        
-        return self.primary_speaker_state.attributes.get('media_position_updated_at') if self.primary_speaker_state else None
+        reference_state = self._get_reference_player_state()
+        return reference_state.attributes.get('media_position_updated_at') if reference_state else None
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
         return (
@@ -757,9 +803,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_play_media(self, media_content_type, media_content_id, **kwargs):
         """Play media on the primary speaker."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'play_media', {
-                'entity_id': self.primary_speaker_entity_id,
+                'entity_id': target_entity_id,
                 'media_content_id': media_content_id,
                 'media_content_type': media_content_type,
                 **kwargs
@@ -768,9 +815,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_join_media(self, group_members):
         """Join speakers to the primary speaker's group."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'join', {
-                'entity_id': self.primary_speaker_entity_id,
+                'entity_id': target_entity_id,
                 'group_members': group_members
             })
             await self.async_update()
@@ -815,33 +863,37 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_media_play(self):
         """Play media."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_play', {
-                'entity_id': self.primary_speaker_entity_id
+                'entity_id': target_entity_id
             })
             await self.async_update()
 
     async def async_media_pause(self):
         """Pause media."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_pause', {
-                'entity_id': self.primary_speaker_entity_id
+                'entity_id': target_entity_id
             })
             await self.async_update()
 
     async def async_media_stop(self):
         """Stop media."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_stop', {
-                'entity_id': self.primary_speaker_entity_id
+                'entity_id': target_entity_id
             })
             await self.async_update()
 
     async def async_media_next_track(self):
         """Next track."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_next_track', {
-                'entity_id': self.primary_speaker_entity_id
+                'entity_id': target_entity_id
             })
             await self.async_update()
 
@@ -857,17 +909,19 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_media_previous_track(self):
         """Previous track."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_previous_track', {
-                'entity_id': self.primary_speaker_entity_id
+                'entity_id': target_entity_id
             })
             await self.async_update()
   
     async def async_media_seek(self, position):
         """Seek to a specific point in the media on the primary speaker."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'media_seek', {
-                'entity_id': self.primary_speaker_entity_id,
+                'entity_id': target_entity_id,
                 'seek_position': position
             })
             await self.async_update()
@@ -877,8 +931,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
 
         # Merge sources from the primary speaker if available
-        if self.primary_speaker_state and self.primary_speaker_state.attributes.get('source_list'):
-            speaker_sources = self.primary_speaker_state.attributes.get('source_list')
+        reference_state = self._get_reference_player_state()
+        if reference_state and reference_state.attributes.get('source_list'):
+            speaker_sources = reference_state.attributes.get('source_list')
             for src in speaker_sources:
                 if src not in sources:
                     sources.append(src)
@@ -889,10 +944,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def source(self):
         """Return the current input source."""
         if self.ags_status == "ON TV":
-            return self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None 
+            reference_state = self._get_reference_player_state()
+            return reference_state.attributes.get('source') if reference_state else None 
         else:
             # If the primary speaker is playing a source not in our ags_media_player_source, reflect it
-            current_spk_source = self.primary_speaker_state.attributes.get('source') if self.primary_speaker_state else None
+            reference_state = self._get_reference_player_state()
+            current_spk_source = reference_state.attributes.get('source') if reference_state else None
             ags_source = self.hass.data.get("ags_media_player_source")
             if current_spk_source and current_spk_source != ags_source:
                  # Check if the speaker source is one of our globals. If not, just show the speaker source.
@@ -924,9 +981,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 )
         else:
             # It must be a source from the primary speaker itself
-            if self.primary_speaker_entity_id:
+            target_entity_id = self._get_command_target_entity_id()
+            if target_entity_id:
                 await self.hass.services.async_call('media_player', 'select_source', {
-                    'entity_id': self.primary_speaker_entity_id,
+                    'entity_id': target_entity_id,
                     'source': source
                 })
 
@@ -935,32 +993,35 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def shuffle(self):
         """Return the shuffle state of the primary speaker."""
-        
-        if self.primary_speaker_state:
-            return self.primary_speaker_state.attributes.get('shuffle', False)
+        reference_state = self._get_reference_player_state()
+        if reference_state:
+            return reference_state.attributes.get('shuffle', False)
         return False
 
     @property
     def repeat(self):
         """Return the repeat state of the primary speaker."""
-        if self.primary_speaker_state:
-            return self.primary_speaker_state.attributes.get('repeat', 'off')
+        reference_state = self._get_reference_player_state()
+        if reference_state:
+            return reference_state.attributes.get('repeat', 'off')
         return 'off'
 
     async def async_set_shuffle(self, shuffle):
         """Enable/Disable shuffle mode."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'shuffle_set', {
-                'entity_id': self.primary_speaker_entity_id,
+                'entity_id': target_entity_id,
                 'shuffle': shuffle
             })
             await self.async_update()
 
     async def async_set_repeat(self, repeat):
         """Set repeat mode."""
-        if self.primary_speaker_entity_id:
+        target_entity_id = self._get_command_target_entity_id()
+        if target_entity_id:
             await self.hass.services.async_call('media_player', 'repeat_set', {
-                'entity_id': self.primary_speaker_entity_id,
+                'entity_id': target_entity_id,
                 'repeat':  repeat
             })
             await self.async_update()

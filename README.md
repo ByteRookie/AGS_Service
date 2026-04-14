@@ -1,4 +1,4 @@
-# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0)
+# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.2)
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FByteRookie%2FAGS_Service%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fags_news_mode.yaml)
 
@@ -74,6 +74,15 @@ type: custom:ags-media-card
 4. Restart Home Assistant.
 
 ## Changelog
+
+### v2.0.2
+- **Performance Improvements**: Reduced startup lag for source playback and tightened room add/remove grouping responsiveness.
+- **Smoother Media Card UX**: Fixed jumpy tab/dropdown behavior by preserving card state instead of re-rendering on every Home Assistant tick.
+- **Responsive Panel Fixes**: Improved mobile and tablet layouts for the AGS panel and embedded media card.
+- **State Refresh Optimization**: Debounced AGS media-player refreshes to avoid redundant full sensor recomputation during rapid device updates.
+- **Playback Stability**: Prevented unnecessary music restarts when room grouping changes while AGS is already in music mode.
+- **HomeKit Bridge Fixes**: Wired the configured `homekit_player` into metadata and transport fallbacks so Apple Home has a stable bridge entity.
+- **Release Hygiene**: Fixed `disable_tv_source` config consistency and refreshed frontend asset versions for reliable cache busting.
 
 ### v2.0.0
 - **Architectural Overhaul**: Transitioned to UI-driven configuration via `hass.helpers.storage`.
