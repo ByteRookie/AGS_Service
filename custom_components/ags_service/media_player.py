@@ -109,6 +109,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_status = None
         self.primary_speaker = None
         self.preferred_primary_speaker = None
+        self.browsing_fallback_speaker = None
         self.ags_source = None
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
