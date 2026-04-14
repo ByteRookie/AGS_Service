@@ -250,9 +250,11 @@ class AGSPanel extends HTMLElement {
     const status = attributes.ags_status || "OFF";
     const activeRooms = Array.isArray(attributes.active_rooms) ? attributes.active_rooms : [];
     const headerInfo =
-      activeRooms.length > 0
-        ? `Active in ${activeRooms[0]}${activeRooms.length > 1 ? ` + ${activeRooms.length - 1}` : ""}`
-        : "System Idle";
+      status === "OFF"
+        ? "Off"
+        : activeRooms.length > 0
+          ? `Active in ${activeRooms[0]}${activeRooms.length > 1 ? ` + ${activeRooms.length - 1}` : ""}`
+          : "Active";
 
     return { headerInfo, status };
   }
@@ -301,16 +303,11 @@ class AGSPanel extends HTMLElement {
       return;
     }
 
-    const { headerInfo, status } = this.getHeaderSummary();
+    const { headerInfo } = this.getHeaderSummary();
     const infoNode = this.shadowRoot.querySelector(".live-header-info");
-    const statusNode = this.shadowRoot.querySelector(".page-status-slot");
 
     if (infoNode) {
       infoNode.textContent = headerInfo;
-    }
-
-    if (statusNode) {
-      statusNode.innerHTML = this.renderStatusPill(status);
     }
   }
 
@@ -1244,7 +1241,7 @@ class AGSPanel extends HTMLElement {
     return `
       <div class="grid home-grid">
         <section class="home-dashboard-wrap">
-          <ags-media-card class="embedded-dashboard" style="width:100%; flex: 1;"></ags-media-card>
+          <ags-media-card class="embedded-dashboard" style="width:100%; flex:1; --ags-card-viewport-offset: 230px; --ags-card-max-width: 100%;"></ags-media-card>
         </section>
         <section class="panel-card home-entities-panel">
           <div class="card-head home-entities-head">
@@ -1291,6 +1288,15 @@ class AGSPanel extends HTMLElement {
     }
 
     this.navigate("/");
+  }
+
+  toggleMenu() {
+    this.dispatchEvent(
+      new CustomEvent("hass-toggle-menu", {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   renderEntitiesContent() {
@@ -1857,7 +1863,7 @@ class AGSPanel extends HTMLElement {
 
   render() {
     const agsState = this.getAgsState();
-    const { headerInfo, status } = this.getHeaderSummary(agsState);
+    const { headerInfo } = this.getHeaderSummary(agsState);
     const theme = this.getThemePalette();
 
     this.shadowRoot.innerHTML = `
@@ -1917,38 +1923,63 @@ class AGSPanel extends HTMLElement {
         }
 
         .page-header {
-          display: flex;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
           align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 24px;
+          gap: 14px;
+          margin-bottom: 18px;
+        }
+
+        .menu-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 46px;
+          height: 46px;
+          border-radius: 14px;
+          border: 1px solid var(--ags-border);
+          background: var(--ags-glass);
+          color: var(--primary-text-color);
+          cursor: pointer;
+          transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+        }
+
+        .menu-btn:hover {
+          background: var(--ags-subtle-strong);
+          border-color: var(--ags-border-strong);
+          transform: translateY(-1px);
+        }
+
+        .menu-btn ha-icon {
+          --mdc-icon-size: 24px;
+        }
+
+        .title-block {
+          min-width: 0;
+          display: flex;
+          align-items: baseline;
+          gap: 12px;
+          flex-wrap: wrap;
         }
 
         .title-block h1 {
           margin: 0;
-          font-size: 2.2rem;
-          font-weight: 900;
-          line-height: 1;
-          letter-spacing: -0.04em;
-          background: linear-gradient(135deg, var(--ags-primary), var(--ags-primary-strong));
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
+          font-size: 1.35rem;
+          font-weight: 800;
+          line-height: 1.1;
+          letter-spacing: -0.02em;
+          color: var(--primary-text-color);
         }
 
         .title-block p {
-          margin: 8px 0 0;
+          margin: 0;
           color: var(--ags-muted);
-          font-size: 1rem;
-          font-weight: 600;
+          font-size: 0.95rem;
+          font-weight: 700;
           max-width: 600px;
-        }
-
-        .header-meta {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          flex-wrap: wrap;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .tabs {
@@ -1986,12 +2017,6 @@ class AGSPanel extends HTMLElement {
           color: var(--ags-on-primary);
           border-color: var(--ags-primary);
           box-shadow: 0 8px 20px var(--ags-primary-soft);
-        }
-
-        .nav-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
         }
 
         .primary-btn {
@@ -2079,11 +2104,11 @@ class AGSPanel extends HTMLElement {
         }
 
         .home-grid {
-          grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+          grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
           align-items: start;
-          max-width: 1200px;
+          max-width: 1240px;
           margin: 0 auto;
-          min-height: min(900px, calc(100vh - 240px));
+          min-height: min(860px, calc(100dvh - 230px));
         }
 
         .home-dashboard-wrap {
@@ -2091,6 +2116,13 @@ class AGSPanel extends HTMLElement {
           min-width: 0;
           display: flex;
           flex-direction: column;
+          position: sticky;
+          top: calc(env(safe-area-inset-top, 0px) + 148px);
+        }
+
+        .embedded-dashboard {
+          display: block;
+          width: 100%;
         }
 
         .home-entities-panel {
@@ -2113,6 +2145,7 @@ class AGSPanel extends HTMLElement {
           padding-right: 4px;
           scroll-behavior: smooth;
           min-height: 0;
+          max-height: min(760px, calc(100dvh - 320px));
         }
 
         .room-layout {
@@ -2449,7 +2482,8 @@ class AGSPanel extends HTMLElement {
           .entities-head { grid-template-columns: 1fr 1fr; }
           .table-head { display: none; }
           .home-grid { min-height: 0; }
-          .home-dashboard-wrap { min-height: 540px; }
+          .home-dashboard-wrap { min-height: 540px; position: static; }
+          .home-entities-scroll { max-height: none; }
         }
 
         @media (max-width: 720px) {
@@ -2459,11 +2493,17 @@ class AGSPanel extends HTMLElement {
             flex-direction: column;
             align-items: stretch;
           }
+          .page-header {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+          }
           .panel-card {
             padding: 20px;
           }
           .title-block h1 {
-            font-size: 1.8rem;
+            font-size: 1.2rem;
           }
           .save-bar {
             padding: 16px;
@@ -2474,10 +2514,6 @@ class AGSPanel extends HTMLElement {
             padding: 14px 20px;
             border-radius: 18px;
           }
-          .header-meta {
-            width: 100%;
-            justify-content: stretch;
-          }
           .tabs {
             padding-bottom: 6px;
           }
@@ -2487,6 +2523,7 @@ class AGSPanel extends HTMLElement {
           .home-entities-scroll {
             overflow: visible;
             padding-right: 0;
+            max-height: none;
           }
         }
 
@@ -2514,13 +2551,14 @@ class AGSPanel extends HTMLElement {
           .danger-btn {
             width: 100%;
           }
-          .tabs .tab-btn,
-          .header-meta .secondary-btn {
+          .tabs .tab-btn {
             width: auto;
             flex: 0 0 auto;
           }
-          .header-meta > * {
-            min-width: 0;
+          .title-block {
+            gap: 6px;
+            align-items: flex-start;
+            flex-direction: column;
           }
           .table-row {
             grid-template-columns: 1fr;
@@ -2534,16 +2572,12 @@ class AGSPanel extends HTMLElement {
       <div class="shell">
         <div class="top-chrome">
           <div class="page-header">
+            <button class="menu-btn" aria-label="Toggle navigation menu" onclick="this.getRootNode().host.toggleMenu()">
+              <ha-icon icon="mdi:menu"></ha-icon>
+            </button>
             <div class="title-block">
               <h1>AGS Service</h1>
               <p class="live-header-info">${this.escapeHtml(headerInfo)}</p>
-            </div>
-            <div class="header-meta">
-              <button class="secondary-btn nav-btn" onclick="this.getRootNode().host.exitPortal()">
-                <ha-icon icon="mdi:arrow-left"></ha-icon>
-                <span>Back</span>
-              </button>
-              <div class="page-status-slot">${this.renderStatusPill(status)}</div>
             </div>
           </div>
 

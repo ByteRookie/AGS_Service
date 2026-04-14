@@ -12,6 +12,7 @@ class AgsMediaCard extends HTMLElement {
     this._showSourceMenu = false;
     this._pendingVolume = new Map();
     this._volumeTimers = new Map();
+    this._pendingRoomToggles = new Map();
     this._handleOutsideClick = this._handleOutsideClick.bind(this);
     this._handleKeydown = this._handleKeydown.bind(this);
   }
@@ -41,6 +42,7 @@ class AgsMediaCard extends HTMLElement {
     const hadBrowseItems = this._browseItems.length > 0;
     this._hass = hass;
     this._syncPendingVolumes();
+    this._syncPendingRoomToggles();
     if (this._config) {
       this.render();
       if (this._section === "browse" && !hadBrowseItems && !this._loadingBrowse) {
@@ -314,6 +316,7 @@ class AgsMediaCard extends HTMLElement {
       showSourceMenu: this._showSourceMenu,
       loadingBrowse: this._loadingBrowse,
       browseError: this._browseError,
+      pendingRoomToggles: Array.from(this._pendingRoomToggles.entries()),
       browseStack: this._browseStack.map((item) => `${item.media_content_type}:${item.media_content_id}`),
       browseItems: this._browseItems.map((item) => `${item.title}:${item.media_content_type}:${item.media_content_id}:${item.can_expand}:${item.can_play}`),
       theme: this.getThemeSignature(),
@@ -328,6 +331,7 @@ class AgsMediaCard extends HTMLElement {
             active_rooms: agsAttrs.active_rooms || [],
             room_details: agsAttrs.room_details || [],
             ags_sources: agsAttrs.ags_sources || [],
+            source_list: agsAttrs.source_list || [],
             browse_entity_id: agsAttrs.browse_entity_id,
             control_device_id: agsAttrs.control_device_id,
           }
@@ -410,6 +414,46 @@ class AgsMediaCard extends HTMLElement {
           this._volumeTimers.delete(entityId);
         }
       }
+    }
+  }
+
+  _syncPendingRoomToggles() {
+    if (!this._hass || !this._pendingRoomToggles.size) return;
+    for (const [entityId, desiredState] of this._pendingRoomToggles.entries()) {
+      const actualState = this._hass.states?.[entityId]?.state === "on";
+      if (actualState === desiredState) {
+        this._pendingRoomToggles.delete(entityId);
+      }
+    }
+  }
+
+  getRoomDesiredState(entityId, active) {
+    if (entityId && this._pendingRoomToggles.has(entityId)) {
+      return this._pendingRoomToggles.get(entityId);
+    }
+    return Boolean(active);
+  }
+
+  isRoomTogglePending(entityId) {
+    return entityId ? this._pendingRoomToggles.has(entityId) : false;
+  }
+
+  async toggleRoom(entityId, active) {
+    if (!this._hass || !entityId || this.isRoomTogglePending(entityId)) return;
+    const nextState = !Boolean(active);
+    this._pendingRoomToggles.set(entityId, nextState);
+    this.render(true);
+    try {
+      await this._hass.callService("switch", nextState ? "turn_on" : "turn_off", {
+        entity_id: entityId,
+      });
+    } finally {
+      window.setTimeout(() => {
+        if (this._pendingRoomToggles.get(entityId) === nextState) {
+          this._pendingRoomToggles.delete(entityId);
+          this.render(true);
+        }
+      }, 1200);
     }
   }
 
@@ -516,48 +560,26 @@ class AgsMediaCard extends HTMLElement {
     const duration = Number(control?.attributes?.media_duration || 0);
     const pos = this.getLiveMediaPosition(control || ags);
     const prog = duration > 0 ? (pos / duration) * 100 : 0;
-    const sourceLabel = ags.attributes.selected_source_name || ags.attributes.source || "Ready";
-    const sourceMenuId = "ags-source-menu";
-
-    const agsSources = this.toArray(ags.attributes.ags_sources);
-    const nativeSources = this.toArray(ags.attributes.source_list);
-
     return `
       <div class="player-view">
-        <div class="hero-strip" style="position: relative;">
-          <button
-            type="button"
-            class="hero-pill hero-trigger clickable"
-            aria-haspopup="menu"
-            aria-expanded="${this._showSourceMenu ? "true" : "false"}"
-            aria-controls="${sourceMenuId}"
-            onclick="this.getRootNode().host.toggleSourceMenu()"
-          >
-            ${this.escapeHtml(sourceLabel)}
-            <ha-icon icon="mdi:chevron-down" style="--mdc-icon-size: 14px; margin-left: 4px;"></ha-icon>
-          </button>
-          ${this._showSourceMenu ? `
-            <div id="${sourceMenuId}" class="source-menu card-glass" role="menu" aria-label="Select Source" style="position: absolute; top: 48px; left: 0; z-index: 100; min-width: 200px;">
-              <div style="font-size:0.7rem; font-weight:900; padding:8px 16px; color:var(--text-sec); text-transform:uppercase;">Select Source</div>
-              ${agsSources.map(s => `<button type="button" role="menuitem" class="source-menu-item" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${s.name}'})">${this.escapeHtml(s.name)}</button>`).join("")}
-              ${nativeSources.filter(s => !agsSources.find(as => as.name === s)).map(s => `<button type="button" role="menuitem" class="source-menu-item" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${s}'})">${this.escapeHtml(s)}</button>`).join("")}
+        <div class="player-main">
+          <div class="art-focal">
+            <div class="art-stack ${isTv ? 'tv-gradient' : ''}">
+              <div class="art-aura"></div>
+              ${pic && !isTv ? `<img class="main-art" src="${pic}" />` : `
+                <div class="idle-art">
+                  <ha-icon icon="${isTv ? 'mdi:television-classic' : 'mdi:music-note-plus'}"></ha-icon>
+                </div>
+              `}
             </div>
-          ` : ""}
-          <span class="hero-pill subtle">${this.escapeHtml(isTv ? "TV Session" : isPlaying ? "Live Playback" : "Standby")}</span>
-        </div>
-        <div class="art-focal">
-          <div class="art-stack ${isTv ? 'tv-gradient' : ''}">
-            <div class="art-aura"></div>
-            ${pic && !isTv ? `<img class="main-art" src="${pic}" />` : `
-              <div class="idle-art">
-                <ha-icon icon="${isTv ? 'mdi:television-classic' : 'mdi:music-note-plus'}"></ha-icon>
-              </div>
-            `}
           </div>
-        </div>
-        <div class="track-info">
-          <div class="track-title">${this.escapeHtml(title)}</div>
-          <div class="track-subtitle">${this.escapeHtml(subtitle)}</div>
+          <div class="track-info">
+            <div class="track-flags">
+              <span class="hero-pill subtle">${this.escapeHtml(isTv ? "TV Session" : isPlaying ? "Live Playback" : "Standby")}</span>
+            </div>
+            <div class="track-title">${this.escapeHtml(title)}</div>
+            <div class="track-subtitle">${this.escapeHtml(subtitle)}</div>
+          </div>
         </div>
         <div class="playback-controls">
           <div class="progress-bar"><div class="progress-fill" style="width:${prog}%;"></div></div>
@@ -643,10 +665,17 @@ class AgsMediaCard extends HTMLElement {
     const currentSrc = ags.attributes.source || ags.attributes.selected_source_name || "Idle";
     const isSystemOn = ags.state !== "off";
     const theme = this.getThemePalette();
+    const sourceMenuId = "ags-source-menu";
+    const agsSources = this.toArray(ags.attributes.ags_sources);
+    const nativeSources = this.toArray(ags.attributes.source_list);
+    const statusTone = ags.attributes.ags_status === "ON TV"
+      ? "status-live"
+      : (isSystemOn ? "status-ready" : "status-offline");
     
     const main = ags.attributes.primary_speaker_room || (active.length > 0 ? active[0] : "");
     const others = active.length > 1 ? ` + ${active.length - 1}` : "";
     const headerInfo = active.length > 0 ? `${main}${others}` : "System Idle";
+    const sectionBodyClass = this._section === "player" ? "section-body section-player" : "section-body";
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -692,19 +721,25 @@ class AgsMediaCard extends HTMLElement {
           opacity: 0.22;
         }
         
-        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, var(--primary-soft), transparent 28%), var(--card-bg-strong); color: var(--text); max-width: 420px; width: 100%; margin: 0 auto; aspect-ratio: 0.72 / 1; min-height: 640px; display: flex; flex-direction: column; border: 1px solid var(--outline); box-shadow: var(--ha-card-box-shadow, var(--shadow)); transition: all 0.3s; }
+        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, var(--primary-soft), transparent 28%), var(--card-bg-strong); color: var(--text); max-width: var(--ags-card-max-width, 420px); width: 100%; margin: 0 auto; height: min(760px, max(520px, calc(100dvh - var(--ags-card-viewport-offset, 32px)))); min-height: min(520px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); display: flex; flex-direction: column; border: 1px solid var(--outline); box-shadow: var(--ha-card-box-shadow, var(--shadow)); transition: all 0.3s; }
         .surface { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; background: linear-gradient(180deg, var(--glass) 0%, var(--card-bg-strong) 78%); }
-        .card-header { padding: 16px 20px 0; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-        .header-picker-wrap { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; position: relative; }
-        .header-rooms { font-size: 0.82rem; font-weight: 800; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+        .card-header { padding: 16px 20px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; border-bottom: 1px solid var(--divider); background: linear-gradient(180deg, var(--glass-heavy), var(--glass)); }
+        .header-picker-wrap { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; position: relative; }
+        .header-rooms { font-size: 0.82rem; font-weight: 800; color: var(--text-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; }
+        .header-meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; min-width: 0; }
         .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .section-body { flex: 1; padding: 12px 20px 20px; overflow-y: auto; scrollbar-width: none; position: relative; }
+        .section-body { flex: 1; min-height: 0; padding: 16px 20px calc(106px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; scrollbar-width: none; position: relative; }
         .section-body::-webkit-scrollbar { display: none; }
+        .section-player { overflow: hidden; padding-bottom: 20px; display: flex; }
         .list-card { background: var(--glass); backdrop-filter: blur(10px); border: 1px solid var(--outline); border-radius: 18px; transition: 0.2s; }
         .master-vol-card { padding: 18px; background: linear-gradient(145deg, var(--primary-strong), var(--card-bg-soft)); color: var(--text); box-shadow: var(--control-shadow); }
-        .hero-strip { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
         .hero-pill { padding: 7px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 900; letter-spacing: 0.02em; background: var(--primary-soft); color: var(--text); border: 1px solid var(--primary-strong); }
         .hero-trigger { display: inline-flex; align-items: center; gap: 4px; }
+        .status-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
+        .status-chip::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: currentColor; opacity: 0.9; flex-shrink: 0; }
+        .status-live { background: var(--primary-soft); color: var(--text); border-color: var(--primary-strong); }
+        .status-ready { background: var(--subdued); color: var(--text); border-color: var(--outline); }
+        .status-offline { background: var(--glass); color: var(--text-sec); border-color: var(--outline); }
         .hero-pill.clickable {
           cursor: pointer;
           transition: all 0.2s ease;
@@ -715,16 +750,19 @@ class AgsMediaCard extends HTMLElement {
           transform: translateY(-1px);
         }
         .hero-pill.subtle { background: var(--glass); color: var(--text-sec); border-color: var(--outline); }
-        .art-focal { display: flex; justify-content: center; margin-bottom: 16px; }
-        .art-stack { position: relative; width: 188px; height: 188px; border-radius: 28px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--outline); background: linear-gradient(160deg, var(--primary-soft), var(--subdued)); }
+        .player-view { width: 100%; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 16px; }
+        .player-main { min-height: 0; display: grid; grid-template-columns: minmax(136px, 172px) minmax(0, 1fr); gap: 18px; align-items: center; }
+        .art-focal { display: flex; justify-content: center; margin-bottom: 0; }
+        .art-stack { position: relative; width: min(100%, 172px); aspect-ratio: 1 / 1; border-radius: 28px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--outline); background: linear-gradient(160deg, var(--primary-soft), var(--subdued)); }
         .art-aura { position: absolute; inset: auto -10% -30% -10%; height: 55%; background: radial-gradient(circle at center, var(--primary-halo), transparent 70%); pointer-events: none; z-index: 0; }
         .tv-gradient { background: linear-gradient(135deg, #1a237e, #4a148c); display: flex; align-items: center; justify-content: center; }
         .main-art { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
         .idle-art { position: relative; z-index: 1; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text); opacity: 0.42; }
         .idle-art ha-icon { --mdc-icon-size: 64px; }
-        .track-info { text-align: center; margin-bottom: 14px; padding: 0 10px; }
-        .track-title { font-size: 1.35rem; font-weight: 900; letter-spacing: -0.03em; margin-bottom: 4px; color: var(--text); }
-        .track-subtitle { font-size: 0.9rem; color: var(--text-sec); font-weight: 700; }
+        .track-info { min-width: 0; text-align: left; margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+        .track-flags { display: flex; flex-wrap: wrap; gap: 8px; }
+        .track-title { font-size: clamp(1.15rem, 2vw, 1.5rem); font-weight: 900; letter-spacing: -0.03em; margin: 0; color: var(--text); line-height: 1.08; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .track-subtitle { font-size: 0.92rem; color: var(--text-sec); font-weight: 700; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .playback-controls { padding: 16px; background: var(--glass); border-radius: 24px; border: 1px solid var(--outline); }
         .progress-bar { height: 6px; background: var(--scrubber); border-radius: 999px; overflow: hidden; }
         .progress-fill { height: 100%; background: var(--primary); transition: width 0.3s; }
@@ -736,6 +774,7 @@ class AgsMediaCard extends HTMLElement {
         .icon-btn,
         .slider-icon-btn,
         .footer-btn,
+        .room-toggle-btn,
         .hero-trigger,
         .source-menu-item,
         .action-card {
@@ -752,6 +791,7 @@ class AgsMediaCard extends HTMLElement {
         .icon-btn:focus-visible,
         .slider-icon-btn:focus-visible,
         .footer-btn:focus-visible,
+        .room-toggle-btn:focus-visible,
         .play-btn:focus-visible,
         .power-toggle:focus-visible,
         .hero-trigger:focus-visible,
@@ -766,6 +806,7 @@ class AgsMediaCard extends HTMLElement {
         .icon-btn:hover,
         .slider-icon-btn:hover,
         .footer-btn:hover,
+        .room-toggle-btn:hover,
         .play-btn:hover,
         .power-toggle:hover,
         .action-card:hover {
@@ -799,8 +840,9 @@ class AgsMediaCard extends HTMLElement {
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -6px; border-radius: 50%; border: 3px solid var(--card-bg-strong); background: var(--primary); box-shadow: var(--control-shadow); }
         input[type=range]::-moz-range-track { height: 8px; border-radius: 999px; background: var(--scrubber); }
         input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; border: 3px solid var(--card-bg-strong); background: var(--primary); box-shadow: var(--control-shadow); }
-        .footer { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 12px 16px 24px; background: var(--glass); border-top: 1px solid var(--outline); }
-        .footer-btn { border-radius: 16px; padding: 12px 0; color: var(--text-sec); min-height: 48px; }
+        .footer { position: sticky; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(180deg, rgba(0, 0, 0, 0), var(--glass-heavy) 18%); border-top: 1px solid var(--outline); backdrop-filter: blur(18px); }
+        .footer-btn { border-radius: 16px; padding: 12px 0; color: var(--text-sec); min-height: 52px; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 800; }
+        .footer-btn ha-icon { --mdc-icon-size: 22px; }
         .footer-btn.active { background: var(--primary-soft); color: var(--text); border-color: var(--primary-strong); }
         .browse-grid, .fav-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
         .browse-item { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 0; cursor: pointer; border-radius: 18px; }
@@ -837,31 +879,50 @@ class AgsMediaCard extends HTMLElement {
         .source-menu-item { width: 100%; text-align: left; padding: 12px 16px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.9rem; transition: 0.2s; border-bottom: 1px solid var(--divider); border-left: none; border-right: none; border-top: none; }
         .source-menu-item:hover { background: var(--primary-soft); color: var(--text); }
         .source-menu-item:last-child { border-bottom: none; }
+        .rooms-view { display: flex; flex-direction: column; gap: 10px; }
+        .room-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; margin-bottom: 0; }
+        .room-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+        .room-title { font-weight: 800; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .room-meta { font-size: 0.76rem; color: var(--text-sec); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+        .room-toggle-btn { min-width: 112px; min-height: 46px; padding: 10px 14px; border-radius: 14px; justify-content: center; gap: 8px; font-weight: 800; box-shadow: var(--control-shadow); }
+        .room-toggle-btn.on { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+        .room-toggle-btn.off { background: var(--glass-heavy); color: var(--text); }
+        .room-toggle-btn.pending { opacity: 0.72; pointer-events: none; }
+        .room-toggle-btn ha-circular-progress { --mdc-circular-progress-size: 18px; }
         @media (max-width: 768px) {
-          ha-card { max-width: 100%; min-height: 0; aspect-ratio: auto; }
-          .card-header { padding: 14px 14px 0; }
-          .section-body { padding: 10px 14px 16px; }
-          .art-stack { width: 160px; height: 160px; border-radius: 24px; }
-          .track-title { font-size: 1.15rem; }
+          ha-card { max-width: 100%; height: min(720px, max(500px, calc(100dvh - var(--ags-card-viewport-offset, 24px)))); min-height: min(500px, calc(100dvh - 12px)); }
+          .card-header { padding: 14px 14px 12px; }
+          .section-body { padding: 14px 14px calc(100px + env(safe-area-inset-bottom, 0px)); }
+          .section-player { padding-bottom: 16px; }
+          .player-main { grid-template-columns: 148px minmax(0, 1fr); gap: 14px; }
+          .art-stack { width: min(100%, 148px); border-radius: 24px; }
           .buttons-row { gap: 8px; }
           .source-menu { left: 0 !important; right: 0; min-width: 0 !important; width: auto; }
-          .footer { padding: 8px 10px 18px; }
+          .footer { padding: 8px 10px calc(14px + env(safe-area-inset-bottom, 0px)); }
           .volume-card-head { flex-direction: column; align-items: flex-start; }
+          .room-toggle-btn { min-width: 104px; }
         }
         @media (max-width: 420px) {
           .browse-grid, .fav-grid { grid-template-columns: 1fr; }
           ha-card { max-width: 100%; }
-          .hero-strip { justify-content: stretch; }
-          .hero-pill { width: 100%; text-align: center; }
+          .card-header { grid-template-columns: 1fr; }
+          .header-actions { width: 100%; justify-content: stretch; }
+          .header-meta-row { gap: 6px; }
+          .hero-pill { max-width: 100%; text-align: center; }
           .play-btn { width: 58px; height: 58px; }
           .footer { grid-template-columns: repeat(5, minmax(48px, 1fr)); }
           .footer-btn { padding: 10px 0; }
-          .header-actions { width: 100%; justify-content: space-between; }
           .power-toggle { flex: 1; justify-content: center; }
+          .settings-btn { flex: 0 0 48px; width: 48px; height: 48px; }
+          .player-main { grid-template-columns: 1fr; justify-items: center; }
+          .track-info { align-items: center; text-align: center; }
+          .track-flags { justify-content: center; }
           .slider-shell,
           .slider-shell-master { grid-template-columns: 36px minmax(0, 1fr) 36px; gap: 8px; }
           .slider-icon-btn { width: 36px; height: 36px; }
           .section-body { padding-inline: 12px; }
+          .room-row { grid-template-columns: 1fr; }
+          .room-toggle-btn { width: 100%; }
         }
       </style>
       <ha-card>
@@ -870,6 +931,27 @@ class AgsMediaCard extends HTMLElement {
           <div class="card-header">
             <div class="header-picker-wrap">
               <div class="header-rooms">${this.escapeHtml(headerInfo)}</div>
+              <div class="header-meta-row">
+                <button
+                  type="button"
+                  class="hero-pill hero-trigger clickable"
+                  aria-haspopup="menu"
+                  aria-expanded="${this._showSourceMenu ? "true" : "false"}"
+                  aria-controls="${sourceMenuId}"
+                  onclick="this.getRootNode().host.toggleSourceMenu()"
+                >
+                  ${this.escapeHtml(currentSrc)}
+                  <ha-icon icon="mdi:chevron-down" style="--mdc-icon-size: 14px; margin-left: 4px;"></ha-icon>
+                </button>
+                <span class="hero-pill status-chip ${statusTone}">${this.escapeHtml(ags.attributes.ags_status || "OFF")}</span>
+              </div>
+              ${this._showSourceMenu ? `
+                <div id="${sourceMenuId}" class="source-menu card-glass" role="menu" aria-label="Select Source" style="top: calc(100% + 8px); left: 0;">
+                  <div style="font-size:0.7rem; font-weight:900; padding:8px 16px; color:var(--text-sec); text-transform:uppercase;">Select Source</div>
+                  ${agsSources.map(s => `<button type="button" role="menuitem" class="source-menu-item" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${s.name}'})">${this.escapeHtml(s.name)}</button>`).join("")}
+                  ${nativeSources.filter(s => !agsSources.find(as => as.name === s)).map(s => `<button type="button" role="menuitem" class="source-menu-item" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${s}'})">${this.escapeHtml(s)}</button>`).join("")}
+                </div>
+              ` : ""}
             </div>
             <div class="header-actions">
               <button type="button" class="power-toggle ${isSystemOn ? 'on' : 'off'}" aria-pressed="${isSystemOn ? "true" : "false"}" onclick="this.getRootNode().host.callService('media_player', '${isSystemOn ? 'turn_off' : 'turn_on'}', {entity_id: '${ags.entity_id}'})">
@@ -879,7 +961,7 @@ class AgsMediaCard extends HTMLElement {
               <button type="button" class="icon-btn settings-btn" aria-label="Open AGS settings" onclick="this.getRootNode().host.openPortal()"><ha-icon icon="mdi:cog"></ha-icon></button>
             </div>
           </div>
-          <div class="section-body">
+          <div class="${sectionBodyClass}">
             ${this._section === "favorites" ? this.renderFavorites(ags) :
               this._section === "rooms" ? this.renderRooms(ags) :
               this._section === "browse" ? this.renderBrowse() :
@@ -887,11 +969,11 @@ class AgsMediaCard extends HTMLElement {
               this.renderPlayerSection(ags, control)}
           </div>
           <div class="footer">
-            <button type="button" class="footer-btn ${this._section==='player'?'active':''}" aria-label="Player" onclick="this.getRootNode().host.setSection('player')"><ha-icon icon="mdi:play-circle"></ha-icon><span class="sr-only">Player</span></button>
-            <button type="button" class="footer-btn ${this._section==='favorites'?'active':''}" aria-label="Favorites" onclick="this.getRootNode().host.setSection('favorites')"><ha-icon icon="mdi:star"></ha-icon><span class="sr-only">Favorites</span></button>
-            <button type="button" class="footer-btn ${this._section==='browse'?'active':''}" aria-label="Browse" onclick="this.getRootNode().host.setSection('browse')"><ha-icon icon="mdi:folder-music"></ha-icon><span class="sr-only">Browse</span></button>
-            <button type="button" class="footer-btn ${this._section==='rooms'?'active':''}" aria-label="Groups" onclick="this.getRootNode().host.setSection('rooms')"><ha-icon icon="mdi:speaker-multiple"></ha-icon><span class="sr-only">Groups</span></button>
-            <button type="button" class="footer-btn ${this._section==='volumes'?'active':''}" aria-label="Volume" onclick="this.getRootNode().host.setSection('volumes')"><ha-icon icon="mdi:tune-vertical"></ha-icon><span class="sr-only">Volume</span></button>
+            <button type="button" class="footer-btn ${this._section==='player'?'active':''}" aria-label="Player" onclick="this.getRootNode().host.setSection('player')"><ha-icon icon="mdi:play-circle"></ha-icon><span>Player</span></button>
+            <button type="button" class="footer-btn ${this._section==='favorites'?'active':''}" aria-label="Favorites" onclick="this.getRootNode().host.setSection('favorites')"><ha-icon icon="mdi:star"></ha-icon><span>Favorites</span></button>
+            <button type="button" class="footer-btn ${this._section==='browse'?'active':''}" aria-label="Browse" onclick="this.getRootNode().host.setSection('browse')"><ha-icon icon="mdi:folder-music"></ha-icon><span>Browse</span></button>
+            <button type="button" class="footer-btn ${this._section==='rooms'?'active':''}" aria-label="Groups" onclick="this.getRootNode().host.setSection('rooms')"><ha-icon icon="mdi:speaker-multiple"></ha-icon><span>Rooms</span></button>
+            <button type="button" class="footer-btn ${this._section==='volumes'?'active':''}" aria-label="Volume" onclick="this.getRootNode().host.setSection('volumes')"><ha-icon icon="mdi:tune-vertical"></ha-icon><span>Volume</span></button>
           </div>
         </div>
       </ha-card>
@@ -914,11 +996,28 @@ class AgsMediaCard extends HTMLElement {
 
   renderRooms(ags) {
     const r = this.toArray(ags.attributes.room_details);
-    return `<div class="rooms-view"><div class="view-title">Groups</div>${r.map(room => `
-      <div class="list-card browse-item" style="padding:12px 16px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border-radius:12px;">
-        <div style="overflow:hidden; flex:1;"><div style="font-weight:800; font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(room.name)}</div><div style="font-size:0.7rem; color:var(--text-sec);">${room.active?'Active':'Idle'}</div></div>
-        <ha-switch aria-label="Toggle ${this.escapeHtml(room.name)}" ${room.active?'checked':''} onclick="this.getRootNode().host.callService('switch', 'toggle', {entity_id: '${room.switch_entity_id}'})"></ha-switch>
-      </div>`).join("")}</div>`;
+    return `<div class="rooms-view"><div class="view-title">Groups</div>${r.map(room => {
+      const active = this.getRoomDesiredState(room.switch_entity_id, room.active);
+      const pending = this.isRoomTogglePending(room.switch_entity_id);
+      return `
+      <div class="list-card room-row">
+        <div class="room-copy">
+          <div class="room-title">${this.escapeHtml(room.name)}</div>
+          <div class="room-meta">${active ? "Included in group" : "Excluded from group"}</div>
+        </div>
+        <button
+          type="button"
+          class="room-toggle-btn ${active ? "on" : "off"} ${pending ? "pending" : ""}"
+          aria-pressed="${active ? "true" : "false"}"
+          aria-label="${active ? "Turn off" : "Turn on"} ${this.escapeHtml(room.name)}"
+          ${pending ? "disabled" : ""}
+          onclick="this.getRootNode().host.toggleRoom('${room.switch_entity_id}', ${room.active ? "true" : "false"})"
+        >
+          ${pending ? '<ha-circular-progress active indeterminate></ha-circular-progress>' : `<ha-icon icon="${active ? "mdi:power-plug" : "mdi:power-plug-off"}"></ha-icon>`}
+          <span>${pending ? "Updating" : active ? "On" : "Off"}</span>
+        </button>
+      </div>`;
+    }).join("")}</div>`;
   }
 
   renderBrowse() {

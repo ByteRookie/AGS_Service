@@ -1,4 +1,4 @@
-# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.3)
+# 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.4)
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FByteRookie%2FAGS_Service%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fags_news_mode.yaml)
 
@@ -74,6 +74,12 @@ type: custom:ags-media-card
 4. Restart Home Assistant.
 
 ## Changelog
+
+### v2.0.4
+- **HA-Style Portal Header**: Reworked the AGS sidebar header to use a Home Assistant-style menu button, cleaner title bar, and a single live status line instead of separate portal header controls.
+- **Home Layout Cleanup**: Tightened the Home page composition so the embedded media player aligns better with the entity/status panel and behaves more consistently across screen sizes.
+- **Embedded Card Fit Fixes**: Reworked the media card shell so the top controls fit on the first row, the player avoids unnecessary vertical scrolling, and Favorites/Browse content scrolls under the bottom nav instead of pushing it off-screen on mobile.
+- **Better Room Controls**: Replaced the awkward room switch interaction with larger right-aligned action buttons and a short pending state so room on/off changes feel cleaner and easier to use.
 
 ### v2.0.3
 - **Core Logic Stability**: Restored the broader `v2.0.1` TV/music decision behavior for switched-on rooms while keeping the faster grouping timing improvements from `v2.0.2`.

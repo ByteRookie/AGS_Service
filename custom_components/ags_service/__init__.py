@@ -358,13 +358,13 @@ async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
         webcomponent_name="ags-panel",
         sidebar_title="AGS Service",
         sidebar_icon="mdi:account-group",
-        module_url="/ags-static/ags-panel.js?v=2.0.3",
+        module_url="/ags-static/ags-panel.js?v=2.0.4",
         embed_iframe=False,
         trust_external=False,
     )
 
     # Register Lovelace Custom Card
-    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.3")
+    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.4")
 
     hass.data[DOMAIN]["_runtime_initialized"] = True
 
