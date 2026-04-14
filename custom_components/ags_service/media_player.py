@@ -36,7 +36,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async def reload_handler(_):
         await ags_media_player.async_update()
     
-    hass.helpers.dispatcher.async_connect(SIGNAL_AGS_RELOAD, reload_handler)
+    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, reload_handler)
     
     tracked_entities = set()
     unsubs = []
@@ -78,6 +78,11 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     # Listen for hot reload to update tracking
     async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
+
+
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up the media player platform from a config entry."""
+    await async_setup_platform(hass, {}, async_add_entities)
 
 class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     _attr_device_class = MediaPlayerDeviceClass.TV

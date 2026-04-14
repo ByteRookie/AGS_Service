@@ -251,7 +251,22 @@ logging.getLogger(__name__).setLevel(logging.INFO)
 
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the custom component."""
-    
+    await _async_initialize_runtime(hass, config)
+
+    if not hass.config_entries.async_entries(DOMAIN):
+        # Legacy YAML mode: discover platforms directly.
+        await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
+        await async_load_platform(hass, 'switch', DOMAIN, {}, config)
+        await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
+
+    return True
+
+
+async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
+    """Initialize shared runtime state, storage, websocket endpoints, and panel."""
+    if DOMAIN in hass.data and hass.data[DOMAIN].get("_runtime_initialized"):
+        return True
+
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     stored_config = await store.async_load()
 
@@ -308,7 +323,8 @@ async def async_setup(hass: HomeAssistant, config: dict):
             'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
         })
 
-    hass.data[DOMAIN] = {'store': store}
+    existing = hass.data.get(DOMAIN, {})
+    hass.data[DOMAIN] = {**existing, 'store': store}
     apply_config(stored_config)
     hass.data[DOMAIN]['apply_config'] = apply_config
 
@@ -322,11 +338,6 @@ async def async_setup(hass: HomeAssistant, config: dict):
     # Initialize synchronization primitives used for sensor updates
     hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
 
-
-    # Load the sensor and switch platforms
-    await async_load_platform(hass, 'sensor', DOMAIN, {}, config)
-    await async_load_platform(hass, 'switch', DOMAIN, {}, config)
-    await async_load_platform(hass, 'media_player', DOMAIN, {}, config)
 
     # Register WebSocket API endpoints
     websocket_api.async_register_command(hass, ws_get_config)
@@ -355,6 +366,17 @@ async def async_setup(hass: HomeAssistant, config: dict):
     # Register Lovelace Custom Card
     add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.3")
 
+    hass.data[DOMAIN]["_runtime_initialized"] = True
+
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry):
+    """Set up AGS Service from a config entry."""
+    await _async_initialize_runtime(hass, {DOMAIN: entry.data or {}})
+    await hass.config_entries.async_forward_entry_setups(
+        entry, ["sensor", "switch", "media_player"]
+    )
     return True
 
 @websocket_api.websocket_command({
@@ -422,6 +444,9 @@ async def async_unload_entry(hass, entry):
     # Cancel the action queue worker
     if DOMAIN in hass.data and "action_worker" in hass.data[DOMAIN]:
         hass.data[DOMAIN]["action_worker"].cancel()
+        hass.data[DOMAIN].pop("action_worker", None)
+        hass.data[DOMAIN].pop("action_queue", None)
+        hass.data[DOMAIN].pop("_runtime_initialized", None)
     
     # Unload platforms (sensor, switch, media_player)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "media_player"])

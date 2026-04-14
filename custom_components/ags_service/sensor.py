@@ -106,6 +106,11 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities(sensors, True)
 
 
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up the sensor platform from a config entry."""
+    await async_setup_platform(hass, {}, async_add_entities)
+
+
 
 # Sensor for configured rooms
 class ConfiguredRoomsSensor(SensorEntity):
@@ -310,5 +315,4 @@ class AGSInactiveTVSpeakersSensor(SensorEntity):
         ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         return ags_inactive_tv_speakers
    
-
 

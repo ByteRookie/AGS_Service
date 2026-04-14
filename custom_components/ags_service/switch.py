@@ -67,6 +67,15 @@ async def async_setup_platform(
 
     await ensure_action_queue(hass)
 
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the switch platform from a config entry."""
+    await async_setup_platform(hass, {}, async_add_entities)
+
 class RoomSwitch(SwitchEntity, RestoreEntity):
     """Representation of a Switch for each Room."""
 
