@@ -112,12 +112,14 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
     async def async_added_to_hass(self):
         """Run when entity about to be added to hass."""
@@ -126,6 +128,8 @@ class RoomSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
+            if DOMAIN in self.hass.data:
+                await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
 class AGSActionsSwitch(SwitchEntity, RestoreEntity):
     """Global switch controlling join/unjoin actions."""
@@ -150,11 +154,13 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         self._attr_is_on = True
         self.hass.data[self._attr_unique_id] = True
         self.async_write_ha_state()
+        await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
     async def async_turn_off(self, **kwargs) -> None:
         self._attr_is_on = False
         self.hass.data[self._attr_unique_id] = False
         self.async_write_ha_state()
+        await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -162,6 +168,8 @@ class AGSActionsSwitch(SwitchEntity, RestoreEntity):
         if last_state:
             self._attr_is_on = last_state.state == "on"
             self.hass.data[self._attr_unique_id] = self._attr_is_on
+            if DOMAIN in self.hass.data:
+                await update_ags_sensors(self.hass.data[DOMAIN], self.hass)
 
 
 

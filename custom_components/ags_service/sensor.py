@@ -7,6 +7,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import DOMAIN, SIGNAL_AGS_RELOAD
+from .ags_service import update_ags_sensors
 
 # Sensors mostly update via the state change listener below, so heavy polling
 # isn't required. 30 seconds keeps them responsive without excessive work.
@@ -32,6 +33,8 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     ]
 
 
+    await update_ags_sensors(ags_config, hass)
+
     # Define a function to be called when a tracked entity changes its state
     async def state_changed_listener(event):
         """Refresh sensors when a tracked entity changes state."""
@@ -55,8 +58,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             if not source_changed:
                 return
             
-        for sensor in sensors:
-            await sensor.async_update_ha_state(True)
+        await update_ags_sensors(ags_config, hass)
 
     # Register sensors so other modules can refresh them immediately
     hass.data['ags_sensors'] = sensors
@@ -315,4 +317,3 @@ class AGSInactiveTVSpeakersSensor(SensorEntity):
         ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         return ags_inactive_tv_speakers
    
-

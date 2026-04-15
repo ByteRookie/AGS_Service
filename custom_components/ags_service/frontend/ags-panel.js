@@ -69,22 +69,29 @@ class AGSPanel extends HTMLElement {
     this.render();
 
     try {
-      const [config, logs] = await Promise.all([
-        this.hass.callWS({ type: "ags_service/config/get" }),
-        this.hass.callWS({ type: "ags_service/get_logs" }),
-      ]);
+      const config = await this.hass.callWS({ type: "ags_service/config/get" });
       this.config = this.normalizeConfig(config);
-      this.logs = Array.isArray(logs) ? logs : [];
       this.ensureRoomSelection();
-      
+
       // Initialize entity pickers after config is loaded
       this.initEntityPickers();
-    } catch (error) {
-      this.error = error.message || String(error);
-    } finally {
+
       this.loading = false;
       this.render();
+
+      this.hass.callWS({ type: "ags_service/get_logs" })
+        .then((logs) => {
+          this.logs = Array.isArray(logs) ? logs : [];
+          this.render();
+        })
+        .catch(() => {});
+      return;
+    } catch (error) {
+      this.error = error.message || String(error);
     }
+
+    this.loading = false;
+    this.render();
   }
 
   normalizeConfig(config) {
@@ -561,8 +568,15 @@ class AGSPanel extends HTMLElement {
   }
 
   setTab(tab) {
+    if (this.activeTab === tab) {
+      return;
+    }
     this.activeTab = tab;
     this.render();
+    requestAnimationFrame(() => {
+      const shell = this.shadowRoot?.querySelector(".shell");
+      if (shell) shell.scrollTop = 0;
+    });
   }
 
   updateConfig(path, value) {
@@ -865,7 +879,7 @@ class AGSPanel extends HTMLElement {
 
    const config = {
      entity: ags.entity_id,
-     sections: ["player", "favorites", "rooms", "volumes"],
+     sections: ["player", "favorites", "browse", "rooms", "volumes"],
      start_section: "player",
    };
    const configKey = JSON.stringify(config);
@@ -1291,12 +1305,14 @@ class AGSPanel extends HTMLElement {
   }
 
   toggleMenu() {
-    this.dispatchEvent(
-      new CustomEvent("hass-toggle-menu", {
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this.dispatchEvent(new CustomEvent("hass-toggle-menu", {
+      bubbles: true,
+      composed: true,
+    }));
+    window.dispatchEvent(new CustomEvent("hass-toggle-menu", {
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   renderEntitiesContent() {
@@ -1924,14 +1940,14 @@ class AGSPanel extends HTMLElement {
 
         .page-header {
           display: grid;
-          grid-template-columns: auto minmax(0, 1fr);
+          grid-template-columns: minmax(0, 1fr);
           align-items: center;
           gap: 14px;
           margin-bottom: 18px;
         }
 
         .menu-btn {
-          display: inline-flex;
+          display: none;
           align-items: center;
           justify-content: center;
           width: 46px;
@@ -1988,6 +2004,7 @@ class AGSPanel extends HTMLElement {
           margin-bottom: 0;
           overflow-x: auto;
           padding-bottom: 8px;
+          scroll-snap-type: x proximity;
           scrollbar-width: none;
         }
 
@@ -2004,6 +2021,7 @@ class AGSPanel extends HTMLElement {
           min-height: 46px;
           font-weight: 700;
           white-space: nowrap;
+          scroll-snap-align: start;
           transition: all 0.2s ease;
         }
 
@@ -2475,6 +2493,12 @@ class AGSPanel extends HTMLElement {
           .top-chrome {
             margin: -24px -16px 20px;
             padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px 10px;
+          }
+          .page-header {
+            grid-template-columns: auto minmax(0, 1fr);
+          }
+          .menu-btn {
+            display: inline-flex;
           }
           .home-grid, .cols-2, .room-layout { grid-template-columns: 1fr; }
           .table-row { grid-template-columns: 1fr 1fr; }

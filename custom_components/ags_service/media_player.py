@@ -13,6 +13,8 @@ from . import DOMAIN, SIGNAL_AGS_RELOAD
 from .ags_service import (
     update_ags_sensors,
     ags_select_source,
+    resolve_music_source_name,
+    has_active_music_playback,
     TV_MODE_TV_AUDIO,
     TV_MODE_NO_MUSIC,
     TV_IGNORE_STATES,
@@ -30,7 +32,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     # Create and add the AGS media player
     ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
-    async_add_entities([ags_media_player])
+    async_add_entities([ags_media_player], True)
     
     # Ensure the media player is properly registered
     async def reload_handler(_):
@@ -90,9 +92,29 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
+        restored_source = None
         last_state = await self.async_get_last_state()
         if last_state:
-            self.hass.data["ags_media_player_source"] = last_state.attributes.get("source")
+            restored_source = last_state.attributes.get("selected_source_name")
+            if restored_source in (None, "", "TV", "Unknown"):
+                restored_source = last_state.attributes.get("source")
+            if restored_source not in (None, "", "TV", "Unknown"):
+                self.hass.data["ags_media_player_source"] = restored_source
+        await self.async_update()
+        if (
+            restored_source not in (None, "", "TV", "Unknown")
+            and self.hass.data.get("ags_status") == "ON"
+            and self.hass.data.get("active_rooms")
+            and not has_active_music_playback(
+                self.hass,
+                self.hass.data.get("active_speakers", []),
+            )
+        ):
+            await ags_select_source(
+                self.ags_config,
+                self.hass,
+                ignore_playing=True,
+            )
 
     def __init__(self, hass, ags_config):
         """Initialize the media player."""
@@ -165,23 +187,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.primary_speaker_room = None
         self.primary_speaker_state = None
 
-        selected_source = self.hass.data.get('ags_media_player_source')
-        if selected_source is None:
-            sources = self.hass.data['ags_service']['Sources']
-            default = next(
-                (
-                    src["Source"]
-                    for src in sources
-                    if src.get("source_default") is True
-                ),
-                None,
-            )
-            if default:
-                selected_source = default
-            elif sources:
-                selected_source = sources[0]["Source"]
-            if selected_source is not None:
-                self.hass.data['ags_media_player_source'] = selected_source
+        selected_source = resolve_music_source_name(self.ags_config, self.hass)
+        if selected_source is not None:
+            self.hass.data['ags_media_player_source'] = selected_source
         self.ags_source = self.get_source_value_by_name(selected_source)
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
@@ -262,6 +270,41 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             return self.primary_speaker_entity_id
         return self._get_homekit_player_entity_id()
 
+    def _derive_app_name_from_id(self, app_id):
+        """Turn raw app IDs into a readable fallback label."""
+        raw = str(app_id or "").strip()
+        if not raw:
+            return None
+        tail = raw.split(".")[-1].replace("_", " ").replace("-", " ").strip()
+        if not tail:
+            return None
+        return " ".join(part.capitalize() for part in tail.split())
+
+    def _get_state_source_label(self, state):
+        """Return the most useful active source/app label for a player state."""
+        if state is None:
+            return None
+
+        attrs = state.attributes
+        source = attrs.get("source")
+        app_name = attrs.get("app_name")
+        media_channel = attrs.get("media_channel")
+        app_id = attrs.get("app_id")
+        media_content_type = attrs.get("media_content_type")
+
+        if app_name:
+            return app_name
+        if source:
+            return source
+        if media_channel:
+            return media_channel
+        derived_app = self._derive_app_name_from_id(app_id)
+        if derived_app:
+            return derived_app
+        if media_content_type and state.state in ("playing", "paused", "buffering"):
+            return str(media_content_type).replace("_", " ").title()
+        return None
+
 
 
     async def async_primary_speaker_changed(self, event):
@@ -273,7 +316,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             # Filter out spam: Only trigger if the actual state, group, or source changed
             state_changed = old_state.state != new_state.state
             group_changed = old_state.attributes.get("group_members") != new_state.attributes.get("group_members")
-            source_changed = old_state.attributes.get("source") != new_state.attributes.get("source")
+            source_changed = self._get_state_source_label(old_state) != self._get_state_source_label(new_state)
             
             if not (state_changed or group_changed or source_changed):
                 return  # Ignore media_position clock ticks
@@ -550,7 +593,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                         "room": room.get("room"),
                         "priority": device.get("priority"),
                         "state": speaker_state,
-                        "source": source,
+                        "source": self._get_state_source_label(state),
                         "available": available,
                         "selected": device["device_id"] == selected,
                         "preferred": device["device_id"] == preferred,
@@ -598,7 +641,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                         "device_type": device_type,
                         "priority": device.get("priority"),
                         "state": state.state if state else None,
-                        "source": state.attributes.get("source") if state else None,
+                        "source": self._get_state_source_label(state),
                         "active": device["device_id"] in active_speakers,
                         "tv_mode": device.get("tv_mode"),
                     }
@@ -717,12 +760,26 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def media_title(self):
         reference_state = self._get_reference_player_state()
-        return reference_state.attributes.get('media_title') if reference_state else None
+        if not reference_state:
+            return None
+        attrs = reference_state.attributes
+        return (
+            attrs.get('media_title')
+            or attrs.get('app_name')
+            or self._derive_app_name_from_id(attrs.get('app_id'))
+        )
 
     @property
     def media_artist(self):
         reference_state = self._get_reference_player_state()
-        return reference_state.attributes.get('media_artist') if reference_state else None
+        if not reference_state:
+            return None
+        attrs = reference_state.attributes
+        return (
+            attrs.get('media_artist')
+            or attrs.get('media_channel')
+            or attrs.get('friendly_name')
+        )
 
     @property
     def entity_picture(self):
@@ -947,14 +1004,20 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def source(self):
         """Return the current input source."""
+        reference_state = self._get_reference_player_state()
+        active_source = self._get_state_source_label(reference_state)
         if self.ags_status == "ON TV":
-            reference_state = self._get_reference_player_state()
-            return reference_state.attributes.get('source') if reference_state else None 
+            return active_source or "TV"
         else:
-            # If the primary speaker is playing a source not in our ags_media_player_source, reflect it
-            reference_state = self._get_reference_player_state()
-            current_spk_source = reference_state.attributes.get('source') if reference_state else None
             ags_source = self.hass.data.get("ags_media_player_source")
+            current_spk_source = active_source
+            # Once AGS has left TV mode, prefer the remembered AGS source over
+            # a stale speaker-reported "TV" source so the UI reflects the
+            # source AGS is actually trying to restore.
+            if ags_source and current_spk_source == "TV":
+                return ags_source
+            # If the primary speaker is playing a source not in our
+            # ags_media_player_source, reflect it.
             if current_spk_source and current_spk_source != ags_source:
                  # Check if the speaker source is one of our globals. If not, just show the speaker source.
                  is_global = any(s["Source"] == current_spk_source for s in self.hass.data['ags_service']['Sources'])
