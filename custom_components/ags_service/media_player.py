@@ -916,7 +916,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         from homeassistant.components import media_source
         return await media_source.async_browse_media(
             self.hass,
-            media_content_type,
             media_content_id,
         )
 

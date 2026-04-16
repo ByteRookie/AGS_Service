@@ -17,6 +17,8 @@ class AGSPanel extends HTMLElement {
     this.browseItems = [];
     this.browsePath = [];
     this.editingDeviceKey = null;
+    this._resetScrollAfterRender = false;
+    this.loadingBrowseResults = false;
   }
 
   set hass(hass) {
@@ -57,6 +59,68 @@ class AGSPanel extends HTMLElement {
 
   get hass() {
     return this._hass;
+  }
+
+  getScrollTargets() {
+    const targets = [];
+    const seen = new Set();
+    let node = this;
+
+    while (node) {
+      node = node.parentNode || node.host || null;
+
+      if (node instanceof HTMLElement) {
+        const style = window.getComputedStyle(node);
+        const overflowY = `${style.overflowY} ${style.overflow}`;
+        const overflowX = `${style.overflowX} ${style.overflow}`;
+        const canScrollY = /(auto|scroll|overlay)/.test(overflowY) && node.scrollHeight > node.clientHeight;
+        const canScrollX = /(auto|scroll|overlay)/.test(overflowX) && node.scrollWidth > node.clientWidth;
+
+        if ((canScrollY || canScrollX || node.scrollTop || node.scrollLeft) && !seen.has(node)) {
+          targets.push(node);
+          seen.add(node);
+        }
+        continue;
+      }
+
+      if (node instanceof Document) {
+        const scrollRoot = node.scrollingElement || node.documentElement;
+        if (scrollRoot && !seen.has(scrollRoot)) {
+          targets.push(scrollRoot);
+        }
+        break;
+      }
+    }
+
+    return targets;
+  }
+
+  captureScrollState() {
+    return {
+      targets: this.getScrollTargets().map((node) => ({
+        node,
+        top: node.scrollTop,
+        left: node.scrollLeft,
+      })),
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+    };
+  }
+
+  restoreScrollState(state, resetToTop = false) {
+    if (!state) return;
+
+    state.targets.forEach(({ node, top, left }) => {
+      if (!node || node.isConnected === false) return;
+      node.scrollTop = resetToTop ? 0 : top;
+      node.scrollLeft = resetToTop ? 0 : left;
+    });
+
+    window.scrollTo({
+      left: resetToTop ? 0 : state.windowX,
+      top: resetToTop ? 0 : state.windowY,
+      behavior: "auto",
+    });
   }
 
   async initData() {
@@ -350,16 +414,173 @@ class AGSPanel extends HTMLElement {
     if (!raw) {
       return "";
     }
-    if (/^(https?:|data:)/i.test(raw)) {
+    if (/^data:/i.test(raw)) {
       return raw;
     }
+    let resolved = raw;
     if (raw.startsWith("//")) {
-      return `${window.location.protocol}${raw}`;
+      resolved = `${window.location.protocol}${raw}`;
+    } else if (!/^https?:/i.test(raw) && typeof this.hass?.hassUrl === "function") {
+      resolved = this.hass.hassUrl(raw.startsWith("/") ? raw : `/${raw}`);
     }
-    if (typeof this.hass?.hassUrl === "function") {
-      return this.hass.hassUrl(raw.startsWith("/") ? raw : `/${raw}`);
+    const auth = this.hass?.auth || {};
+    const token = auth.data?.access_token || auth.accessToken;
+    if (!token) {
+      return resolved;
     }
-    return raw;
+    try {
+      const url = new URL(resolved, window.location.origin);
+      if (url.origin === window.location.origin) {
+        url.searchParams.set("authSig", token);
+        return url.toString();
+      }
+    } catch (error) {
+      // Fall back to the resolved value when the URL cannot be normalized.
+    }
+    return resolved;
+  }
+
+  getPreferredSpeakerEntityId() {
+    if (!this.config?.rooms) return null;
+
+    const allSpeakers = [];
+    this.config.rooms.forEach((room) => {
+      if (room.devices) {
+        room.devices.forEach((device) => {
+          if (device.device_type === "speaker" && device.device_id) {
+            allSpeakers.push(device);
+          }
+        });
+      }
+    });
+
+    if (!allSpeakers.length) return null;
+
+    allSpeakers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+    const targetId = allSpeakers[0].device_id;
+
+    return this.hass.states[targetId] ? targetId : null;
+  }
+
+  getBrowseEntityCandidates() {
+    const ags = this.getAgsState();
+    const candidates = [
+      ags?.entity_id,
+      ags?.attributes?.browse_entity_id,
+      ags?.attributes?.primary_speaker,
+      ags?.attributes?.preferred_primary_speaker,
+      ags?.attributes?.control_device_id,
+      this.getPreferredSpeakerEntityId(),
+    ];
+    const seen = new Set();
+    return candidates.filter((entityId) => {
+      const normalized = String(entityId || "").trim();
+      if (!normalized || normalized === "none" || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+  }
+
+  humanizeBrowseLabel(value, fallback = "Media") {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return fallback;
+    }
+    return normalized
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/\b\w/g, (match) => match.toUpperCase());
+  }
+
+  normalizeBrowseItem(item) {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+
+    const children = Array.isArray(item.children)
+      ? item.children.map((child) => this.normalizeBrowseItem(child)).filter(Boolean)
+      : [];
+    const rawTitle = String(
+      item.title || item.name || item.media_title || item.media_content_id || item.media_class || "",
+    ).trim();
+    const mediaContentType = String(item.media_content_type || "").trim();
+    const mediaContentId = String(item.media_content_id || "").trim();
+    const canExpand = Boolean(item.can_expand || children.length);
+    const canPlay = Boolean(item.can_play || (!canExpand && mediaContentType && mediaContentId));
+
+    return {
+      ...item,
+      title: rawTitle || (canExpand ? "Untitled Folder" : "Untitled Item"),
+      media_class: String(item.media_class || mediaContentType || (canExpand ? "folder" : "media")).trim(),
+      media_content_type: mediaContentType,
+      media_content_id: mediaContentId,
+      thumbnail: String(item.thumbnail || item.entity_picture || item.media_image_url || item.image || "").trim(),
+      can_expand: canExpand,
+      can_play: canPlay,
+      children,
+    };
+  }
+
+  normalizeBrowseResponse(response) {
+    const children = Array.isArray(response?.children)
+      ? response.children.map((child) => this.normalizeBrowseItem(child)).filter(Boolean)
+      : [];
+
+    return {
+      ...response,
+      children,
+    };
+  }
+
+  getBrowseItemIcon(item) {
+    if (item?.can_expand) return "mdi:folder";
+    const mediaClass = String(item?.media_class || item?.media_content_type || "").toLowerCase();
+    if (mediaClass.includes("playlist")) return "mdi:playlist-music";
+    if (mediaClass.includes("album")) return "mdi:album";
+    if (mediaClass.includes("artist")) return "mdi:account-music";
+    if (mediaClass.includes("podcast")) return "mdi:podcast";
+    if (mediaClass.includes("radio")) return "mdi:radio";
+    if (mediaClass.includes("channel")) return "mdi:television-play";
+    if (mediaClass.includes("movie") || mediaClass.includes("episode") || mediaClass.includes("video")) return "mdi:movie-open";
+    if (mediaClass.includes("app")) return "mdi:apps";
+    if (mediaClass.includes("image") || mediaClass.includes("photo")) return "mdi:image";
+    return item?.can_play ? "mdi:play-circle" : "mdi:music-note";
+  }
+
+  getBrowseItemMeta(item) {
+    const kind = this.humanizeBrowseLabel(item?.media_class || item?.media_content_type, item?.can_expand ? "Folder" : "Media");
+    if (item?.can_expand && item?.can_play) return `${kind} • Open or add`;
+    if (item?.can_expand) return `${kind} • Open`;
+    if (item?.can_play) return `${kind} • Add`;
+    return `${kind} • Unavailable`;
+  }
+
+  renderBrowseArtwork(item, className = "browse-result-art") {
+    const thumbnail = item?.thumbnail ? this.resolveMediaUrl(item.thumbnail) : "";
+    const icon = this.getBrowseItemIcon(item);
+    return `
+      <div class="${className}${thumbnail ? "" : " no-image"}" data-browse-art>
+        ${thumbnail
+          ? `<img src="${this.escapeHtml(thumbnail)}" alt="" loading="lazy" style="width:100%; height:100%; object-fit:cover;" onerror="const host=this.closest('[data-browse-art]'); if (host) host.classList.add('image-failed'); this.remove();" />`
+          : ""}
+        <span class="browse-art-fallback" aria-hidden="true">
+          <ha-icon icon="${icon}"></ha-icon>
+        </span>
+      </div>
+    `;
+  }
+
+  getBrowseErrorMessage(error) {
+    const detail = String(error?.message || error || "").trim();
+    if (!detail) {
+      return "Browse media request failed.";
+    }
+    if (/browse media/i.test(detail) || /entity not found/i.test(detail)) {
+      return "Browse media failed for AGS and the active speaker.";
+    }
+    return detail;
   }
 
   clamp(value, min, max) {
@@ -572,6 +793,7 @@ class AGSPanel extends HTMLElement {
       return;
     }
     this.activeTab = tab;
+    this._resetScrollAfterRender = true;
     this.render();
     requestAnimationFrame(() => {
       const shell = this.shadowRoot?.querySelector(".shell");
@@ -902,30 +1124,6 @@ class AGSPanel extends HTMLElement {
     `;
   }
 
-  getBrowseEntityId() {
-    if (!this.config?.rooms) return null;
-
-    // Find all speakers across all rooms
-    const allSpeakers = [];
-    this.config.rooms.forEach(room => {
-      if (room.devices) {
-        room.devices.forEach(device => {
-          if (device.device_type === 'speaker' && device.device_id) {
-            allSpeakers.push(device);
-          }
-        });
-      }
-    });
-
-    if (allSpeakers.length === 0) return null;
-
-    // Sort by priority and return the device_id of the first one
-    allSpeakers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
-    const targetId = allSpeakers[0].device_id;
-    
-    return this.hass.states[targetId] ? targetId : null;
-  }
-
   mergeSources(sourceEntries) {
     const existingKeys = new Set(
       this.config.Sources.map((entry) => `${entry.Source}::${entry.Source_Value}`),
@@ -953,28 +1151,32 @@ class AGSPanel extends HTMLElement {
     return added;
   }
 
-  collectPlayableBrowseItems(node, results = []) {
+  collectPlayableBrowseItems(node, results = [], seen = new Set()) {
     if (!node || typeof node !== "object") {
       return results;
     }
 
     if (node.can_play && node.title && node.media_content_id) {
-      results.push({
-        Source: node.title,
-        Source_Value: node.media_content_id,
-        media_content_type: node.media_content_type || "music",
-      });
+      const key = `${node.media_content_type || "media"}::${node.media_content_id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push({
+          Source: node.title,
+          Source_Value: node.media_content_id,
+          media_content_type: node.media_content_type || "music",
+        });
+      }
     }
 
     if (Array.isArray(node.children)) {
-      node.children.forEach((child) => this.collectPlayableBrowseItems(child, results));
+      node.children.forEach((child) => this.collectPlayableBrowseItems(child, results, seen));
     }
 
     return results;
   }
 
   async importSpeakerSourceList() {
-    const entityId = this.getBrowseEntityId();
+    const entityId = this.getPreferredSpeakerEntityId();
     if (!entityId) {
       this.favoriteBrowseError = "No active speaker is available for source import.";
       this.render();
@@ -1003,8 +1205,8 @@ class AGSPanel extends HTMLElement {
   }
 
   async browseMediaFavorites() {
-    const entityId = this.getBrowseEntityId();
-    if (!entityId) {
+    const candidates = this.getBrowseEntityCandidates();
+    if (!candidates.length) {
       this.favoriteBrowseError = "No active speaker is available for media browsing.";
       this.render();
       return;
@@ -1014,37 +1216,57 @@ class AGSPanel extends HTMLElement {
     this.discoveredFavorites = [];
     this.browseItems = [];
     this.browsePath = [];
+    this.loadingBrowseResults = true;
     this.render();
 
     try {
       await this.loadBrowseNode();
     } catch (error) {
-      this.favoriteBrowseError = error.message || "Browse media request failed.";
+      this.favoriteBrowseError = this.getBrowseErrorMessage(error);
+    } finally {
+      this.loadingBrowseResults = false;
     }
 
     this.render();
   }
 
   async loadBrowseNode(node = null) {
-    const entityId = this.getBrowseEntityId();
-    if (!entityId) {
+    const candidates = this.getBrowseEntityCandidates();
+    if (!candidates.length) {
       throw new Error("No active speaker is available for media browsing.");
     }
 
-    const payload = {
-      type: "media_player/browse_media",
-      entity_id: entityId,
-    };
+    let result = null;
+    let lastError = null;
 
-    if (node?.media_content_type) {
-      payload.media_content_type = node.media_content_type;
-    }
-    if (node?.media_content_id) {
-      payload.media_content_id = node.media_content_id;
+    for (const entityId of candidates) {
+      const payload = {
+        type: "media_player/browse_media",
+        entity_id: entityId,
+      };
+
+      if (node?.media_content_type) {
+        payload.media_content_type = node.media_content_type;
+      }
+      if (node?.media_content_id) {
+        payload.media_content_id = node.media_content_id;
+      }
+
+      try {
+        result = await this.hass.callWS(payload);
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn("AGS panel browse failed for", entityId, error);
+      }
     }
 
-    const result = await this.hass.callWS(payload);
-    const children = Array.isArray(result?.children) ? result.children : [];
+    if (!result) {
+      throw lastError || new Error("Browse media request failed.");
+    }
+
+    const normalized = this.normalizeBrowseResponse(result);
+    const children = Array.isArray(normalized?.children) ? normalized.children : [];
     this.browseItems = children;
     this.discoveredFavorites = this.collectPlayableBrowseItems({ children });
 
@@ -1067,10 +1289,14 @@ class AGSPanel extends HTMLElement {
         media_content_id: item.media_content_id,
         media_content_type: item.media_content_type,
       });
+      this.loadingBrowseResults = true;
+      this.render();
       try {
         await this.loadBrowseNode(item);
       } catch (error) {
-        this.favoriteBrowseError = error.message || "Failed to open media folder.";
+        this.favoriteBrowseError = this.getBrowseErrorMessage(error);
+      } finally {
+        this.loadingBrowseResults = false;
       }
       this.render();
       return;
@@ -1087,6 +1313,8 @@ class AGSPanel extends HTMLElement {
       if (!added) {
         this.favoriteBrowseError = "That media item is already in your AGS source list.";
         this.render();
+      } else {
+        this.favoriteBrowseError = "";
       }
     }
   }
@@ -1094,6 +1322,8 @@ class AGSPanel extends HTMLElement {
   async browseBack() {
     if (!this.browsePath.length) {
       this.browseItems = [];
+      this.discoveredFavorites = [];
+      this.loadingBrowseResults = false;
       this.favoriteBrowseError = "";
       this.render();
       return;
@@ -1101,10 +1331,14 @@ class AGSPanel extends HTMLElement {
 
     this.browsePath.pop();
     const previous = this.browsePath[this.browsePath.length - 1] || null;
+    this.loadingBrowseResults = true;
+    this.render();
     try {
       await this.loadBrowseNode(previous);
     } catch (error) {
-      this.favoriteBrowseError = error.message || "Failed to load previous media folder.";
+      this.favoriteBrowseError = this.getBrowseErrorMessage(error);
+    } finally {
+      this.loadingBrowseResults = false;
     }
     this.render();
   }
@@ -1119,6 +1353,8 @@ class AGSPanel extends HTMLElement {
     if (!added) {
       this.favoriteBrowseError = "That favorite is already in your AGS source list.";
       this.render();
+    } else {
+      this.favoriteBrowseError = "";
     }
   }
 
@@ -1656,7 +1892,7 @@ class AGSPanel extends HTMLElement {
           </div>
         ` : ""}
 
-        ${this.browseItems.length || this.discoveredFavorites.length || this.browsePath.length ? `
+        ${this.loadingBrowseResults || this.browseItems.length || this.discoveredFavorites.length || this.browsePath.length ? `
           <div class="panel-card" style="margin-bottom:32px; background:var(--ags-subtle); border:2px dashed var(--ags-border); padding:24px;">
             <div class="card-head" style="margin-bottom:16px;">
               <div>
@@ -1665,24 +1901,46 @@ class AGSPanel extends HTMLElement {
               </div>
               <button class="secondary-btn" onclick="this.getRootNode().host.browseBack()">${this.browsePath.length ? "Back" : "Clear"}</button>
             </div>
-            <div class="browse-results-grid">
-              ${this.browseItems.map((item, index) => `
-                <button type="button" class="browse-result-card" aria-label="${item.can_expand ? `Open ${this.escapeHtml(item.title || "Untitled")}` : `Add ${this.escapeHtml(item.title || "Untitled")}`}" onclick="this.getRootNode().host.openBrowseItem(${index})">
-                  <div class="browse-result-art">
-                    ${item.thumbnail ? `<img src="${this.resolveMediaUrl(item.thumbnail)}" style="width:100%; height:100%; object-fit:cover;" />` : `
-                      <div style="width:100%; height:100%; background:var(--ags-subtle-strong); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                        <ha-icon icon="${item.can_expand ? 'mdi:folder' : 'mdi:music-note'}"></ha-icon>
+            ${this.loadingBrowseResults ? `
+              <div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>
+            ` : ""}
+            ${this.browseItems.length ? `
+              <div class="browse-results-grid">
+                ${this.browseItems.map((item, index) => `
+                  <button
+                    type="button"
+                    class="browse-result-card"
+                    aria-label="${item.can_expand ? `Open ${this.escapeHtml(item.title || "Untitled")}` : `Add ${this.escapeHtml(item.title || "Untitled")}`}"
+                    onclick="this.getRootNode().host.openBrowseItem(${index})"
+                    ${!item.can_expand && !item.can_play ? "disabled" : ""}
+                  >
+                    ${this.renderBrowseArtwork(item)}
+                    <div class="browse-result-copy">
+                      <div style="font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
+                      <div class="section-help" style="font-size:0.78rem;">${this.escapeHtml(this.getBrowseItemMeta(item))}</div>
+                    </div>
+                    <span class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0; pointer-events:none;">${item.can_expand ? "Open" : item.can_play ? "Add" : "View"}</span>
+                  </button>
+                `).join("")}
+              </div>
+            ` : ""}
+            ${this.discoveredFavorites.length ? `
+              <div style="margin-top:${this.browseItems.length ? "20px" : "0"};">
+                <div class="eyebrow" style="margin-bottom:10px;">Playable Items</div>
+                <div class="browse-results-grid">
+                  ${this.discoveredFavorites.map((favorite, index) => `
+                    <button type="button" class="browse-result-card" aria-label="Add ${this.escapeHtml(favorite.Source || "Untitled")}" onclick="this.getRootNode().host.addBrowsedFavorite(${index})">
+                      ${this.renderBrowseArtwork({ title: favorite.Source, media_content_type: favorite.media_content_type, can_play: true })}
+                      <div class="browse-result-copy">
+                        <div style="font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(favorite.Source || "Untitled")}</div>
+                        <div class="section-help" style="font-size:0.78rem;">${this.escapeHtml(this.humanizeBrowseLabel(favorite.media_content_type, "Media"))}</div>
                       </div>
-                    `}
-                  </div>
-                  <div class="browse-result-copy">
-                    <div style="font-weight:700; font-size:0.95rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(item.title || "Untitled")}</div>
-                    <div class="section-help" style="font-size:0.78rem;">${this.escapeHtml(item.media_content_type || "media")}</div>
-                  </div>
-                  <span class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0; pointer-events:none;">${item.can_expand ? "Open" : "Add"}</span>
-                </button>
-              `).join("")}
-            </div>
+                      <span class="secondary-btn" style="padding:4px 10px; font-size:0.75rem; flex-shrink:0; pointer-events:none;">Add</span>
+                    </button>
+                  `).join("")}
+                </div>
+              </div>
+            ` : ""}
           </div>
         ` : ""}
 
@@ -1878,6 +2136,9 @@ class AGSPanel extends HTMLElement {
   }
 
   render() {
+    const scrollState = this.captureScrollState();
+    const resetToTop = this._resetScrollAfterRender;
+    this._resetScrollAfterRender = false;
     const agsState = this.getAgsState();
     const { headerInfo } = this.getHeaderSummary(agsState);
     const theme = this.getThemePalette();
@@ -1887,6 +2148,7 @@ class AGSPanel extends HTMLElement {
         :host {
           display: block;
           min-height: 100vh;
+          --ags-panel-stable-vh: 100vh;
           background: ${theme.shellBg};
           color: ${theme.text};
           font-family: var(--ha-font-family-body, Roboto, sans-serif);
@@ -1911,6 +2173,15 @@ class AGSPanel extends HTMLElement {
           --ags-log-bg: ${theme.logBg};
           --ags-log-text: ${theme.logText};
           --ags-focus-ring: 0 0 0 3px var(--ags-primary-soft);
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+        }
+
+        @supports (height: 100svh) {
+          :host {
+            --ags-panel-stable-vh: 100svh;
+            min-height: 100svh;
+          }
         }
 
         * {
@@ -1925,7 +2196,7 @@ class AGSPanel extends HTMLElement {
           max-width: 1400px;
           margin: 0 auto;
           padding: 24px 32px 100px;
-          min-height: 100vh;
+          min-height: var(--ags-panel-stable-vh);
         }
 
         .top-chrome {
@@ -2006,6 +2277,8 @@ class AGSPanel extends HTMLElement {
           padding-bottom: 8px;
           scroll-snap-type: x proximity;
           scrollbar-width: none;
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-x;
         }
 
         .tabs::-webkit-scrollbar { display: none; }
@@ -2126,7 +2399,7 @@ class AGSPanel extends HTMLElement {
           align-items: start;
           max-width: 1240px;
           margin: 0 auto;
-          min-height: min(860px, calc(100dvh - 230px));
+          min-height: min(860px, calc(var(--ags-panel-stable-vh) - 230px));
         }
 
         .home-dashboard-wrap {
@@ -2163,7 +2436,10 @@ class AGSPanel extends HTMLElement {
           padding-right: 4px;
           scroll-behavior: smooth;
           min-height: 0;
-          max-height: min(760px, calc(100dvh - 320px));
+          max-height: min(760px, calc(var(--ags-panel-stable-vh) - 320px));
+          -webkit-overflow-scrolling: touch;
+          overscroll-behavior: contain;
+          touch-action: pan-y;
         }
 
         .room-layout {
@@ -2443,6 +2719,11 @@ class AGSPanel extends HTMLElement {
           font: inherit;
         }
 
+        .browse-result-card:disabled {
+          cursor: default;
+          opacity: 0.74;
+        }
+
         .grid > *,
         .inline-grid > * {
           min-width: 0;
@@ -2460,6 +2741,7 @@ class AGSPanel extends HTMLElement {
         }
 
         .browse-result-art {
+          position: relative;
           aspect-ratio: 1.1 / 1;
           overflow: hidden;
           border-radius: 16px;
@@ -2469,6 +2751,18 @@ class AGSPanel extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
+        }
+
+        .browse-art-fallback {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .browse-result-art:not(.no-image):not(.image-failed) .browse-art-fallback {
+          display: none;
         }
 
         .browse-result-copy {
@@ -2591,6 +2885,34 @@ class AGSPanel extends HTMLElement {
           .entities-row,
           .entities-head { grid-template-columns: 1fr; }
         }
+
+        @media (hover: none), (pointer: coarse) {
+          .menu-btn:hover,
+          .tab-btn:hover,
+          .primary-btn:hover,
+          .secondary-btn:hover,
+          .danger-btn:hover,
+          .table-row:hover,
+          .browse-result-card:hover {
+            transform: none;
+            box-shadow: none;
+          }
+
+          .table-row:hover,
+          .browse-result-card:hover {
+            background: inherit;
+            border-color: inherit;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+          }
+        }
       </style>
 
       <div class="shell">
@@ -2642,6 +2964,10 @@ class AGSPanel extends HTMLElement {
     this._lastAgsSignature = this.getAgsStateSignature();
     this.bindEntityPickers();
     this.bindEmbeddedDashboard();
+    requestAnimationFrame(() => {
+      this.restoreScrollState(scrollState, resetToTop);
+      requestAnimationFrame(() => this.restoreScrollState(scrollState, resetToTop));
+    });
   }
 }
 
