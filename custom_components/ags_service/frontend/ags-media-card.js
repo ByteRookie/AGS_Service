@@ -1543,9 +1543,10 @@ class AgsMediaCard extends HTMLElement {
   renderArtworkFallback(snapshot, variant = "full") {
     const label = snapshot?.sourceLabel || snapshot?.currentSource || (snapshot?.isTv ? "TV" : "Media");
     const showText = !snapshot?.hasMedia;
+    const isFocal = variant === "focal";
     return `
       <div class="fallback-art fallback-art-${variant} ${snapshot?.hasMedia ? "" : "fallback-art-missing"}">
-        <div class="fallback-art-orb"></div>
+        ${!isFocal ? '<div class="fallback-art-orb"></div>' : ""}
         <div class="fallback-art-glyph">
           <ha-icon icon="${snapshot?.sourceIcon || "mdi:music-note"}"></ha-icon>
         </div>
@@ -1736,7 +1737,7 @@ class AgsMediaCard extends HTMLElement {
     return `
       <div class="player-view ${this._transitionPreset === "expand-player" ? "animate-player-open" : this._transitionPreset === "collapse-player" ? "animate-player-close" : ""}" style="--fallback-accent:${snapshot.sourceColor};">
         <div class="player-art-background ${snapshot.isTv && !snapshot.pic ? 'tv-gradient' : ''} ${!snapshot.pic ? 'player-art-background-empty' : ''}">
-          ${snapshot.pic ? `<img class="player-art-image" src="${snapshot.pic}" />` : this.renderArtworkFallback(snapshot, "full")}
+          ${snapshot.pic ? `<img class="player-art-image" src="${snapshot.pic}" />` : ''}
           <div class="player-art-scrim"></div>
         </div>
         <div class="player-main">
@@ -1748,6 +1749,7 @@ class AgsMediaCard extends HTMLElement {
                   ${this.renderSourceBadge(snapshot, "full")}
                 </div>
               </div>
+              ${!snapshot.pic ? this.renderArtworkFallback(snapshot, "focal") : ''}
               <div class="art-aura"></div>
             </div>
           </div>
@@ -2103,10 +2105,41 @@ class AgsMediaCard extends HTMLElement {
           inset: 0;
           z-index: 0;
         }
-        .player-art-background-empty .fallback-art {
-          justify-content: flex-start;
-          padding-top: 28px;
+        .player-art-background-empty {
+          background:
+            radial-gradient(circle at 26% 22%, rgba(255, 255, 255, 0.18), transparent 38%),
+            linear-gradient(160deg, var(--fallback-accent, var(--primary)), rgba(15, 23, 42, 0.92));
         }
+        .fallback-art-focal {
+          position: absolute;
+          left: 50%;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          z-index: 2;
+          color: #fff;
+          text-align: center;
+          background: none;
+          width: auto;
+          height: auto;
+          padding: 0;
+        }
+        .fallback-art-focal .fallback-art-glyph {
+          width: 88px;
+          height: 88px;
+          border-radius: 28px;
+          background: rgba(255, 255, 255, 0.18);
+          border: 1px solid rgba(255, 255, 255, 0.28);
+          box-shadow: 0 16px 40px rgba(15, 23, 42, 0.32);
+          backdrop-filter: blur(16px);
+        }
+        .fallback-art-focal .fallback-art-glyph ha-icon { --mdc-icon-size: 52px; }
+        .fallback-art-focal .fallback-art-copy { color: rgba(255, 255, 255, 0.88); }
+        .fallback-art-focal .fallback-art-title { font-size: 0.88rem; font-weight: 800; letter-spacing: 0.04em; text-shadow: 0 1px 4px rgba(15, 23, 42, 0.5); }
         .player-art-image {
           position: absolute;
           inset: 0;
@@ -2322,8 +2355,8 @@ class AgsMediaCard extends HTMLElement {
         .track-room-label { min-width: 0; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase; color: var(--player-ink); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-source-row { min-width: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; }
         .status-display { text-transform: uppercase; }
-        .track-title { font-size: clamp(1.08rem, 2.1vw, 1.42rem); font-weight: 900; letter-spacing: -0.04em; margin: 0; color: var(--player-ink); line-height: 1.02; min-height: 1.02em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; }
-        .track-subtitle { font-size: 0.88rem; color: var(--player-ink); opacity: 0.92; font-weight: 800; margin: 0; line-height: 1.18; min-height: 1.18em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; }
+        .track-title { font-size: clamp(1.08rem, 2.1vw, 1.42rem); font-weight: 900; letter-spacing: -0.04em; margin: 0; color: var(--player-ink); line-height: 1.02; min-height: 1.02em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.22); }
+        .track-subtitle { font-size: 0.88rem; color: var(--player-ink); opacity: 0.92; font-weight: 800; margin: 0; line-height: 1.18; min-height: 1.18em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.16); }
         .track-detail-stack {
           display: flex;
           flex-direction: column;
