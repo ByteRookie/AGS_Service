@@ -55,8 +55,21 @@ class AgsMediaCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = config;
-    const configuredStart = typeof config?.start_section === "string" ? config.start_section : "player";
+    const normalizedConfig =
+      config && typeof config === "object"
+        ? { ...config }
+        : {};
+    const entity =
+      typeof normalizedConfig.entity === "string" && normalizedConfig.entity.trim()
+        ? normalizedConfig.entity.trim()
+        : "media_player.ags_media_player";
+
+    this._config = {
+      ...normalizedConfig,
+      entity,
+    };
+
+    const configuredStart = typeof normalizedConfig.start_section === "string" ? normalizedConfig.start_section : "player";
     this._section = this.getSavedSection(configuredStart);
     this.render(true);
   }
@@ -167,8 +180,11 @@ class AgsMediaCard extends HTMLElement {
 
   getAgsPlayer() {
     if (!this._hass) return null;
-    return this._hass.states[this._config.entity] || 
-           Object.values(this._hass.states).find(s => s?.attributes?.ags_status !== undefined) || null;
+    const configuredEntity = this._config?.entity;
+    if (configuredEntity && this._hass.states?.[configuredEntity]) {
+      return this._hass.states[configuredEntity];
+    }
+    return Object.values(this._hass.states).find(s => s?.attributes?.ags_status !== undefined) || null;
   }
 
   getControlPlayer() {
@@ -1772,7 +1788,11 @@ class AgsMediaCard extends HTMLElement {
       return `
         <div class="system-off-view">
           <div class="off-icon-wrap"><ha-icon icon="mdi:power-sleep"></ha-icon></div>
-          <div class="off-text">System is Offline</div>
+          <div class="off-copy">
+            <div class="off-kicker">AGS standby</div>
+            <div class="off-text">System is Offline</div>
+            <div class="off-subtext">Power it on to restore your speaker group and controls.</div>
+          </div>
           <button class="play-btn turn-on-btn" onclick="this.getRootNode().host.callService('media_player', 'turn_on', {entity_id: '${ags.entity_id}'})">
             <ha-icon icon="mdi:power"></ha-icon><span>Activate System</span>
           </button>
@@ -2044,6 +2064,9 @@ class AgsMediaCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host {
+          display: block;
+          width: 100%;
+          min-width: 0;
           color-scheme: ${theme.colorScheme};
           --ags-card-stable-vh: 100vh;
           --primary: ${theme.primary};
@@ -2776,7 +2799,7 @@ class AgsMediaCard extends HTMLElement {
         .loading-spin { text-align: center; padding: 40px; }
         .browse-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; color: var(--text-sec); font-size: 0.9rem; font-weight: 600; text-align: center; }
         .browse-empty ha-icon { --mdc-icon-size: 40px; opacity: 0.4; }
-        .system-off-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+        .system-off-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(14px, 2.6vh, 20px); width: 100%; max-width: 100%; padding: clamp(18px, 4vw, 28px); text-align: center; }
         .system-off-surface {
           justify-content: center;
           background: linear-gradient(180deg, var(--glass-heavy), var(--card-bg-strong));
@@ -2785,11 +2808,15 @@ class AgsMediaCard extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 24px;
+          padding: clamp(16px, 3vw, 24px);
         }
-        .off-icon-wrap { width: 80px; height: 80px; border-radius: 50%; background: var(--glass-heavy); display: flex; align-items: center; justify-content: center; color: var(--text-sec); opacity: 0.5; }
-        .off-text { font-size: 1.1rem; font-weight: 800; color: var(--text-sec); }
-        .turn-on-btn { width: auto; height: auto; padding: 12px 24px; border-radius: 14px; display: flex; align-items: center; gap: 10px; font-weight: 800; background: var(--primary); color: var(--on-primary); }
+        .off-icon-wrap { width: clamp(72px, 19vw, 88px); height: clamp(72px, 19vw, 88px); border-radius: 50%; background: var(--glass-heavy); display: flex; align-items: center; justify-content: center; color: var(--text-sec); opacity: 0.56; border: 1px solid var(--outline); }
+        .off-icon-wrap ha-icon { --mdc-icon-size: clamp(32px, 8vw, 40px); }
+        .off-copy { display: grid; gap: 8px; width: min(100%, 280px); }
+        .off-kicker { font-size: 0.72rem; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; color: var(--primary); }
+        .off-text { font-size: clamp(1rem, 2.5vw, 1.18rem); font-weight: 900; color: var(--text); line-height: 1.08; }
+        .off-subtext { font-size: 0.85rem; line-height: 1.4; color: var(--text-sec); }
+        .turn-on-btn { width: auto; max-width: 100%; min-height: 46px; height: auto; padding: 12px 24px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; background: var(--primary); color: var(--on-primary); }
         .source-menu { position: absolute; inset: 0; z-index: 60; display: flex; align-items: stretch; justify-content: stretch; padding: 12px; }
         .source-menu-backdrop { position: absolute; inset: 0; border: none; background: rgba(2, 6, 23, 0.48); cursor: pointer; }
         .source-sheet { position: relative; z-index: 1; width: 100%; height: 100%; max-height: none; display: flex; flex-direction: column; border-radius: 22px; border: 1px solid var(--primary-strong); background: linear-gradient(180deg, var(--glass-heavy), var(--card-bg-strong)); box-shadow: var(--shadow); overflow: hidden; backdrop-filter: blur(20px) saturate(1.08); }
@@ -3035,6 +3062,10 @@ class AgsMediaCard extends HTMLElement {
           .room-row { grid-template-columns: 1fr; }
           .room-volume-top { grid-template-columns: 1fr; }
           .room-toggle-btn { width: 100%; }
+          .system-off-shell { padding: 14px; }
+          .system-off-view { padding: 14px; }
+          .off-copy { width: min(100%, 240px); }
+          .turn-on-btn { width: 100%; }
         }
         @media (hover: none), (pointer: coarse) {
           .hero-pill.clickable:hover,

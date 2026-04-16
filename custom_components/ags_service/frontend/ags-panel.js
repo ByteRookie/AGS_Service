@@ -1124,7 +1124,7 @@ class AGSPanel extends HTMLElement {
 
    const config = {
      entity: ags.entity_id,
-     sections: ["player", "favorites", "browse", "rooms", "volumes"],
+     sections: ["player", "browse", "rooms", "sources"],
      start_section: "player",
    };
    const configKey = JSON.stringify(config);
@@ -1524,7 +1524,7 @@ class AGSPanel extends HTMLElement {
     return `
       <div class="grid home-grid">
         <section class="home-dashboard-wrap">
-          <ags-media-card class="embedded-dashboard" style="width:100%; flex:1; --ags-card-viewport-offset: 230px; --ags-card-max-width: 100%;"></ags-media-card>
+          <ags-media-card class="embedded-dashboard"></ags-media-card>
         </section>
         <section class="panel-card home-entities-panel">
           <div class="card-head home-entities-head">
@@ -2428,7 +2428,7 @@ class AGSPanel extends HTMLElement {
         }
 
         .home-grid {
-          grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+          grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
           align-items: start;
           max-width: 1240px;
           margin: 0 auto;
@@ -2440,6 +2440,7 @@ class AGSPanel extends HTMLElement {
           min-width: 0;
           display: flex;
           flex-direction: column;
+          align-self: start;
           position: sticky;
           top: calc(env(safe-area-inset-top, 0px) + 148px);
         }
@@ -2447,6 +2448,10 @@ class AGSPanel extends HTMLElement {
         .embedded-dashboard {
           display: block;
           width: 100%;
+          flex: 1 1 auto;
+          min-width: 0;
+          --ags-card-max-width: 100%;
+          --ags-card-viewport-offset: 230px;
         }
 
         .home-entities-panel {
@@ -2815,6 +2820,23 @@ class AGSPanel extends HTMLElement {
           border: 1px solid var(--ags-border);
         }
 
+        @media (max-width: 1180px) {
+          .home-grid {
+            grid-template-columns: minmax(0, 1fr);
+            min-height: 0;
+          }
+          .home-dashboard-wrap {
+            position: static;
+            width: min(100%, 640px);
+            margin: 0 auto;
+          }
+          .embedded-dashboard {
+            --ags-card-max-width: min(100%, 640px);
+            --ags-card-viewport-offset: 208px;
+          }
+          .home-entities-scroll { max-height: none; }
+        }
+
         @media (max-width: 1024px) {
           .shell { padding: 24px 16px 100px; }
           .top-chrome {
@@ -2833,7 +2855,8 @@ class AGSPanel extends HTMLElement {
           .entities-head { grid-template-columns: 1fr 1fr; }
           .table-head { display: none; }
           .home-grid { min-height: 0; }
-          .home-dashboard-wrap { min-height: 540px; position: static; }
+          .home-dashboard-wrap { min-height: 0; position: static; width: min(100%, 620px); }
+          .embedded-dashboard { --ags-card-viewport-offset: 196px; }
           .home-entities-scroll { max-height: none; }
         }
 
@@ -2870,6 +2893,12 @@ class AGSPanel extends HTMLElement {
           }
           .home-entities-panel {
             overflow: visible;
+          }
+          .home-dashboard-wrap {
+            width: min(100%, 560px);
+          }
+          .embedded-dashboard {
+            --ags-card-viewport-offset: 178px;
           }
           .home-entities-scroll {
             overflow: visible;
@@ -2910,6 +2939,13 @@ class AGSPanel extends HTMLElement {
             gap: 6px;
             align-items: flex-start;
             flex-direction: column;
+          }
+          .home-dashboard-wrap,
+          .embedded-dashboard {
+            width: 100%;
+          }
+          .embedded-dashboard {
+            --ags-card-viewport-offset: 162px;
           }
           .table-row {
             grid-template-columns: 1fr;

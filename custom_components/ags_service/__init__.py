@@ -21,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
+FRONTEND_ASSET_VERSION = "2.0.6"
 
 # Signal for dynamic entity updates
 SIGNAL_AGS_RELOAD = "ags_service_reload"
@@ -358,13 +359,13 @@ async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
         webcomponent_name="ags-panel",
         sidebar_title="AGS Service",
         sidebar_icon="mdi:account-group",
-        module_url="/ags-static/ags-panel.js?v=2.0.9",
+        module_url=f"/ags-static/ags-panel.js?v={FRONTEND_ASSET_VERSION}",
         embed_iframe=False,
         trust_external=False,
     )
 
     # Register Lovelace Custom Card
-    add_extra_js_url(hass, "/ags-static/ags-media-card.js?v=2.0.9")
+    add_extra_js_url(hass, f"/ags-static/ags-media-card.js?v={FRONTEND_ASSET_VERSION}")
 
     hass.data[DOMAIN]["_runtime_initialized"] = True
 

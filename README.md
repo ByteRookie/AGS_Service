@@ -49,11 +49,9 @@ Configure cascading logic per device. This example shows a "News" override that 
 * V2 includes a beautiful, premium Lovelace dashboard card specifically built for AGS. It provides a rich player with dynamic blurred backgrounds, live room volume grouping, and a grid of your global music sources. 
 
 ### How to add the Custom Card to your Dashboard:
-1. Go to **Settings** → **Dashboards** → click the three dots (⋮) in the top right → **Resources**.
-2. Click **Add Resource** in the bottom right corner.
-3. Enter the URL: `/ags-static/ags-media-card.js`
-4. Ensure the Resource type is set to **JavaScript Module**, and click Create.
-5. Go to your Lovelace dashboard, click Edit, Add Card, search for "Manual", and paste the following:
+1. Restart Home Assistant after installing or updating AGS so the integration can register the latest frontend assets.
+2. If you previously added `/ags-static/ags-media-card.js` manually in **Settings** → **Dashboards** → **Resources**, remove that old unversioned resource. AGS now injects the versioned card asset automatically, and stale manual resources can cause dashboard-only configuration errors.
+3. Go to your Lovelace dashboard, click Edit, Add Card, search for "Manual", and paste the following:
 ```yaml
 type: custom:ags-media-card
 ```
