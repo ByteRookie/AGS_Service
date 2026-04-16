@@ -494,6 +494,13 @@ class AGSPanel extends HTMLElement {
       .replace(/\b\w/g, (match) => match.toUpperCase());
   }
 
+  hasCompleteBrowseTarget(node) {
+    if (!node || typeof node !== "object") {
+      return false;
+    }
+    return Boolean(String(node.media_content_type || "").trim() && String(node.media_content_id || "").trim());
+  }
+
   normalizeBrowseItem(item) {
     if (!item || typeof item !== "object") {
       return null;
@@ -577,10 +584,26 @@ class AGSPanel extends HTMLElement {
     if (!detail) {
       return "Browse media request failed.";
     }
+    if (/media_content_type.*media_content_id.*provided together/i.test(detail)) {
+      return "Could not open that media folder because the speaker returned an incomplete browse target.";
+    }
     if (/browse media/i.test(detail) || /entity not found/i.test(detail)) {
       return "Browse media failed for AGS and the active speaker.";
     }
     return detail;
+  }
+
+  applyBrowseNodeResults(node) {
+    const normalized = this.normalizeBrowseItem(node);
+    const children = Array.isArray(normalized?.children) ? normalized.children : [];
+    this.browseItems = children;
+    this.discoveredFavorites = this.collectPlayableBrowseItems({ children });
+
+    if (!children.length && !this.discoveredFavorites.length) {
+      this.favoriteBrowseError = "Browse media returned no folders or playable items.";
+    } else {
+      this.favoriteBrowseError = "";
+    }
   }
 
   clamp(value, min, max) {
@@ -1236,6 +1259,11 @@ class AGSPanel extends HTMLElement {
       throw new Error("No active speaker is available for media browsing.");
     }
 
+    if (node && !this.hasCompleteBrowseTarget(node) && Array.isArray(node.children) && node.children.length) {
+      this.applyBrowseNodeResults(node);
+      return;
+    }
+
     let result = null;
     let lastError = null;
 
@@ -1245,10 +1273,8 @@ class AGSPanel extends HTMLElement {
         entity_id: entityId,
       };
 
-      if (node?.media_content_type) {
+      if (this.hasCompleteBrowseTarget(node)) {
         payload.media_content_type = node.media_content_type;
-      }
-      if (node?.media_content_id) {
         payload.media_content_id = node.media_content_id;
       }
 
@@ -1284,10 +1310,17 @@ class AGSPanel extends HTMLElement {
     }
 
     if (item.can_expand) {
+      if (!this.hasCompleteBrowseTarget(item) && (!Array.isArray(item.children) || !item.children.length)) {
+        this.favoriteBrowseError = "This media folder cannot be opened because the speaker did not provide a complete media target.";
+        this.render();
+        return;
+      }
       this.browsePath.push({
         title: item.title,
         media_content_id: item.media_content_id,
         media_content_type: item.media_content_type,
+        media_class: item.media_class,
+        children: Array.isArray(item.children) ? item.children : [],
       });
       this.loadingBrowseResults = true;
       this.render();

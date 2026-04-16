@@ -652,6 +652,50 @@ class AgsMediaCard extends HTMLElement {
     return { ...response, children };
   }
 
+  getBrowseNodeKey(node) {
+    if (!node || typeof node !== "object") return "";
+    return [
+      String(node.media_content_type || "").trim(),
+      String(node.media_content_id || "").trim(),
+      String(node.title || node.name || "").trim(),
+      String(node.media_class || "").trim(),
+    ].join("::");
+  }
+
+  hasCompleteBrowseTarget(node) {
+    if (!node || typeof node !== "object") return false;
+    return Boolean(String(node.media_content_type || "").trim() && String(node.media_content_id || "").trim());
+  }
+
+  applyBrowsePayloadNode(payload, node) {
+    if (!node || typeof node !== "object") return payload;
+    if (!this.hasCompleteBrowseTarget(node)) return payload;
+    payload.media_content_type = String(node.media_content_type || "").trim();
+    payload.media_content_id = String(node.media_content_id || "").trim();
+    return payload;
+  }
+
+  setBrowseNodeResults(node) {
+    const normalized = this.normalizeBrowseItem(node);
+    this._browseItems = Array.isArray(normalized?.children) ? normalized.children : [];
+    this._browseError = this._browseItems.length
+      ? ""
+      : "This media folder does not expose any child items in the custom browser.";
+  }
+
+  rememberBrowseNode(node) {
+    const nodeKey = this.getBrowseNodeKey(node);
+    const currentKey = this.getBrowseNodeKey(this._browseStack[this._browseStack.length - 1]);
+    if (!nodeKey || currentKey === nodeKey) return;
+    this._browseStack.push({
+      title: node.title,
+      media_content_id: node.media_content_id,
+      media_content_type: node.media_content_type,
+      media_class: node.media_class,
+      children: Array.isArray(node.children) ? node.children : [],
+    });
+  }
+
   getBrowseItemIcon(item) {
     if (item?.can_expand) return "mdi:folder";
     const mediaClass = String(item?.media_class || item?.media_content_type || "").toLowerCase();
@@ -693,6 +737,9 @@ class AgsMediaCard extends HTMLElement {
   getBrowseErrorMessage(error) {
     const detail = String(error?.message || error || "").trim();
     if (!detail) return "Could not load media library. Make sure your speaker is reachable.";
+    if (/media_content_type.*media_content_id.*provided together/i.test(detail)) {
+      return "Could not open that media folder because the speaker returned an incomplete browse target.";
+    }
     if (/browse media/i.test(detail) || /entity not found/i.test(detail)) {
       return "Could not load media library from AGS or the active speaker.";
     }
@@ -1158,8 +1205,10 @@ class AgsMediaCard extends HTMLElement {
     if (!ags) return;
     this._browseError = "";
 
-    if (node && (!node.media_content_type || !node.media_content_id)) {
-      this._browseError = "Media content type and ID must be provided together";
+    if (node && !this.hasCompleteBrowseTarget(node) && Array.isArray(node.children) && node.children.length) {
+      this.setBrowseNodeResults(node);
+      this.rememberBrowseNode(node);
+      this._loadingBrowse = false;
       this.render(true);
       return;
     }
@@ -1179,11 +1228,10 @@ class AgsMediaCard extends HTMLElement {
       let lastError = null;
 
       for (const entityId of candidates) {
-        const payload = { type: "media_player/browse_media", entity_id: entityId };
-        if (node) {
-          payload.media_content_id = node.media_content_id;
-          payload.media_content_type = node.media_content_type;
-        }
+        const payload = this.applyBrowsePayloadNode(
+          { type: "media_player/browse_media", entity_id: entityId },
+          node,
+        );
         try {
           response = await this._hass.callWS(payload);
           break;
@@ -1200,9 +1248,7 @@ class AgsMediaCard extends HTMLElement {
       const normalized = this.normalizeBrowseResponse(response);
       this._browseItems = normalized.children || [];
       if (node) {
-        if (!this._browseStack.length || this._browseStack[this._browseStack.length-1].media_content_id !== node.media_content_id) {
-          this._browseStack.push(node);
-        }
+        this.rememberBrowseNode(node);
       } else { this._browseStack = []; }
     } catch (e) {
       console.error("AGS browseMedia failed", e);
@@ -1458,8 +1504,14 @@ class AgsMediaCard extends HTMLElement {
   _handleBrowseClick(index) {
     const item = this._browseItems[index];
     if (!item) return;
-    if (item.can_expand) { this.browseMedia(item); } 
-    else if (item.can_play) {
+    if (item.can_expand) {
+      if (!this.hasCompleteBrowseTarget(item) && (!Array.isArray(item.children) || !item.children.length)) {
+        this._browseError = "This media folder cannot be opened because the speaker did not provide a complete media target.";
+        this.render(true);
+        return;
+      }
+      this.browseMedia(item);
+    } else if (item.can_play) {
       if (!item.media_content_id || !item.media_content_type) {
         console.warn("Cannot play media: missing content ID or type", item);
         return;
