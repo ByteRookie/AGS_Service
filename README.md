@@ -1,6 +1,6 @@
 # 🎵 AGS Service: Auto Grouping Speaker Logic (v2.0.5)
 
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FByteRookie%2FAGS_Service%2Fblob%2Fmain%2Fblueprints%2Fscript%2Fags_news_mode.yaml)
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FByteRookie%2FAGS_Service%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fags_entity_context_actions.yaml)
 
 ## The Problem: Manual Grouping is a Chore
 If you have multiple Sonos or smart speakers, you know the routine: you move rooms and have to open an app to "join" the new speaker, or you turn on the TV and have to manually ungroup the soundbar.
@@ -12,7 +12,7 @@ AGS Service is a utility that handles the "handshakes" between your speakers. It
 
 *   **Music Follows You**: Automatically regroups speakers based on room toggles or motion triggers.
 *   **Intelligent TV Sync**: Detects active TVs and switches soundbars to TV audio instantly. Allows other rooms to "listen in" or stay isolated via **TV Mode: No Music**.
-*   **News Mode (Cascading Overrides)**: Triggers specific behaviors for sources. Selecting "News" can run a script on your Apple TV if the TV is on, or fallback to a Sonos radio station if it's off.
+*   **Entity-Based Context Actions**: Use the blueprint to react to AGS source changes or room switches with the current source, primary speaker, TV device, and room devices available as action variables.
 *   **Sticky Master Logic**: Prevents audio cutouts by maintaining the lead speaker as long as it's active, even if a higher-priority room joins.
 *   **No More YAML**: Manage everything through a dedicated Sidebar Panel.
 

@@ -27,6 +27,12 @@ class AgsMediaCard extends HTMLElement {
     this._lastRenderSignature = "";
     this._progressFrame = null;
     this._progressStateSignature = "";
+    this._browseView = 'favorites';
+    this._browseMode = 'grid';
+    this._browseSort = 'default';
+    this._nativeFavoriteIds = new Set();
+    this._loadedServiceConfig = false;
+    this._browseLoadedOnce = false;
     this._handleOutsideClick = this._handleOutsideClick.bind(this);
     this._handleKeydown = this._handleKeydown.bind(this);
   }
@@ -55,23 +61,21 @@ class AgsMediaCard extends HTMLElement {
   }
 
   setConfig(config) {
-    const normalizedConfig =
-      config && typeof config === "object"
-        ? { ...config }
-        : {};
-    const entity =
-      typeof normalizedConfig.entity === "string" && normalizedConfig.entity.trim()
-        ? normalizedConfig.entity.trim()
-        : "media_player.ags_media_player";
-
-    this._config = {
-      ...normalizedConfig,
-      entity,
-    };
-
+    if (!config) throw new Error("Invalid configuration");
+    const normalizedConfig = typeof config === "object" ? { ...config } : {};
+    const entity = String(normalizedConfig.entity || "media_player.ags_media_player").trim();
+    this._config = { ...normalizedConfig, entity };
     const configuredStart = typeof normalizedConfig.start_section === "string" ? normalizedConfig.start_section : "player";
-    this._section = this.getSavedSection(configuredStart);
-    this.render(true);
+    try {
+      this._section = this.getSavedSection(configuredStart);
+      const browseSettings = this.getSavedBrowseSettings();
+      this._browseView = browseSettings.view;
+      this._browseMode = browseSettings.mode;
+      this._browseSort = browseSettings.sort;
+    } catch (e) {
+      this._section = "player";
+    }
+    if (this._hass) this.render(true);
   }
 
   getCardSize() { return 6; }
@@ -82,7 +86,7 @@ class AgsMediaCard extends HTMLElement {
   }
 
   getSavedSection(fallback = "player") {
-    const valid = new Set(["player", "browse", "rooms", "sources"]);
+    const valid = new Set(["player", "browse", "rooms"]);
     const normalizedFallback = fallback === "volumes" ? "rooms" : fallback;
     const preferred = valid.has(normalizedFallback) ? normalizedFallback : "player";
     try {
@@ -99,6 +103,41 @@ class AgsMediaCard extends HTMLElement {
       window.localStorage?.setItem(this.getSectionStorageKey(), section);
     } catch (error) {
       // Ignore storage failures in restricted browser contexts.
+    }
+  }
+
+  getBrowseSettingsStorageKey() {
+    const entityId = this._config?.entity || "ags-media-card";
+    return `ags-media-card:browse-settings:${entityId}`;
+  }
+
+  getSavedBrowseSettings() {
+    const defaults = {
+      view: 'favorites',
+      mode: 'grid',
+      sort: 'default'
+    };
+    try {
+      const saved = window.localStorage?.getItem(this.getBrowseSettingsStorageKey());
+      if (saved) {
+        return { ...defaults, ...JSON.parse(saved) };
+      }
+    } catch (error) {
+      // Return defaults on parse error
+    }
+    return defaults;
+  }
+
+  saveBrowseSettings() {
+    try {
+      const settings = {
+        view: this._browseView,
+        mode: this._browseMode,
+        sort: this._browseSort
+      };
+      window.localStorage?.setItem(this.getBrowseSettingsStorageKey(), JSON.stringify(settings));
+    } catch (error) {
+      // Ignore
     }
   }
 
@@ -165,26 +204,137 @@ class AgsMediaCard extends HTMLElement {
   }
 
   set hass(hass) {
-    const hadBrowseItems = this._browseItems.length > 0;
     this._hass = hass;
+    this.loadServiceConfig();
     this._syncPendingVolumes();
     this._syncPendingRoomToggles();
     if (this._config) {
       this.render();
       this.syncLiveProgressUi();
-      if (this._section === "browse" && !hadBrowseItems && !this._loadingBrowse) {
-        this.browseMedia();
-      }
     }
   }
 
   getAgsPlayer() {
-    if (!this._hass) return null;
+    if (!this._hass || !this._hass.states) return null;
     const configuredEntity = this._config?.entity;
-    if (configuredEntity && this._hass.states?.[configuredEntity]) {
+    if (configuredEntity && this._hass.states[configuredEntity]) {
       return this._hass.states[configuredEntity];
     }
     return Object.values(this._hass.states).find(s => s?.attributes?.ags_status !== undefined) || null;
+  }
+
+  getFavoriteSources(config = this._config) {
+    const configSources = this.getConfigFavoriteSources(config);
+    if (config !== this._config || Date.now() < (this._preferLocalSourceConfigUntil || 0)) {
+      return configSources;
+    }
+    const entitySources = this.getAgsSourceEntries("ags_sources");
+    return entitySources.length ? entitySources : configSources;
+  }
+
+  getConfigFavoriteSources(config = this._config) {
+    const sources = Array.isArray(config?.source_favorites)
+      ? config.source_favorites
+      : (Array.isArray(config?.favorite_sources)
+        ? config.favorite_sources
+        : (Array.isArray(config?.Sources) ? config.Sources : []));
+    return this.normalizeSourceEntries(sources).filter((source) => !this.isLegacyConfigSource(source));
+  }
+
+  getAgsSourceEntries(attributeName) {
+    const ags = this.getAgsPlayer();
+    const entries = ags?.attributes?.[attributeName];
+    if (!Array.isArray(entries)) return [];
+    return this.normalizeSourceEntries(entries.map((source) => ({
+      id: source.id,
+      Source: source.name || source.Source,
+      Source_Value: source.value || source.Source_Value,
+      media_content_type: source.media_content_type,
+      source_default: source.default || source.source_default,
+    })));
+  }
+
+  getSourceId(source) {
+    const mediaType = String(source?.media_content_type || "music").trim() || "music";
+    const value = String(source?.Source_Value || source?.value || source?.media_content_id || "").trim();
+    return String(source?.id || (value ? `${mediaType}::${value}` : "")).trim();
+  }
+
+  normalizeSourceEntries(sources) {
+    const seen = new Set();
+    return (Array.isArray(sources) ? sources : [])
+      .map((source) => {
+        const value = String(source?.Source_Value || source?.value || source?.media_content_id || "").trim();
+        if (!value) return null;
+        const mediaType = String(source?.media_content_type || "music").trim() || "music";
+        const id = this.getSourceId({ ...source, Source_Value: value, media_content_type: mediaType });
+        const name = String(source?.Source || source?.name || source?.title || value).trim();
+        if (!id || !name) return null;
+        return {
+          id,
+          Source: name,
+          Source_Value: value,
+          media_content_type: mediaType,
+          source_default: Boolean(source?.source_default),
+          ...(source?.origin ? { origin: String(source.origin) } : {}),
+        };
+      })
+      .filter((source) => {
+        if (!source || seen.has(source.id)) return false;
+        seen.add(source.id);
+        return true;
+      });
+  }
+
+  isLegacyConfigSource(source) {
+    const mediaType = String(source?.media_content_type || "").trim().toLowerCase();
+    const name = String(source?.Source || source?.name || "").trim();
+    const value = String(source?.Source_Value || source?.value || "").trim();
+    const id = String(source?.id || "").trim();
+    return source?.origin === "legacy_config"
+      || (mediaType === "source" && name && name.toLowerCase() === value.toLowerCase() && id.startsWith("source::"));
+  }
+
+  getFavoriteBrowseItems() {
+    return this.getFavoriteSources().map((src) => {
+      const id = this.getSourceId(src);
+      return {
+        title: this._config?.source_display_names?.[id] || src.Source,
+        media_content_id: src.Source_Value,
+        media_content_type: src.media_content_type || "music",
+        media_class: "music",
+        can_play: true,
+        can_expand: false,
+        is_native_favorite: false,
+      };
+    });
+  }
+
+  normalizeServiceConfig(config) {
+    const sources = this.getConfigFavoriteSources(config);
+    return {
+      ...(config || {}),
+      source_favorites: this.normalizeSourceEntries(sources).filter((source) => !this.isLegacyConfigSource(source)),
+      hidden_source_ids: Array.isArray(config?.hidden_source_ids)
+        ? config.hidden_source_ids
+        : (Array.isArray(config?.ExcludedSources) ? config.ExcludedSources : []),
+      source_display_names: config?.source_display_names || {},
+      default_source_id: config?.default_source_id || null,
+      last_discovered_sources: this.normalizeSourceEntries(config?.last_discovered_sources || []),
+    };
+  }
+
+  async loadServiceConfig() {
+    if (!this._hass || this._loadedServiceConfig) return;
+    this._loadedServiceConfig = true;
+    try {
+      const serviceConfig = await this._hass.callWS({ type: "ags_service/config/get" });
+      const entity = this._config?.entity || "media_player.ags_media_player";
+      this._config = this.normalizeServiceConfig({ ...serviceConfig, entity });
+      this.render(true);
+    } catch (error) {
+      console.warn("Failed to load AGS service config", error);
+    }
   }
 
   getControlPlayer() {
@@ -612,19 +762,43 @@ class AgsMediaCard extends HTMLElement {
 
   getBrowseCandidates(ags) {
     const candidates = [
-      ags?.entity_id,
+      ags?.attributes?.control_device_id,
       ags?.attributes?.browse_entity_id,
       ags?.attributes?.primary_speaker,
       ags?.attributes?.preferred_primary_speaker,
-      ags?.attributes?.control_device_id,
+      ...(ags?.attributes?.active_speakers || []),
+      ...this.getConfiguredSpeakerCandidates(),
+      ags?.entity_id,
     ];
     const seen = new Set();
     return candidates.filter((entityId) => {
       const normalized = String(entityId || "").trim();
       if (!normalized || normalized === "none" || seen.has(normalized)) return false;
       seen.add(normalized);
-      return true;
+      const state = this._hass?.states[normalized];
+      return state && state.state !== "unavailable";
     });
+  }
+
+  getConfiguredSpeakerCandidates() {
+    const speakers = [];
+    const rooms = Array.isArray(this._config?.rooms) ? this._config.rooms : [];
+    rooms.forEach((room) => {
+      (room.devices || []).forEach((device) => {
+        if (device.device_type === "speaker" && device.device_id) {
+          speakers.push(device);
+        }
+      });
+    });
+    return speakers
+      .sort((a, b) => (a.priority || 999) - (b.priority || 999))
+      .map((speaker) => speaker.device_id);
+  }
+
+  browseResponseHasRealContent(response) {
+    const children = Array.isArray(response?.children) ? response.children : [];
+    if (!children.length) return !this.isEmptyBrowsePlaceholder(response);
+    return children.some((child) => !this.isEmptyBrowsePlaceholder(child));
   }
 
   humanizeBrowseLabel(value, fallback = "Media") {
@@ -638,6 +812,7 @@ class AgsMediaCard extends HTMLElement {
 
   normalizeBrowseItem(item) {
     if (!item || typeof item !== "object") return null;
+    if (this.isEmptyBrowsePlaceholder(item)) return null;
     const children = Array.isArray(item.children)
       ? item.children.map((child) => this.normalizeBrowseItem(child)).filter(Boolean)
       : [];
@@ -659,6 +834,19 @@ class AgsMediaCard extends HTMLElement {
       can_play: canPlay,
       children,
     };
+  }
+
+  isEmptyBrowsePlaceholder(item) {
+    if (!item || typeof item !== "object") return false;
+    const values = [
+      item.title,
+      item.name,
+      item.media_content_id,
+      item.media_class,
+    ].map((value) => String(value || "").trim().toLowerCase());
+    return values.some((value) =>
+      ["no item", "no items", "nothing found", "empty"].includes(value),
+    );
   }
 
   normalizeBrowseResponse(response) {
@@ -685,9 +873,18 @@ class AgsMediaCard extends HTMLElement {
 
   applyBrowsePayloadNode(payload, node) {
     if (!node || typeof node !== "object") return payload;
-    if (!this.hasCompleteBrowseTarget(node)) return payload;
-    payload.media_content_type = String(node.media_content_type || "").trim();
-    payload.media_content_id = String(node.media_content_id || "").trim();
+    let type = String(node.media_content_type || "").trim();
+    let id = String(node.media_content_id || "").trim();
+
+    // Both must be provided together or HA will reject with an incomplete target error.
+    if (id && !type) {
+      type = node.can_expand ? "library" : "music";
+    } else if (type && !id) {
+      id = "";
+    }
+
+    if (type) payload.media_content_type = type;
+    if (id !== undefined) payload.media_content_id = id;
     return payload;
   }
 
@@ -868,28 +1065,17 @@ class AgsMediaCard extends HTMLElement {
   }
 
   getSourceOptions(ags) {
-    const isTvMode = ags?.attributes?.ags_status === "ON TV";
-    const currentSource = this.getSelectedSourceName(ags);
     const agsSources = this.toArray(ags?.attributes?.ags_sources)
       .map((source) => source?.name)
       .filter(Boolean);
-    const nativeSources = this.toArray(ags?.attributes?.source_list)
-      .map((source) => String(source || "").trim())
-      .filter(Boolean);
-    const options = isTvMode
-      ? nativeSources.filter((source) => !agsSources.includes(source) || source === currentSource)
-      : agsSources.filter((source) => source !== "TV" && source !== "Unknown");
+    const options = agsSources.filter((source) => source !== "Unknown");
     const seen = new Set();
-    const deduped = options.filter((source) => {
+    return options.filter((source) => {
       const key = source.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-    if (currentSource && !deduped.some((source) => source.toLowerCase() === currentSource.toLowerCase())) {
-      deduped.unshift(currentSource);
-    }
-    return deduped;
   }
 
   getDisplayedPosition(snapshot) {
@@ -1046,45 +1232,25 @@ class AgsMediaCard extends HTMLElement {
           </div>
           <div class="quick-volume-body" onclick="event.stopPropagation()">
             <div class="quick-volume-readout">
-              <div class="quick-volume-value" data-volume-id="${ags.entity_id}">${groupVol}%</div>
-              <div class="quick-volume-subtitle">Master output for the whole group</div>
+              <div class="stepper-controls" style="justify-content: center; background: transparent; border: none; padding: 0;">
+                <button class="step-btn" style="width: 44px; height: 44px;" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', -5)"><ha-icon icon="mdi:minus" style="--mdc-icon-size: 24px;"></ha-icon></button>
+                <div style="display: flex; align-items: baseline;">
+                  <input type="number" class="vol-num-input" style="font-size: 2.4rem; width: 64px;" value="${groupVol}" min="0" max="100" onchange="this.getRootNode().host.commitVolumeSet('${ags.entity_id}', this.value)" />
+                  <span class="vol-num-unit" style="font-size: 1.2rem;">%</span>
+                </div>
+                <button class="step-btn" style="width: 44px; height: 44px;" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', 5)"><ha-icon icon="mdi:plus" style="--mdc-icon-size: 24px;"></ha-icon></button>
+              </div>
+              <div class="quick-volume-subtitle" style="margin-top: 12px; text-align: center;">Master output for the whole group</div>
             </div>
-            <div class="quick-volume-slider-row">
-              <button type="button" class="slider-icon-btn slider-icon-btn-master" aria-label="Lower master volume" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', -6)">
-                <ha-icon icon="mdi:minus"></ha-icon>
-              </button>
-              <input
-                class="volume-slider volume-slider-master quick-volume-slider"
-                type="range"
-                min="0"
-                max="100"
-                value="${groupVol}"
-                aria-label="Master volume"
-                oninput="this.getRootNode().host.queueVolumeSet('${ags.entity_id}', this.value)"
-                onchange="this.getRootNode().host.commitVolumeSet('${ags.entity_id}', this.value)"
-              />
-              <button type="button" class="slider-icon-btn slider-icon-btn-master" aria-label="Raise master volume" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', 6)">
-                <ha-icon icon="mdi:plus"></ha-icon>
-              </button>
-            </div>
-            <div class="quick-volume-actions">
+
+            <div class="quick-volume-actions" style="margin-top: 32px; display: flex; justify-content: center;">
               <button
                 type="button"
-                class="quick-volume-action ${groupMuted ? "active" : ""}"
-                aria-label="${groupMuted ? "Unmute group" : "Mute group"}"
+                class="icon-btn master-mute-btn ${groupMuted ? "active" : ""}"
+                style="width: 64px; height: 64px; border-radius: 20px;"
                 onclick="this.getRootNode().host.toggleMuteTargets([${activeSpeakers.map((entityId) => `'${entityId}'`).join(", ")}], ${groupMuted ? "true" : "false"})"
               >
-                <ha-icon icon="${groupMuted ? "mdi:volume-off" : "mdi:volume-mute"}"></ha-icon>
-                <span>${groupMuted ? "Unmute" : "Mute"}</span>
-              </button>
-              <button
-                type="button"
-                class="quick-volume-action quick-volume-full"
-                aria-label="Set master volume to 100 percent"
-                onclick="this.getRootNode().host.commitVolumeSet('${ags.entity_id}', 100)"
-              >
-                <ha-icon icon="mdi:volume-high"></ha-icon>
-                <span>Full Volume</span>
+                <ha-icon icon="${groupMuted ? "mdi:volume-off" : "mdi:volume-high"}" style="--mdc-icon-size: 32px;"></ha-icon>
               </button>
             </div>
           </div>
@@ -1096,7 +1262,7 @@ class AgsMediaCard extends HTMLElement {
   setSection(s) {
     if (this._section === s) return;
     const previous = this._section;
-    const sectionOrder = ["player", "sources", "browse", "rooms"];
+    const sectionOrder = ["player", "browse", "rooms"];
     const normalizedPrevious = previous === "volumes" ? "rooms" : previous;
     const normalizedNext = s === "volumes" ? "rooms" : s;
     if (previous === "player" || s === "player") {
@@ -1112,6 +1278,7 @@ class AgsMediaCard extends HTMLElement {
     this._showQuickVolume = false;
     if (s === "browse" && !this._browseItems.length) this.browseMedia();
     this.render(true);
+
     if (this._transitionTimer) {
       window.clearTimeout(this._transitionTimer);
     }
@@ -1126,6 +1293,161 @@ class AgsMediaCard extends HTMLElement {
     });
   }
 
+  getBrowseItemSourceId(item) {
+    return this.getSourceId({
+      Source_Value: item?.media_content_id,
+      media_content_type: item?.media_content_type || "music",
+    });
+  }
+
+  isHiddenSourceItem(item) {
+    const hidden = this._config?.hidden_source_ids || [];
+    const itemId = this.getBrowseItemSourceId(item);
+    const rawId = String(item?.media_content_id || "").trim();
+    return hidden.includes(itemId) || hidden.includes(rawId);
+  }
+
+  isAgsFavorite(item) {
+    if (!item || !item.media_content_id) return false;
+
+    // In favorites view, everything shown is considered a favorite (or container)
+    if (this._browseView === 'favorites') return true;
+
+    const normId = String(item.media_content_id).trim();
+
+    // Check custom sources first
+    const sources = this.getFavoriteSources();
+    const sourceId = this.getBrowseItemSourceId(item);
+    if (sources.some(s => this.getSourceId(s) === sourceId || String(s.Source_Value).trim() === normId)) return true;
+
+    if (this.isHiddenSourceItem(item)) return false;
+
+    // Check if it's in our native favorites cache (includes folders crawled)
+    if (this._nativeFavoriteIds.has(normId)) return true;
+
+    // If it's a folder, check if ANY favorited item is a descendant (hierarchical ID matching)
+    if (item.can_expand) {
+      const allFavoritedIds = [
+        ...sources.map(s => String(s.Source_Value).trim()),
+        ...Array.from(this._nativeFavoriteIds)
+      ];
+      if (allFavoritedIds.some(favId => favId.startsWith(normId) && favId !== normId)) {
+        return true;
+      }
+    }
+
+    return !!item.is_native_favorite;
+  }
+
+  isDefaultSource(item) {
+    const sources = this.getFavoriteSources();
+    const itemId = this.getBrowseItemSourceId(item);
+    return this._config?.default_source_id === itemId || sources.some(s => this.getSourceId(s) === itemId && s.source_default);
+  }
+
+  async toggleAgsFavorite(index) {
+    const items = this.getFilteredBrowseItems();
+    const item = items[index];
+    if (!item) return;
+
+    const sources = [...this.getFavoriteSources()];
+    const hidden = [...(this._config?.hidden_source_ids || [])];
+    const itemId = this.getBrowseItemSourceId(item);
+    const existingIdx = sources.findIndex(s => this.getSourceId(s) === itemId);
+    const hiddenIdx = hidden.indexOf(itemId);
+
+    if (this.isAgsFavorite(item)) {
+      // Hide / Remove from favorites
+      if (existingIdx >= 0) {
+        sources.splice(existingIdx, 1);
+      }
+      if (itemId && !hidden.includes(itemId)) {
+        hidden.push(itemId);
+      }
+    } else {
+      // Show / Add to favorites
+      if (hiddenIdx >= 0) {
+        hidden.splice(hiddenIdx, 1);
+      }
+      if (existingIdx < 0) {
+        sources.push({
+          id: itemId,
+          Source: String(item.title || "Unknown Source"),
+          Source_Value: String(item.media_content_id),
+          media_content_type: String(item.media_content_type || "music"),
+          source_default: !this._config?.default_source_id && sources.length === 0,
+          origin: "user_favorite",
+          priority: sources.length + 1
+        });
+      }
+    }
+
+    const nextDefault = this._config?.default_source_id && !hidden.includes(this._config.default_source_id)
+      ? this._config.default_source_id
+      : (sources[0] ? this.getSourceId(sources[0]) : null);
+    await this.saveConfig({
+      ...this._config,
+      source_favorites: sources,
+      hidden_source_ids: hidden,
+      default_source_id: nextDefault,
+    });
+    if (this._browseView === 'favorites') {
+      this.browseMedia();
+    }
+  }
+
+  async renameAgsFavorite(index) {
+    const items = this.getFilteredBrowseItems();
+    const item = items[index];
+    if (!item) return;
+
+    const sources = [...this.getFavoriteSources()];
+    const itemId = this.getBrowseItemSourceId(item);
+    const existingIdx = sources.findIndex(s => this.getSourceId(s) === itemId);
+    if (existingIdx < 0) return;
+
+    const newName = window.prompt("Enter a new name for this favorite:", sources[existingIdx].Source);
+    if (newName === null || newName.trim() === "" || newName === sources[existingIdx].Source) return;
+
+    const displayNames = {
+      ...(this._config?.source_display_names || {}),
+      [itemId]: newName.trim(),
+    };
+    sources[existingIdx].Source = newName.trim();
+    await this.saveConfig({ ...this._config, source_favorites: sources, source_display_names: displayNames });
+  }
+
+  async setAsDefaultSource(index) {
+    const items = this.getFilteredBrowseItems();
+    const item = items[index];
+    if (!item) return;
+
+    const itemId = this.getBrowseItemSourceId(item);
+    const sources = this.getFavoriteSources().map(s => ({
+      ...s,
+      source_default: this.getSourceId(s) === itemId
+    }));
+
+    await this.saveConfig({ ...this._config, source_favorites: sources, default_source_id: itemId });
+  }
+
+  async saveConfig(config) {
+    const payload = this.normalizeServiceConfig(config);
+    delete payload.Sources;
+    delete payload.favorite_sources;
+    delete payload.ExcludedSources;
+    delete payload.homekit_player;
+    delete payload.entity;
+    this._config = this.normalizeServiceConfig(config);
+    this._preferLocalSourceConfigUntil = Date.now() + 5000;
+    try {
+      await this._hass.callWS({ type: "ags_service/config/save", config: payload });
+      this.render(true);
+    } catch (e) {
+      console.error("Failed to save AGS config from card", e);
+    }
+  }
+
   toggleSourceMenu() {
     this._showSourceMenu = !this._showSourceMenu;
     if (this._showSourceMenu) this._showQuickVolume = false;
@@ -1138,8 +1460,8 @@ class AgsMediaCard extends HTMLElement {
     this.render(true);
   }
 
-  callService(domain, service, data) { 
-    this._hass.callService(domain, service, data); 
+  callService(domain, service, data) {
+    this._hass.callService(domain, service, data);
     if (service === 'select_source') this._showSourceMenu = false;
     this.render(true);
   }
@@ -1173,8 +1495,8 @@ class AgsMediaCard extends HTMLElement {
       browseError: this._browseError,
       pendingRoomToggles: Array.from(this._pendingRoomToggles.entries()),
       transitionPreset: this._transitionPreset,
-      browseStack: this._browseStack.map((item) => `${item.media_content_type}:${item.media_content_id}`),
-      browseItems: this._browseItems.map((item) => `${item.title}:${item.media_content_type}:${item.media_content_id}:${item.media_class}:${item.can_expand}:${item.can_play}:${item.thumbnail}`),
+      browseStack: this._browseStack.map((item) => `${item?.media_content_type}:${item?.media_content_id}`),
+      browseItems: this._browseItems.map((item) => `${item?.title}:${item?.media_content_type}:${item?.media_content_id}:${item?.media_class}:${item?.can_expand}:${item?.can_play}:${item?.thumbnail}`),
       theme: this.getThemeSignature(),
       ags: ags
         ? {
@@ -1183,7 +1505,7 @@ class AgsMediaCard extends HTMLElement {
             ags_status: agsAttrs.ags_status,
             source: agsAttrs.source,
             selected_source_name: agsAttrs.selected_source_name,
-            volume_level: agsAttrs.volume_level,
+            volume_level: this.getSignatureVolumeLevel(ags.entity_id, agsAttrs.volume_level),
             is_volume_muted: agsAttrs.is_volume_muted,
             primary_speaker_room: agsAttrs.primary_speaker_room,
             active_rooms: agsAttrs.active_rooms || [],
@@ -1216,10 +1538,74 @@ class AgsMediaCard extends HTMLElement {
     });
   }
 
+  setBrowseView(view) {
+    if (this._browseView === view) return;
+    this._browseView = view;
+    this._browseStack = [];
+    this._browseItems = [];
+    this._browseLoadedOnce = false;
+    this.saveBrowseSettings();
+    this.browseMedia();
+  }
+
+  setBrowseMode(mode) {
+    this._browseMode = mode;
+    this.saveBrowseSettings();
+    this.render(true);
+  }
+
+  setBrowseSort(sort) {
+    this._browseSort = sort;
+    this.saveBrowseSettings();
+    this.render(true);
+  }
+  getFilteredBrowseItems() {
+    if (this._browseView === 'favorites' && this._browseStack.length <= 1) {
+      return this.getFavoriteBrowseItems();
+    }
+
+    let items = Array.isArray(this._browseItems) ? [...this._browseItems] : [];
+
+    // Filter out items that are explicitly hidden/excluded
+    const excluded = this._config?.hidden_source_ids || [];
+
+    // If we are currently inside an excluded folder, don't show any children
+    const isCurrentPathExcluded = this._browseStack.some(node => node.media_content_id && (
+      excluded.includes(node.media_content_id) || excluded.includes(this.getBrowseItemSourceId(node))
+    ));
+    if (isCurrentPathExcluded) {
+      return [];
+    }
+
+    items = items.filter(item => !this.isHiddenSourceItem(item));
+
+    if (this._browseSort === 'a-z') {
+      items.sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: 'accent', numeric: true }));
+    }
+    return items;
+  }
+
   async browseMedia(node = null) {
     const ags = this.getAgsPlayer();
     if (!ags) return;
     this._browseError = "";
+
+    // Background fetch native favorites only for library icons. The Favorites
+    // view itself is AGS-managed so it stays in sync with source_favorites.
+    if (this._browseView !== 'favorites') {
+      this.fetchNativeFavorites();
+    }
+
+    // The Favorites view is the AGS visible source list, not a separate native
+    // media-browser crawl.
+    if (!node && this._browseView === 'favorites') {
+      this._browseItems = this.getFavoriteBrowseItems();
+      this._browseStack = [{ title: "Favorites", children: this._browseItems }];
+      this._loadingBrowse = false;
+      this._browseLoadedOnce = true;
+      this.render(true);
+      return;
+    }
 
     if (node && !this.hasCompleteBrowseTarget(node) && Array.isArray(node.children) && node.children.length) {
       this.setBrowseNodeResults(node);
@@ -1250,6 +1636,10 @@ class AgsMediaCard extends HTMLElement {
         );
         try {
           response = await this._hass.callWS(payload);
+          if (!node && !this.browseResponseHasRealContent(response)) {
+            lastError = new Error(`${entityId} returned no browse items.`);
+            continue;
+          }
           break;
         } catch (error) {
           lastError = error;
@@ -1262,23 +1652,156 @@ class AgsMediaCard extends HTMLElement {
       }
 
       const normalized = this.normalizeBrowseResponse(response);
-      this._browseItems = normalized.children || [];
+      const nextItems = normalized.children || [];
+      if (!node && !nextItems.length && this._browseItems.length) {
+        this._loadingBrowse = false;
+        this.render(true);
+        return;
+      }
+      this._browseItems = nextItems;
+      this._browseLoadedOnce = true;
       if (node) {
         this.rememberBrowseNode(node);
       } else { this._browseStack = []; }
     } catch (e) {
       console.error("AGS browseMedia failed", e);
-      this._browseItems = [];
+      if (!this._browseItems.length) {
+        this._browseItems = [];
+      }
       this._browseError = this.getBrowseErrorMessage(e);
+      this._browseLoadedOnce = true;
     }
     this._loadingBrowse = false;
     this.render(true);
   }
 
   async browseBack() {
+    if (this._browseStack.length <= (this._browseView === 'favorites' ? 1 : 0)) {
+      this.setSection('player');
+      return;
+    }
     this._browseStack.pop();
     const prev = this._browseStack[this._browseStack.length - 1] || null;
     await this.browseMedia(prev);
+  }
+
+  toggleBrowseView() {
+    this.setBrowseView(this._browseView === 'favorites' ? 'library' : 'favorites');
+  }
+
+  toggleBrowseMode() {
+    this.setBrowseMode(this._browseMode === 'list' ? 'grid' : 'list');
+  }
+
+  toggleBrowseSort() {
+    this.setBrowseSort(this._browseSort === 'a-z' ? 'default' : 'a-z');
+  }
+
+  async fetchNativeFavorites() {
+    const ags = this.getAgsPlayer();
+    if (!ags) return;
+    const candidates = this.getBrowseCandidates(ags);
+    for (const entityId of candidates) {
+      try {
+        const root = await this._hass.callWS({ type: "media_player/browse_media", entity_id: entityId });
+        const children = root.children || [];
+        const favoritesNode = children.find(c =>
+          String(c.media_class || "").toLowerCase().includes("favorites") ||
+          String(c.title || "").toLowerCase().includes("favorites") ||
+          String(c.media_content_id || "").toLowerCase().includes("favorites")
+        );
+        if (favoritesNode) {
+          // Add the favorites folder itself to the set so it shows as 'Hide' in library view
+          if (favoritesNode.media_content_id) {
+            this._nativeFavoriteIds.add(String(favoritesNode.media_content_id).trim());
+          }
+          const payload = this.applyBrowsePayloadNode(
+            { type: "media_player/browse_media", entity_id: entityId },
+            favoritesNode,
+          );
+          const response = await this._hass.callWS(payload);
+          await this.crawlFavorites(entityId, response);
+          // Once crawled, re-render to update icons in Library view
+          this.render(true);
+          break;
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
+
+  async crawlFavorites(entityId, node, results = [], seen = new Set()) {
+    if (!node) return results;
+    const normalizedNode = this.normalizeBrowseItem(node);
+    if (!normalizedNode) return results;
+
+    // Add the folder itself to native favorites so it can be 'hidden'
+    if (normalizedNode.media_content_id) {
+      this._nativeFavoriteIds.add(String(normalizedNode.media_content_id).trim());
+    }
+
+    const excluded = this._config?.hidden_source_ids || [];
+    const children = normalizedNode.children || [];
+
+    for (const child of children) {
+      if (child.can_play && child.media_content_id) {
+        if (excluded.includes(child.media_content_id) || excluded.includes(this.getBrowseItemSourceId(child))) continue;
+
+        const key = `${child.media_content_type}::${child.media_content_id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          this._nativeFavoriteIds.add(String(child.media_content_id).trim());
+          // Mark as native so we know to 'Exclude' rather than 'Remove' in UI
+          child.is_native_favorite = true;
+          results.push(child);
+        }
+      } else if (child.can_expand) {
+        this._nativeFavoriteIds.add(String(child.media_content_id).trim());
+        try {
+          const payload = this.applyBrowsePayloadNode(
+            { type: "media_player/browse_media", entity_id: entityId },
+            child,
+          );
+          const response = await this._hass.callWS(payload);
+          const subFolder = this.normalizeBrowseItem(response);
+          if (subFolder && subFolder.children) {
+            for (const subChild of subFolder.children) {
+              if (subChild.can_play && subChild.media_content_id) {
+                if (excluded.includes(subChild.media_content_id) || excluded.includes(this.getBrowseItemSourceId(subChild))) continue;
+                const subKey = `${subChild.media_content_type}::${subChild.media_content_id}`;
+                if (!seen.has(subKey)) {
+                  seen.add(subKey);
+                  this._nativeFavoriteIds.add(String(subChild.media_content_id).trim());
+                  subChild.is_native_favorite = true;
+                  results.push(subChild);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Sub-folder crawl failed for", child.title, e);
+        }
+      }
+    }
+
+    // Also inject custom favorites that aren't in the native list
+    const customSources = this.getFavoriteSources();
+    for (const src of customSources) {
+      const key = this.getSourceId(src);
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push({
+          title: this._config?.source_display_names?.[key] || src.Source,
+          media_content_id: src.Source_Value,
+          media_content_type: src.media_content_type,
+          can_play: true,
+          is_native_favorite: false
+        });
+      }
+    }
+
+    return results;
   }
 
   _syncPendingVolumes() {
@@ -1304,6 +1827,13 @@ class AgsMediaCard extends HTMLElement {
         this._pendingRoomToggles.delete(entityId);
       }
     }
+  }
+
+  getSignatureVolumeLevel(entityId, rawLevel) {
+    if (entityId && this._pendingVolume.has(entityId)) {
+      return this._pendingVolume.get(entityId) / 100;
+    }
+    return rawLevel;
   }
 
   getRoomDesiredState(entityId, active) {
@@ -1441,7 +1971,7 @@ class AgsMediaCard extends HTMLElement {
     }
 
     return {
-      icon: isTv ? "mdi:television-classic" : (raw ? "mdi:radio" : "mdi:play-network-outline"),
+      icon: isTv ? "mdi:television-classic" : (raw ? "mdi:radio" : "mdi:play-box-multiple"),
       color: isTv ? "#38bdf8" : "#64748b",
       label: raw || (isTv ? "TV" : "Media"),
     };
@@ -1487,6 +2017,7 @@ class AgsMediaCard extends HTMLElement {
     const nextValue = Math.round(this.clamp(Number(percent || 0), 0, 100));
     this._pendingVolume.set(entityId, nextValue);
     this._updateVolumeLabel(entityId, nextValue);
+    this._lastRenderSignature = this.getRenderSignature();
 
     const existingTimer = this._volumeTimers.get(entityId);
     if (existingTimer) {
@@ -1501,6 +2032,7 @@ class AgsMediaCard extends HTMLElement {
     const nextValue = Math.round(this.clamp(Number(percent || 0), 0, 100));
     this._pendingVolume.set(entityId, nextValue);
     this._updateVolumeLabel(entityId, nextValue);
+    this._lastRenderSignature = this.getRenderSignature();
     const existingTimer = this._volumeTimers.get(entityId);
     if (existingTimer) {
       window.clearTimeout(existingTimer);
@@ -1518,14 +2050,10 @@ class AgsMediaCard extends HTMLElement {
   }
 
   _handleBrowseClick(index) {
-    const item = this._browseItems[index];
+    const items = this.getFilteredBrowseItems();
+    const item = items[index];
     if (!item) return;
     if (item.can_expand) {
-      if (!this.hasCompleteBrowseTarget(item) && (!Array.isArray(item.children) || !item.children.length)) {
-        this._browseError = "This media folder cannot be opened because the speaker did not provide a complete media target.";
-        this.render(true);
-        return;
-      }
       this.browseMedia(item);
     } else if (item.can_play) {
       if (!item.media_content_id || !item.media_content_type) {
@@ -1538,6 +2066,15 @@ class AgsMediaCard extends HTMLElement {
     }
   }
 
+  openMoreInfo(entityId) {
+    const target = entityId || this._config?.entity || "media_player.ags_media_player";
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      bubbles: true,
+      composed: true,
+      detail: { entityId: target },
+    }));
+  }
+
   renderSourceBadge(snapshot, variant = "full") {
     const label = snapshot?.sourceLabel || snapshot?.currentSource || (snapshot?.isTv ? "TV" : "Media");
     return `
@@ -1547,11 +2084,8 @@ class AgsMediaCard extends HTMLElement {
         style="--badge-accent:${snapshot?.sourceColor || "var(--primary)"};"
         aria-label="Select source. Current source: ${this.escapeAttribute(label)}"
         title="${this.escapeAttribute(label)}"
-        onclick="this.getRootNode().host.setSection('sources')"
-      >
-        <ha-icon icon="${snapshot?.sourceIcon || "mdi:music-note"}"></ha-icon>
-        <span>${this.escapeHtml(label)}</span>
-      </button>
+        onclick="this.getRootNode().host.setSection('browse')"
+      ><ha-icon icon="${snapshot?.sourceIcon || "mdi:play-box-multiple"}"></ha-icon><span>${this.escapeHtml(label)}</span></button>
     `;
   }
 
@@ -1566,7 +2100,7 @@ class AgsMediaCard extends HTMLElement {
         onclick="this.getRootNode().host.setSection('rooms')"
       >
         <span class="mode-badge" aria-hidden="true">
-          <ha-icon icon="${snapshot?.isTv ? "mdi:television-play" : "mdi:music-note"}"></ha-icon>
+          <ha-icon icon="mdi:speaker"></ha-icon>
         </span>
         <span>${this.escapeHtml(label)}</span>
       </button>
@@ -1574,32 +2108,24 @@ class AgsMediaCard extends HTMLElement {
   }
 
   getMiniSectionShortcut(snapshot) {
-    if (this._section === "sources") {
-      return {
-        icon: "mdi:folder-music",
-        target: "browse",
-        label: "Open browse media",
-        title: "Browse media",
-      };
-    }
     if (this._section === "browse" || this._section === "rooms") {
       return {
-        icon: snapshot?.sourceIcon || "mdi:playlist-play",
-        target: "sources",
-        label: `Open sources. Current source: ${snapshot?.sourceLabel || snapshot?.currentSource || "Media"}`,
-        title: "Sources",
+        icon: "mdi:play-circle-outline",
+        target: "player",
+        label: "Return to player",
+        title: "Player",
       };
     }
     return {
-      icon: "mdi:volume-high",
+      icon: "mdi:speaker",
       target: "rooms",
-      label: "Open rooms",
+      label: "Open volume controls",
       title: "Rooms",
     };
   }
 
   renderModeBadge(snapshot) {
-    const icon = snapshot?.isTv ? "mdi:television-play" : "mdi:music-note";
+    const icon = snapshot?.isTv ? "mdi:television-play" : "mdi:play-box-multiple";
     const label = snapshot?.isTv ? "TV mode" : "Music mode";
     return `
       <span class="mode-badge" aria-label="${label}" title="${label}">
@@ -1616,9 +2142,10 @@ class AgsMediaCard extends HTMLElement {
       <div class="fallback-art fallback-art-${variant} ${snapshot?.hasMedia ? "" : "fallback-art-missing"}">
         ${!isFocal ? '<div class="fallback-art-orb"></div>' : ""}
         <div class="fallback-art-glyph">
-          <ha-icon icon="${snapshot?.sourceIcon || "mdi:music-note"}"></ha-icon>
+          <ha-icon icon="${snapshot?.sourceIcon || "mdi:play-box-multiple"}"></ha-icon>
         </div>
         ${showText ? `
+
           <div class="fallback-art-copy">
             <div class="fallback-art-title">${this.escapeHtml(label)}</div>
           </div>
@@ -1695,30 +2222,46 @@ class AgsMediaCard extends HTMLElement {
     const displayPos = this.getDisplayedPosition(snapshot);
     const displayProg = this.getDisplayedProgress(snapshot);
     const canSeek = snapshot.duration > 0;
-    const miniShortcut = this.getMiniSectionShortcut(snapshot);
+
     return `
       <div class="mini-player mini-player-clickback ${this._transitionPreset === "collapse-player" ? "animate-up" : this._transitionPreset === "expand-player" ? "animate-down" : ""}">
-        <div class="mini-player-main">
-          <button
-            type="button"
-            class="mini-art-button"
-            aria-label="Return to full player"
-            onclick="this.getRootNode().host.setSection('player')"
-          >
-            <div class="mini-art ${snapshot.isTv && !snapshot.pic ? "tv-gradient" : ""} ${!snapshot.pic ? "mini-art-empty" : ""}" style="--fallback-accent:${snapshot.sourceColor};">
-              ${snapshot.pic
-                ? `<img class="mini-art-image" src="${snapshot.pic}" />`
-                : this.renderArtworkFallback(snapshot, "mini")}
+        ${snapshot.hasMedia ? `
+          <div class="mini-progress-seam">
+            <div class="progress-shell seek-shell mini-seek-shell ${canSeek ? "is-seekable" : "is-static"}">
+              <div class="progress-bar progress-bar-mini">
+                <div class="progress-fill" style="width:${displayProg}%;"></div>
+              </div>
+              ${canSeek ? `
+                <input
+                  type="range"
+                  class="seek-slider seek-slider-mini"
+                  min="0"
+                  max="${snapshot.duration}"
+                  step="1"
+                  value="${displayPos}"
+                  aria-label="Seek track"
+                  oninput="this.getRootNode().host.previewSeek(this.value, ${snapshot.duration})"
+                  onpointerup="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
+                  onmouseup="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
+                  ontouchend="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
+                  onchange="this.getRootNode().host.commitSeek('${ags.entity_id}', this.value, ${snapshot.duration})"
+                />
+              ` : ""}
             </div>
-          </button>
+          </div>
+        ` : ""}
+        <div class="mini-player-main">
           <button
             type="button"
             class="mini-meta"
             aria-label="Return to full player"
             onclick="this.getRootNode().host.setSection('player')"
           >
-            <span class="mini-title">${this.escapeHtml(snapshot.title)}</span>
+            <div class="mini-title-row">
+              <span class="mini-title">${this.escapeHtml(snapshot.title)}</span>
+            </div>
             <span class="mini-subtitle">${this.escapeHtml(snapshot.subtitle)}</span>
+            ${snapshot.hasMedia ? `<span class="mini-time-track"><span class="time-current">${this.formatTime(displayPos)}</span> / ${this.formatTime(snapshot.duration)}</span>` : ""}
           </button>
           <div class="mini-actions">
             <button
@@ -1727,56 +2270,42 @@ class AgsMediaCard extends HTMLElement {
               aria-label="${snapshot.isPlaying ? "Pause" : "Play"}"
               onclick="this.getRootNode().host.callService('media_player', 'media_play_pause', {entity_id: '${ags.entity_id}'})"
             >
-              <ha-icon icon="${snapshot.isPlaying ? "mdi:pause" : "mdi:play"}"></ha-icon>
+              <ha-icon icon="${snapshot.isPlaying ? 'mdi:pause' : 'mdi:play'}"></ha-icon>
             </button>
+
+            ${this._section === "rooms" || this._section === "volumes" ? `
+              <button
+                type="button"
+                class="icon-btn mini-action-btn"
+                aria-label="Open library"
+                title="Library"
+                onclick="this.getRootNode().host.setSection('browse')"
+              >
+                <ha-icon icon="mdi:play-box-multiple"></ha-icon>
+              </button>
+            ` : `
+              <button
+                type="button"
+                class="icon-btn mini-action-btn ${this._section === "rooms" ? "active" : ""}"
+                aria-label="Open rooms"
+                title="Rooms"
+                onclick="this.getRootNode().host.setSection('rooms')"
+              >
+                <ha-icon icon="mdi:speaker"></ha-icon>
+              </button>
+            `}
+
+
             <button
               type="button"
               class="power-toggle icon-btn power-icon-btn mini-power ${isSystemOn ? "on" : "off"}"
               aria-pressed="${isSystemOn ? "true" : "false"}"
               aria-label="${isSystemOn ? "Turn system off" : "Turn system on"}"
               title="${isSystemOn ? "Turn system off" : "Turn system on"}"
-              onclick="this.getRootNode().host.callService('media_player', '${isSystemOn ? "turn_off" : "turn_on"}', {entity_id: '${ags.entity_id}'})"
+              onclick="this.getRootNode().host.callService('media_player', '${isSystemOn ? 'turn_off' : 'turn_on'}', {entity_id: '${ags.entity_id}'})"
             >
               <ha-icon icon="mdi:power"></ha-icon>
             </button>
-            <div class="source-anchor source-anchor-mini">
-              <button
-                type="button"
-                class="icon-btn source-toggle mini-source-btn ${miniShortcut.target === this._section ? "active" : ""}"
-                aria-label="${this.escapeAttribute(miniShortcut.label)}"
-                title="${this.escapeAttribute(miniShortcut.title)}"
-                onclick="this.getRootNode().host.setSection('${miniShortcut.target}')"
-              >
-                <ha-icon icon="${miniShortcut.icon}"></ha-icon>
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="seek-shell mini-progress-seam ${canSeek ? "is-seekable" : "is-static"}">
-          <div class="progress-bar progress-bar-mini">
-            <div class="progress-fill" style="width:${displayProg}%;"></div>
-          </div>
-          ${canSeek ? `
-            <input
-              class="seek-slider seek-slider-mini"
-              type="range"
-              min="0"
-              max="${snapshot.duration}"
-              step="1"
-              value="${displayPos}"
-              aria-label="Seek playback position"
-              oninput="this.getRootNode().host.previewSeek(this.value, ${snapshot.duration})"
-              onpointerup="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
-              onmouseup="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
-              ontouchend="this.getRootNode().host.releaseSeek(event, '${ags.entity_id}', ${snapshot.duration})"
-              onchange="this.getRootNode().host.commitSeek('${ags.entity_id}', this.value, ${snapshot.duration})"
-            />
-          ` : ""}
-        </div>
-        <div class="mini-footer">
-          <div class="time-meta mini-time-meta">
-            <span class="time-current">${this.formatTime(displayPos)}</span>
-            <span>${snapshot.duration > 0 ? this.formatTime(snapshot.duration) : ""}</span>
           </div>
         </div>
       </div>
@@ -1806,6 +2335,8 @@ class AgsMediaCard extends HTMLElement {
     const displayPos = this.getDisplayedPosition(snapshot);
     const displayProg = this.getDisplayedProgress(snapshot);
     const canSeek = snapshot.duration > 0;
+    const roomCount = this.toArray(ags.attributes.active_rooms).length;
+    const roomButtonLabel = roomCount > 1 ? `${snapshot.roomSummary} rooms` : snapshot.roomSummary;
     return `
       <div class="player-view ${this._transitionPreset === "expand-player" ? "animate-player-open" : this._transitionPreset === "collapse-player" ? "animate-player-close" : ""}" style="--fallback-accent:${snapshot.sourceColor};">
         <div class="player-art-background ${snapshot.isTv && !snapshot.pic ? 'tv-gradient' : ''} ${!snapshot.pic ? 'player-art-background-empty' : ''}">
@@ -1816,9 +2347,23 @@ class AgsMediaCard extends HTMLElement {
           <div class="art-focal">
             <div class="art-stack">
               <div class="player-top-bar">
-                <div class="track-source-row player-top-chips">
-                  ${this.renderRoomShortcut(snapshot)}
-                  ${this.renderSourceBadge(snapshot, "full")}
+                <div class="player-ha-header">
+                  <div class="player-ha-leading" style="--badge-accent:${snapshot.sourceColor};">
+                    <ha-icon icon="${snapshot.sourceIcon}"></ha-icon>
+                  </div>
+                  <div class="player-ha-copy">
+                    <div class="player-ha-room" title="${this.escapeAttribute(snapshot.roomSummary)}">${this.escapeHtml(snapshot.roomSummary)}</div>
+                    <div class="player-ha-source" title="${this.escapeAttribute(snapshot.sourceLabel || currentSrc)}">${this.escapeHtml(snapshot.sourceLabel || currentSrc)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="icon-btn player-more-btn"
+                    aria-label="Open AGS Media Player details"
+                    title="AGS Media Player"
+                    onclick="this.getRootNode().host.openMoreInfo('${ags.entity_id}')"
+                  >
+                    <ha-icon icon="mdi:dots-vertical"></ha-icon>
+                  </button>
                 </div>
               </div>
               ${!snapshot.pic ? this.renderArtworkFallback(snapshot, "focal") : ''}
@@ -1875,17 +2420,28 @@ class AgsMediaCard extends HTMLElement {
                 <button class="play-btn" aria-label="${snapshot.isPlaying ? "Pause" : "Play"}" onclick="this.getRootNode().host.callService('media_player', 'media_play_pause', {entity_id: '${ags.entity_id}'})"><ha-icon icon="${snapshot.isPlaying ? 'mdi:pause' : 'mdi:play'}"></ha-icon></button>
                 <button class="transport-btn" aria-label="Next track" onclick="this.getRootNode().host.callService('media_player', 'media_next_track', {entity_id: '${ags.entity_id}'})"><ha-icon icon="mdi:skip-next"></ha-icon></button>
               </div>
-              <div class="source-anchor source-anchor-full">
-                <button
-                  type="button"
-                  class="icon-btn source-toggle player-source-btn ${this._section === "rooms" ? "active" : ""}"
-                  aria-label="Open rooms"
-                  title="Rooms"
-                  onclick="this.getRootNode().host.setSection('rooms')"
-                >
-                  <ha-icon icon="mdi:volume-high"></ha-icon>
-                </button>
-              </div>
+            </div>
+            <div class="player-action-row">
+              <button
+                type="button"
+                class="player-action-pill"
+                aria-label="Open source browser. Current source: ${this.escapeAttribute(snapshot.sourceLabel || currentSrc)}"
+                title="${this.escapeAttribute(snapshot.sourceLabel || currentSrc)}"
+                onclick="this.getRootNode().host.setSection('browse')"
+              >
+                <ha-icon icon="${snapshot.sourceIcon}"></ha-icon>
+                <span>${this.escapeHtml(snapshot.sourceLabel || currentSrc)}</span>
+              </button>
+              <button
+                type="button"
+                class="player-action-pill"
+                aria-label="Open rooms and volume controls. Current rooms: ${this.escapeAttribute(roomButtonLabel)}"
+                title="${this.escapeAttribute(roomButtonLabel)}"
+                onclick="this.getRootNode().host.setSection('rooms')"
+              >
+                <ha-icon icon="mdi:speaker"></ha-icon>
+                <span>${this.escapeHtml(roomButtonLabel)}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1900,36 +2456,29 @@ class AgsMediaCard extends HTMLElement {
     const rooms = this.toArray(ags.attributes.room_details);
     return `
       <div class="volumes-view">
-        <div class="view-title">Rooms</div>
-        <div class="list-card master-vol-card">
-          <div class="volume-card-head">
-            <div>
-              <div class="control-eyebrow">Group Master</div>
-              <div class="volume-figure" data-volume-id="${ags.entity_id}">${groupVol}%</div>
-            </div>
-            <div class="volume-head-actions">
-              <div class="volume-chip">All Active Rooms</div>
-              <button
-                type="button"
-                class="slider-icon-btn slider-icon-btn-master mute-btn ${groupMuted ? "active" : ""}"
-                aria-label="${groupMuted ? "Unmute group" : "Mute group"}"
-                onclick="this.getRootNode().host.toggleMuteTargets([${activeSpeakers.map((entityId) => `'${entityId}'`).join(", ")}], ${groupMuted ? "true" : "false"})"
-              >
-                <ha-icon icon="${groupMuted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
-              </button>
-            </div>
+        <div class="view-header">
+          <div class="view-title" style="display:flex; align-items:center; gap:8px;">
+            <ha-icon icon="mdi:speaker"></ha-icon>
+            <span>Rooms</span>
           </div>
-          <div class="slider-shell slider-shell-master">
-            <button type="button" class="slider-icon-btn slider-icon-btn-master" aria-label="Lower master volume" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', -6)">
-              <ha-icon icon="mdi:minus"></ha-icon>
-            </button>
-            <input class="volume-slider volume-slider-master" type="range" min="0" max="100" value="${groupVol}" aria-label="Group master volume" oninput="this.getRootNode().host.queueVolumeSet('${ags.entity_id}', this.value)" onchange="this.getRootNode().host.commitVolumeSet('${ags.entity_id}', this.value)" />
-            <button type="button" class="slider-icon-btn slider-icon-btn-master" aria-label="Raise master volume" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', 6)">
-              <ha-icon icon="mdi:plus"></ha-icon>
+          <div class="master-chip-wrap">
+            <div class="stepper-controls">
+              <button class="step-btn" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', -5)"><ha-icon icon="mdi:minus"></ha-icon></button>
+              <input type="number" class="vol-num-input" value="${groupVol}" min="0" max="100" onchange="this.getRootNode().host.commitVolumeSet('${ags.entity_id}', this.value)" />
+              <span class="vol-num-unit">%</span>
+              <button class="step-btn" onclick="this.getRootNode().host.nudgeVolume('${ags.entity_id}', 5)"><ha-icon icon="mdi:plus"></ha-icon></button>
+            </div>
+            <button
+              type="button"
+              class="icon-btn master-mute-btn ${groupMuted ? "active" : ""}"
+              onclick="this.getRootNode().host.toggleMuteTargets([${activeSpeakers.map((entityId) => `'${entityId}'`).join(", ")}], ${groupMuted ? "true" : "false"})"
+            >
+              <ha-icon icon="${groupMuted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
             </button>
           </div>
         </div>
-        <div class="room-levels-stack">
+
+        <div class="room-list">
           ${rooms.map(r => {
             const spkId = r.devices?.find(d => d.device_type === "speaker")?.entity_id;
             const spkState = spkId ? this._hass.states[spkId] : null;
@@ -1940,83 +2489,47 @@ class AgsMediaCard extends HTMLElement {
               (r.switch_state || "").toLowerCase() === "on",
             );
             const pending = this.isRoomTogglePending(r.switch_entity_id);
-            const roomMeta = r.active
-              ? "Included in group"
-              : switchOn
-                ? "On, waiting for AGS"
-                : "Excluded from group";
+
             return `
-              <div class="list-card volume-room-card">
-                <div class="room-volume-top">
-                  <div class="room-volume-copy">
-                    <span class="room-volume-title">${this.escapeHtml(r.name)}</span>
-                    <span class="room-volume-meta">${roomMeta}</span>
+              <div class="room-row-minimal ${switchOn ? 'is-on' : 'is-off'}">
+                <div class="room-info-area">
+                  <div class="room-name-line">
+                    <span class="room-dot ${r.active ? 'active' : ''}"></span>
+                    <span class="room-label">${this.escapeHtml(r.name)}</span>
                   </div>
-                  <button
-                    type="button"
-                    class="room-toggle-btn ${switchOn ? "on" : "off"} ${pending ? "pending" : ""}"
-                    aria-pressed="${switchOn ? "true" : "false"}"
-                    aria-label="${switchOn ? "Turn off" : "Turn on"} ${this.escapeHtml(r.name)}"
-                    ${pending ? "disabled" : ""}
-                    onclick="this.getRootNode().host.toggleRoom('${r.switch_entity_id}', ${((r.switch_state || "").toLowerCase() === "on") ? "true" : "false"})"
-                  >
-                    ${pending ? '<ha-circular-progress active indeterminate></ha-circular-progress>' : `<ha-icon icon="${switchOn ? "mdi:power-plug" : "mdi:power-plug-off"}"></ha-icon>`}
-                    <span>${pending ? "Updating" : switchOn ? "On" : "Off"}</span>
-                  </button>
                 </div>
-                <div class="room-volume-controls">
-                  <input class="volume-slider room-volume-slider" type="range" min="0" max="100" value="${v}" ${!spkId ? 'disabled' : ''} aria-label="${this.escapeHtml(r.name)} volume" oninput="this.getRootNode().host.queueVolumeSet('${spkId}', this.value)" onchange="this.getRootNode().host.commitVolumeSet('${spkId}', this.value)" />
-                  <div class="room-volume-actions">
-                    <span class="room-volume-value" data-volume-id="${spkId || `room-${this.escapeHtml(r.name)}`}">${v}%</span>
-                    <button
-                      type="button"
-                      class="slider-icon-btn mute-btn ${muted ? "active" : ""}"
-                      aria-label="${muted ? `Unmute ${this.escapeAttribute(r.name)}` : `Mute ${this.escapeAttribute(r.name)}`}"
-                      ${!spkId ? 'disabled' : ''}
-                      onclick="this.getRootNode().host.toggleMuteTargets('${spkId}', ${muted ? "true" : "false"})"
-                    >
-                      <ha-icon icon="${muted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
-                    </button>
-                  </div>
+
+                <div class="room-control-area">
+                   <div class="stepper-controls minimal-stepper">
+                      <button class="step-btn" ${!spkId ? 'disabled' : ''} onclick="this.getRootNode().host.nudgeVolume('${spkId}', -5)"><ha-icon icon="mdi:minus"></ha-icon></button>
+                      <input type="number" class="vol-num-input" value="${v}" min="0" max="100" ${!spkId ? 'disabled' : ''} onchange="this.getRootNode().host.commitVolumeSet('${spkId}', this.value)" />
+                      <span class="vol-num-unit">%</span>
+                      <button class="step-btn" ${!spkId ? 'disabled' : ''} onclick="this.getRootNode().host.nudgeVolume('${spkId}', 5)"><ha-icon icon="mdi:plus"></ha-icon></button>
+                   </div>
+
+                   <div class="room-row-actions">
+                     <button
+                        type="button"
+                        class="room-action-btn mute-btn ${muted ? "active" : ""}"
+                        ${!spkId ? 'disabled' : ''}
+                        onclick="this.getRootNode().host.toggleMuteTargets('${spkId}', ${muted ? "true" : "false"})"
+                      >
+                        <ha-icon icon="${muted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
+                      </button>
+
+                      <button
+                        type="button"
+                        class="room-action-btn room-power-toggle ${switchOn ? "on" : "off"} ${pending ? "pending" : ""}"
+                        ${pending ? "disabled" : ""}
+                        onclick="this.getRootNode().host.toggleRoom('${r.switch_entity_id}', ${((r.switch_state || "").toLowerCase() === "on") ? "true" : "false"})"
+                      >
+                        <ha-icon icon="${switchOn ? "mdi:power" : "mdi:power-off"}"></ha-icon>
+                      </button>
+                   </div>
                 </div>
               </div>
             `;
           }).join("")}
-        </div>
-      </div>
-    `;
-  }
-
-  renderSourcesSection(ags) {
-    const currentSrc = this.getSelectedSourceName(ags);
-    const sourceOptions = this.getSourceOptions(ags);
-    return `
-      <div class="sources-view">
-        <div class="view-title">Sources</div>
-        <div class="sources-list">
-          ${sourceOptions.length
-            ? sourceOptions.map((source) => {
-              const selected = source === currentSrc;
-              const sourcePresentation = this.getSourcePresentation(source, ags?.attributes?.ags_status === "ON TV");
-              return `
-                <button
-                  type="button"
-                  class="list-card source-page-item ${selected ? "selected" : ""}"
-                  aria-pressed="${selected ? "true" : "false"}"
-                  onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${this.escapeJsString(source)}'})"
-                >
-                  <span class="source-menu-item-leading" style="--source-item-accent:${sourcePresentation.color};">
-                    <ha-icon icon="${sourcePresentation.icon}"></ha-icon>
-                  </span>
-                  <span class="source-page-item-copy">
-                    <span class="source-page-item-title">${this.escapeHtml(sourcePresentation.label || source)}</span>
-                    <span class="source-page-item-meta">${selected ? "Current source" : "Tap to switch"}</span>
-                  </span>
-                  ${selected ? '<ha-icon class="source-menu-check" icon="mdi:check"></ha-icon>' : ""}
-                </button>
-              `;
-            }).join("")
-            : '<div class="list-card source-page-empty">No sources available</div>'}
         </div>
       </div>
     `;
@@ -2132,17 +2645,74 @@ class AgsMediaCard extends HTMLElement {
           opacity: 0.32;
           transform: scale(1.06);
         }
-        
-        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, var(--art-tint), transparent 24%), linear-gradient(180deg, var(--primary-soft), transparent 38%), var(--card-bg-strong); color: var(--text); max-width: var(--ags-card-max-width, 420px); width: 100%; margin: 0 auto; height: min(382px, max(272px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 338px)))); min-height: min(272px, calc(var(--ags-card-stable-vh) - 124px)); max-height: calc(var(--ags-card-stable-vh) - 130px); display: flex; flex-direction: column; border: 1px solid var(--outline); box-shadow: var(--ha-card-box-shadow, var(--shadow)); transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease; }
-        .surface { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; overflow: visible; background: linear-gradient(180deg, var(--glass) 0%, var(--backdrop-overlay) 34%, var(--card-bg-strong) 82%); backdrop-filter: blur(24px) saturate(1.08); }
-        .surface-player { background: transparent; backdrop-filter: none; }
+
+        ha-card { position: relative; overflow: hidden; border-radius: 28px; background: linear-gradient(180deg, var(--art-tint), transparent 24%), linear-gradient(180deg, var(--primary-soft), transparent 38%), var(--card-bg-strong); color: var(--text); max-width: var(--ags-card-max-width, 420px); width: 100%; margin: 0 auto; height: min(364px, max(264px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 338px)))); min-height: min(264px, calc(var(--ags-card-stable-vh) - 124px)); max-height: calc(var(--ags-card-stable-vh) - 130px); display: flex; flex-direction: column; border: 1px solid var(--outline); box-shadow: var(--ha-card-box-shadow, var(--shadow)); transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease; }
+        ha-card.card-player {
+          background: none !important;
+          background-color: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+          --ha-card-border-width: 0px;
+          --ha-card-border-color: transparent;
+          --ha-card-box-shadow: none;
+          --ha-card-background: transparent;
+        }
+        .surface { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden; border-radius: inherit; background: linear-gradient(180deg, var(--glass) 0%, var(--backdrop-overlay) 34%, var(--card-bg-strong) 82%); backdrop-filter: blur(24px) saturate(1.08); }
+        .surface-player { background: transparent !important; backdrop-filter: none !important; border-radius: inherit; overflow: hidden; }
+        .surface-player .section-player,
+        .surface-player .section-body,
+        .surface-player .transition-shell,
+        .surface-player .player-view,
+        .surface-player .player-art-background { border-radius: inherit; overflow: hidden; }
         .card-header { position: relative; z-index: 6; overflow: visible; padding: 16px 20px 14px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border-bottom: 1px solid var(--divider); background: linear-gradient(180deg, var(--glass-heavy), rgba(0, 0, 0, 0)); backdrop-filter: blur(22px) saturate(1.1); }
         .header-picker-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; position: relative; overflow: visible; z-index: 7; }
         .header-meta-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; width: 100%; min-width: 0; position: relative; z-index: 8; }
         .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .section-body { flex: 1; min-height: 0; padding: 8px 18px calc(18px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; scrollbar-width: none; scroll-behavior: auto; position: relative; z-index: 1; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; touch-action: pan-y; background: var(--section-surface); }
+
+        .view-title { font-size: 1.1rem; font-weight: 800; margin: 16px 4px 20px; color: var(--text); }
+
+        /* Volumes Section Simplified */
+        .volumes-view { display: flex; flex-direction: column; gap: 0; }
+        .view-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 0 2px; }
+        .master-chip-wrap { display: flex; align-items: center; gap: 8px; }
+        .stepper-controls { display: flex; align-items: center; gap: 4px; background: var(--glass-heavy); padding: 4px; border-radius: 12px; border: 1px solid var(--outline); }
+        .minimal-stepper { border-radius: 10px; background: var(--subdued); border: none; padding: 2px; }
+        .step-btn { width: 28px; height: 28px; border-radius: 8px; border: none; background: transparent; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .step-btn:hover { background: var(--glass-heavy); }
+        .step-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .step-btn ha-icon { --mdc-icon-size: 16px; }
+        .vol-num-input { width: 32px; border: none; background: transparent; color: var(--text); font-family: inherit; font-size: 0.85rem; font-weight: 900; text-align: right; padding: 0; appearance: textfield; -moz-appearance: textfield; }
+        .vol-num-input::-webkit-outer-spin-button, .vol-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .vol-num-input:focus { outline: none; background: var(--glass-heavy); border-radius: 4px; }
+        .vol-num-unit { font-size: 0.65rem; font-weight: 800; opacity: 0.6; margin-right: 4px; margin-left: -2px; }
+        .master-mute-btn { width: 34px; height: 34px; border-radius: 10px; background: var(--glass-heavy); border: 1px solid var(--outline); }
+        .master-mute-btn.active { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+
+        .room-list { display: flex; flex-direction: column; gap: 4px; }
+        .room-row-minimal { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 10px; background: var(--glass); border: 1px solid var(--outline); transition: 0.2s; gap: 6px; }
+        .room-row-minimal.is-off { opacity: 0.5; }
+        .room-info-area { flex: 0 1 100px; min-width: 0; margin-right: 4px; }
+        .room-name-line { display: flex; align-items: center; gap: 4px; }
+        .room-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-sec); opacity: 0.2; flex-shrink: 0; }
+        .room-dot.active { background: #10b981; opacity: 1; box-shadow: 0 0 5px #10b981; }
+        .room-label { font-size: 0.76rem; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+        .room-control-area { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; justify-content: flex-end; }
+        .minimal-stepper { border-radius: 8px; background: var(--subdued); border: none; padding: 2px; flex-shrink: 0; }
+        .step-btn { width: 24px; height: 24px; border-radius: 6px; }
+        .vol-num-input { width: 26px; font-size: 0.78rem; }
+        .vol-num-unit { font-size: 0.55rem; margin-right: 2px; }
+        .room-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .room-action-btn { width: 30px; height: 30px; border-radius: 8px; background: var(--subdued); color: var(--text); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .room-action-btn.mute-btn.active { background: var(--primary-soft); color: var(--primary); }
+        .room-action-btn.room-power-toggle.on { background: var(--primary-soft); color: var(--primary); }
+        .room-action-btn.pending { opacity: 0.5; }
+        .room-action-btn ha-icon { --mdc-icon-size: 14px; }
         .section-body::-webkit-scrollbar { display: none; }
-        .section-player { overflow: hidden; padding: 0; display: flex; min-width: 0; }
+        .section-player { overflow: hidden; padding: 0 !important; display: flex; min-width: 0; }
+        .section-player .transition-shell { display: flex; flex: 1 1 auto; height: 100%; min-height: 0; border-radius: inherit; overflow: hidden; }
+        .section-player .player-view { flex: 1 1 auto; min-height: 100%; }
         .list-card { background: var(--glass); backdrop-filter: blur(10px); border: 1px solid var(--outline); border-radius: 18px; transition: 0.2s; }
         .master-vol-card { padding: 18px; background: linear-gradient(145deg, var(--primary-strong), var(--card-bg-soft)); color: var(--text); box-shadow: var(--control-shadow); }
         .hero-pill { min-height: 44px; padding: 0 14px; border-radius: 999px; font-size: 0.72rem; font-weight: 900; letter-spacing: 0.02em; background: var(--primary-soft); color: var(--text); border: 1px solid var(--primary-strong); display: inline-flex; align-items: center; justify-content: center; }
@@ -2165,7 +2735,7 @@ class AgsMediaCard extends HTMLElement {
         .transition-shell { position: relative; overflow: hidden; min-height: 0; width: 100%; flex: 1 1 auto; will-change: transform, opacity; }
         .transition-shell.slide-forward { animation: page-slide-in-left 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
         .transition-shell.slide-back { animation: page-slide-in-right 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
-        .player-view { position: relative; width: 100%; height: 100%; display: grid; grid-template-rows: minmax(150px, 1fr) auto; gap: 0; align-items: stretch; will-change: transform, opacity; transform-origin: center top; overflow: hidden; border-radius: 0; background: var(--player-fade-base); }
+        .player-view { position: relative; width: 100%; height: 100%; display: grid; grid-template-rows: minmax(178px, 1fr) auto; gap: 0; align-items: stretch; will-change: transform, opacity; transform-origin: center top; overflow: hidden; border-radius: inherit; background: transparent; }
         .player-view.animate-player-open { animation: player-drop-open 0.26s cubic-bezier(0.22, 1, 0.36, 1); }
         .player-view.animate-player-close { animation: player-lift-close 0.22s cubic-bezier(0.22, 1, 0.36, 1); }
         .player-art-background {
@@ -2221,8 +2791,8 @@ class AgsMediaCard extends HTMLElement {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          object-position: center 28%;
-          transform: scale(1.02);
+          object-position: center 34%;
+          transform: none;
           transform-origin: center center;
           z-index: 0;
           opacity: 1;
@@ -2232,9 +2802,9 @@ class AgsMediaCard extends HTMLElement {
           position: absolute;
           inset: 0;
           z-index: 1;
-          background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0) 64%, rgba(15, 23, 42, 0.04) 78%, rgba(15, 23, 42, 0.12) 100%);
+          background: linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0) 34%, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, 0.2) 100%);
         }
-        .player-main { position: relative; z-index: 1; min-height: clamp(164px, 25vh, 228px); display: block; }
+        .player-main { position: relative; z-index: 1; min-height: clamp(178px, 28vh, 236px); display: block; }
         .art-focal { display: block; width: 100%; height: 100%; min-height: inherit; margin-bottom: 0; }
         .art-stack {
           position: relative;
@@ -2251,27 +2821,88 @@ class AgsMediaCard extends HTMLElement {
           right: 14px;
           z-index: 3;
           display: flex;
-          justify-content: flex-start;
+          justify-content: stretch;
           pointer-events: none;
         }
         .player-top-chips {
           pointer-events: auto;
         }
+        .player-ha-header {
+          width: 100%;
+          min-width: 0;
+          min-height: 48px;
+          display: grid;
+          grid-template-columns: 38px minmax(0, 1fr) 38px;
+          align-items: center;
+          gap: 10px;
+          pointer-events: auto;
+          color: #fff;
+          text-shadow: 0 1px 6px rgba(0, 0, 0, 0.58);
+        }
+        .player-ha-leading {
+          width: 38px;
+          height: 38px;
+          border-radius: 50%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(0, 0, 0, 0.28);
+          color: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          backdrop-filter: blur(10px);
+        }
+        .player-ha-leading ha-icon { --mdc-icon-size: 22px; }
+        .player-ha-copy {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .player-ha-room,
+        .player-ha-source {
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .player-ha-room {
+          font-size: 0.96rem;
+          font-weight: 800;
+          line-height: 1.1;
+        }
+        .player-ha-source {
+          font-size: 0.78rem;
+          font-weight: 600;
+          line-height: 1.15;
+          opacity: 0.88;
+        }
+        .player-more-btn {
+          width: 38px;
+          height: 38px;
+          min-width: 38px;
+          padding: 0;
+          border-radius: 50%;
+          background: rgba(0, 0, 0, 0.24);
+          color: #fff;
+          border-color: rgba(255, 255, 255, 0.18);
+          backdrop-filter: blur(10px);
+        }
+        .player-more-btn ha-icon { --mdc-icon-size: 22px; }
         .art-aura { position: absolute; inset: auto -6% -10% -6%; height: 24%; background: radial-gradient(circle at center, var(--art-glow), transparent 74%); opacity: 0.45; pointer-events: none; z-index: 1; }
         .player-bottom-panel {
           position: relative;
           z-index: 3;
           display: grid;
           grid-template-columns: minmax(0, 1fr);
-          gap: 5px;
-          margin-top: -28px;
-          padding: 10px 14px 10px;
-          background: linear-gradient(180deg, var(--player-panel-bg) 0%, var(--player-panel-bg-strong) 100%);
-          border-radius: 24px 24px 0 0;
-          box-shadow: 0 -18px 36px rgba(15, 23, 42, 0.1);
-          backdrop-filter: blur(20px) saturate(1.08);
-          -webkit-backdrop-filter: blur(20px) saturate(1.08);
-          border-top: 1px solid var(--player-panel-border);
+          gap: 6px;
+          margin-top: -20px;
+          padding: 11px 14px 12px;
+          background: linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.9) 100%);
+          border-radius: 18px 18px 0 0;
+          box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.08);
+          backdrop-filter: blur(12px) saturate(1.02);
+          -webkit-backdrop-filter: blur(12px) saturate(1.02);
+          border-top: 1px solid rgba(255, 255, 255, 0.42);
         }
         .tv-gradient { background: linear-gradient(135deg, #1a237e, #4a148c); display: flex; align-items: center; justify-content: center; }
         .main-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; z-index: 0; }
@@ -2366,10 +2997,10 @@ class AgsMediaCard extends HTMLElement {
           gap: 5px;
           width: auto;
           min-width: 0;
-          max-width: min(100%, 220px);
+          max-width: 140px;
           flex: 0 1 auto;
           min-height: 32px;
-          padding: 4px 8px;
+          padding: 4px 10px;
           border-radius: 999px;
           font-size: 0.59rem;
           font-weight: 900;
@@ -2430,8 +3061,8 @@ class AgsMediaCard extends HTMLElement {
         .track-room-label { min-width: 0; font-size: 0.82rem; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase; color: var(--player-ink); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .track-source-row { min-width: 0; width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; }
         .status-display { text-transform: uppercase; }
-        .track-title { font-size: clamp(1.08rem, 2.1vw, 1.42rem); font-weight: 900; letter-spacing: -0.04em; margin: 0; color: var(--player-ink); line-height: 1.02; min-height: 1.02em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.22); }
-        .track-subtitle { font-size: 0.88rem; color: var(--player-ink); opacity: 0.92; font-weight: 800; margin: 0; line-height: 1.18; min-height: 1.18em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.16); }
+        .track-title { font-size: clamp(1.02rem, 2.1vw, 1.28rem); font-weight: 800; letter-spacing: 0; margin: 0; color: var(--player-ink); line-height: 1.08; min-height: 1.08em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: none; }
+        .track-subtitle { font-size: 0.82rem; color: var(--player-muted); opacity: 1; font-weight: 600; margin: 0; line-height: 1.18; min-height: 1.18em; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: 100%; text-shadow: none; }
         .track-detail-stack {
           display: flex;
           flex-direction: column;
@@ -2467,11 +3098,11 @@ class AgsMediaCard extends HTMLElement {
         .progress-shell { position: relative; padding: 1px 2px 0; }
         .seek-shell { position: relative; }
         .seek-shell.is-seekable { cursor: pointer; }
-        .progress-bar { height: 7px; background: linear-gradient(90deg, var(--player-line), var(--scrubber)); border-radius: 999px; overflow: hidden; position: relative; }
-        .progress-bar-hero { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12); }
+        .progress-bar { height: 5px; background: rgba(127, 127, 127, 0.24); border-radius: 999px; overflow: hidden; position: relative; }
+        .progress-bar-hero { box-shadow: none; }
         .progress-bar-mini { border-radius: 999px; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-halo)); transition: width 0.12s linear; border-radius: inherit; }
-        .progress-glow { position: absolute; left: 2px; top: 8px; height: 7px; border-radius: 999px; background: linear-gradient(90deg, var(--primary-halo), transparent); filter: blur(8px); opacity: 0.8; pointer-events: none; }
+        .progress-fill { height: 100%; background: var(--primary); transition: width 0.12s linear; border-radius: inherit; }
+        .progress-glow { display: none; }
         .seek-slider {
           position: absolute;
           inset: 0;
@@ -2496,13 +3127,13 @@ class AgsMediaCard extends HTMLElement {
         .seek-slider-mini { min-height: 12px; }
         .seek-slider-full { min-height: 20px; }
         .time-meta { display: flex; justify-content: space-between; font-size: 0.58rem; margin-top: 1px; color: var(--player-muted); font-weight: 800; }
-        .buttons-row { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 6px 0 0; }
-        .buttons-row-full { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 10px; width: 100%; }
-        .buttons-row-full > .power-icon-btn { width: 100%; min-width: 0; height: 48px; min-height: 48px; border-radius: 16px; }
+        .buttons-row { display: flex; justify-content: center; align-items: center; gap: 8px; margin: 5px 0 0; }
+        .buttons-row-full { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: stretch; gap: 8px; width: 100%; }
+        .buttons-row-full > .power-icon-btn { width: 100%; min-width: 0; height: 42px; min-height: 42px; border-radius: 12px; }
         .buttons-row-full .source-anchor-full { width: 100%; justify-self: stretch; }
-        .buttons-row-full .source-toggle { width: 100%; height: 48px; min-height: 48px; border-radius: 16px; }
+        .buttons-row-full .source-toggle { width: 100%; height: 42px; min-height: 42px; border-radius: 12px; }
         .transport-cluster { display: contents; }
-        .play-btn { width: 56px; height: 56px; border-radius: 18px; background: var(--primary); color: var(--on-primary); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--control-shadow); }
+        .play-btn { width: 52px; height: 52px; border-radius: 50%; background: var(--primary); color: var(--on-primary); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: none; }
         .play-btn ha-icon { --mdc-icon-size: 24px; }
         .transport-btn,
         .icon-btn,
@@ -2516,7 +3147,7 @@ class AgsMediaCard extends HTMLElement {
           align-items: center;
           justify-content: center;
           border: 1px solid var(--outline);
-          background: var(--glass-heavy);
+          background: var(--card-bg);
           color: var(--text);
           cursor: pointer;
           transition: border-color 0.14s ease-out, background 0.14s ease-out, color 0.14s ease-out, box-shadow 0.14s ease-out;
@@ -2550,7 +3181,7 @@ class AgsMediaCard extends HTMLElement {
           width: 48px;
           height: 48px;
           border-radius: 16px;
-          box-shadow: var(--control-shadow);
+          box-shadow: none;
         }
         .buttons-row-full .transport-btn,
         .transport-cluster .play-btn {
@@ -2559,16 +3190,48 @@ class AgsMediaCard extends HTMLElement {
         }
         .buttons-row-full .transport-btn,
         .buttons-row-full .play-btn {
-          height: 48px;
-          min-height: 48px;
+          height: 42px;
+          min-height: 42px;
           min-width: 0;
-          border-radius: 16px;
+          border-radius: 12px;
         }
         .buttons-row-full .transport-btn,
         .buttons-row-full > .power-icon-btn {
-          background: var(--player-chip-bg-strong);
+          background: rgba(255, 255, 255, 0.58);
           color: var(--player-ink);
           border-color: var(--player-line);
+        }
+        .player-action-row {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          width: 100%;
+        }
+        .player-action-pill {
+          min-width: 0;
+          min-height: 34px;
+          padding: 0 10px;
+          border-radius: 12px;
+          border: 1px solid var(--player-line);
+          background: rgba(255, 255, 255, 0.48);
+          color: var(--player-ink);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          cursor: pointer;
+          font-size: 0.72rem;
+          font-weight: 700;
+        }
+        .player-action-pill ha-icon {
+          --mdc-icon-size: 17px;
+          flex-shrink: 0;
+        }
+        .player-action-pill span {
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .icon-btn { padding: 10px; border-radius: 14px; }
         .settings-btn { width: 44px; height: 44px; flex: 0 0 44px; }
@@ -2644,17 +3307,45 @@ class AgsMediaCard extends HTMLElement {
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin-top: -6px; border-radius: 50%; border: 3px solid var(--card-bg-strong); background: var(--primary); box-shadow: var(--control-shadow); }
         input[type=range]::-moz-range-track { height: 8px; border-radius: 999px; background: var(--scrubber); }
         input[type=range]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; border: 3px solid var(--card-bg-strong); background: var(--primary); box-shadow: var(--control-shadow); }
-        .browse-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
-        .browse-item { display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-bottom: 0; cursor: pointer; border-radius: 18px; touch-action: pan-y; }
+        .browse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; padding: 4px; }
+        .browse-grid.grid-view { grid-template-columns: repeat(auto-fill, minmax(95px, 1fr)); gap: 10px; }
+        .browse-grid.list-view { grid-template-columns: 1fr; gap: 4px; padding: 0; }
+        .browse-item { display: flex; flex-direction: column; gap: 7px; padding: 8px; margin-bottom: 0; cursor: pointer; border-radius: 12px; touch-action: pan-y; transition: all 0.2s ease; position: relative; background: var(--glass); border: 1px solid var(--outline); }
+        .browse-item-contents { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; cursor: pointer; }
+        .list-view .browse-item-contents { flex-direction: row; align-items: center; gap: 8px; }
+        .grid-view .browse-item { text-align: center; }
+        .grid-view .browse-item:hover { transform: translateY(-2px); border-color: var(--primary-soft); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .list-view .browse-item { flex-direction: row; align-items: center; gap: 6px; padding: 5px 7px; min-height: 42px; border-radius: 10px; }
+        .browse-item-copy { flex: 1; min-width: 0; }
         .browse-item:hover { background: var(--glass-heavy); }
+        .browse-item-actions { display: flex; align-items: center; gap: 4px; padding: 0; }
+        .grid-view .browse-item-actions { position: absolute; top: 6px; right: 6px; z-index: 2; flex-direction: column; gap: 4px; }
+        .grid-view .browse-item-actions .filter-icon-btn { background: var(--glass-heavy); backdrop-filter: blur(4px); box-shadow: 0 2px 6px rgba(0,0,0,0.15); width: 32px; height: 32px; border-radius: 50%; }
+        .list-view .browse-item-actions { gap: 4px; padding-right: 0; }
+        .list-view .browse-item-actions .filter-icon-btn { width: 28px; height: 28px; border-radius: 8px; }
         .action-card { width: 100%; text-align: left; }
-        .browse-art { position: relative; aspect-ratio: 1.55 / 1; border-radius: 18px; overflow: hidden; border: 1px solid var(--outline); background: linear-gradient(160deg, var(--primary-soft), var(--subdued)); display:flex; align-items:center; justify-content:center; }
-        .browse-art img { width: 100%; height: 100%; object-fit: cover; }
-        .browse-art-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text); }
+        .browse-art { position: relative; aspect-ratio: 1 / 1; border-radius: 12px; overflow: hidden; border: 1px solid var(--outline); background: linear-gradient(160deg, var(--primary-soft), var(--subdued)); display:flex; align-items:center; justify-content:center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .grid-view .browse-art { width: 100%; }
+        .list-view .browse-art { width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; }
+        .browse-art img { width: 100%; height: 100%; object-fit: cover !important; }
+        .browse-art-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text); opacity: 0.6; }
         .browse-art:not(.no-image):not(.image-failed) .browse-art-fallback { display: none; }
-        .browse-label { font-weight: 800; font-size: 0.9rem; line-height: 1.18; min-height: 2.1em; color: var(--text); }
-        .browse-meta { font-size: 0.74rem; color: var(--text-sec); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+        .list-view .browse-art-fallback ha-icon { --mdc-icon-size: 18px; }
+        .grid-view .browse-art-fallback ha-icon { --mdc-icon-size: 32px; }
+        .browse-label { font-weight: 800; font-size: 0.75rem; line-height: 1.2; color: var(--text); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+        .list-view .browse-label { font-size: 0.8rem; flex: 1; }
+        .browse-meta { font-size: 0.62rem; color: var(--text-sec); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 1px; }
+        .grid-view .browse-meta { display: none; }
+        .list-view .browse-meta { display: none; }
         .browse-item:disabled { cursor: default; opacity: 0.74; }
+        .filter-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 4px; background: var(--glass); border-radius: 12px; border: 1px solid var(--outline); }
+        .filter-toggle { flex: 1; display: flex; background: var(--glass-heavy); border-radius: 8px; padding: 2px; }
+        .filter-btn-pill { flex: 1; border: none; background: transparent; color: var(--text-sec); font-size: 0.65rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 4px; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .filter-btn-pill.active { background: var(--primary); color: var(--on-primary); box-shadow: var(--control-shadow); }
+        .filter-actions { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
+        .filter-icon-btn { width: 28px; height: 28px; border-radius: 6px; background: var(--glass-heavy); border: 1px solid var(--outline); color: var(--text); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; }
+        .filter-icon-btn.active { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+        .filter-icon-btn ha-icon { --mdc-icon-size: 16px; }
         .power-toggle {
           gap: 8px;
           min-height: 46px;
@@ -2686,61 +3377,49 @@ class AgsMediaCard extends HTMLElement {
           position: relative;
           z-index: 5;
           padding: 0;
-          display: grid;
-          grid-template-rows: auto 5px auto;
+          display: flex;
+          flex-direction: column;
           border-bottom: none;
           overflow: hidden;
-          background: transparent;
-          backdrop-filter: blur(18px) saturate(1.08);
+          background: rgba(255, 255, 255, 0.18);
+          backdrop-filter: blur(8px) saturate(1.02);
           will-change: transform, opacity;
           transform-origin: center top;
         }
         .mini-player.animate-up { animation: mini-player-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
         .mini-player.animate-down { animation: mini-player-drop 0.32s cubic-bezier(0.22, 1, 0.36, 1); }
+        .mini-progress-seam {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 4px;
+          z-index: 10;
+        }
+        .mini-seek-shell { padding: 0 !important; height: 100%; }
+        .mini-progress-seam .progress-bar { height: 4px; border-radius: 0; background: var(--scrubber); }
+        .mini-progress-seam .progress-fill { background: var(--primary); }
         .mini-player-main {
           position: relative;
           z-index: 1;
-          min-height: 92px;
+          min-height: 70px;
           display: grid;
-          grid-template-columns: 84px minmax(0, 1fr) auto;
-          gap: 0;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px;
           align-items: stretch;
-          background: linear-gradient(180deg, var(--source-accent-soft), var(--glass-heavy) 44%);
+          background: transparent;
+          padding: 8px 10px 8px 12px;
         }
-        .mini-art-button,
+        .mini-title-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: nowrap; overflow: hidden; }
+        .mini-time-track { font-size: 0.62rem; font-weight: 800; color: var(--text); opacity: 0.55; white-space: nowrap; }
         .mini-meta { border: none; background: transparent; padding: 0; color: inherit; text-align: left; cursor: pointer; }
-        .mini-art-button {
-          display: flex;
-          align-items: stretch;
-          height: 100%;
-          min-height: 100%;
-        }
-        .mini-art {
-          position: relative;
-          width: 100%;
-          height: 100%;
-          border-radius: 0;
-          overflow: hidden;
-          border: none;
-          background: linear-gradient(160deg, var(--art-tint), var(--subdued));
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: inset -1px 0 0 rgba(255,255,255,0.08);
-        }
-        .mini-art-empty {
-          background:
-            linear-gradient(180deg, rgba(15, 23, 42, 0.14), rgba(15, 23, 42, 0.5)),
-            linear-gradient(160deg, var(--fallback-accent, var(--primary)), rgba(15, 23, 42, 0.92));
-        }
-        .mini-art-image { width: 100%; height: 100%; object-fit: cover; }
         .mini-meta {
           min-width: 0;
           display: flex;
           flex-direction: column;
           justify-content: center;
-          gap: 4px;
-          padding: 14px 12px 14px 14px;
+          gap: 3px;
+          padding: 0;
         }
         .mini-title { display: block; font-size: 0.92rem; font-weight: 900; color: var(--text); line-height: 1.2; min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .mini-subtitle { display: block; font-size: 0.78rem; font-weight: 700; color: var(--text-sec); line-height: 1.2; min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2748,24 +3427,17 @@ class AgsMediaCard extends HTMLElement {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 0 14px 0 0;
+          padding: 0;
+          flex-shrink: 0;
         }
-        .mini-action-btn { width: 42px; height: 42px; border-radius: 14px; }
-        .mini-power { width: 42px; min-width: 42px; min-height: 42px; border-radius: 14px; }
+        .mini-action-btn { width: 38px; height: 38px; border-radius: 12px; }
+        .mini-power { width: 38px; min-width: 38px; min-height: 38px; border-radius: 12px; }
         .source-anchor { position: relative; display: flex; align-items: center; justify-content: flex-end; }
         .source-anchor-full { justify-self: end; }
         .source-anchor-mini { flex: 0 0 auto; }
         .source-toggle { width: 46px; height: 46px; padding: 0; border-radius: 16px; box-shadow: var(--control-shadow); }
         .source-toggle.active { background: var(--primary-soft); border-color: var(--primary-strong); }
         .mini-source-btn { width: 42px; height: 42px; border-radius: 14px; }
-        .mini-progress-seam {
-          position: relative;
-          z-index: 2;
-          width: 100%;
-          height: 5px;
-          background: var(--section-overlay);
-          backdrop-filter: blur(8px) saturate(1.01);
-        }
         .mini-footer {
           position: relative;
           z-index: 1;
@@ -2775,12 +3447,6 @@ class AgsMediaCard extends HTMLElement {
           padding: 6px 12px 8px;
           background: var(--section-overlay);
           backdrop-filter: blur(8px) saturate(1.01);
-        }
-        .mini-progress-seam .progress-bar {
-          height: 5px;
-          border-radius: 0;
-          background: var(--scrubber);
-          box-shadow: none;
         }
         .mini-progress-seam .progress-fill { background: linear-gradient(90deg, rgba(255, 255, 255, 0.98), var(--primary)); box-shadow: 0 0 10px var(--primary-halo); }
         .mini-progress-seam .seek-slider-mini {
@@ -2796,7 +3462,7 @@ class AgsMediaCard extends HTMLElement {
           font-size: 0.68rem;
           line-height: 1.1;
         }
-        .loading-spin { text-align: center; padding: 40px; }
+        .loading-spin { display: flex; align-items: center; justify-content: center; padding: 40px; min-height: 100px; }
         .browse-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 20px; color: var(--text-sec); font-size: 0.9rem; font-weight: 600; text-align: center; }
         .browse-empty ha-icon { --mdc-icon-size: 40px; opacity: 0.4; }
         .system-off-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: clamp(14px, 2.6vh, 20px); width: 100%; max-width: 100%; padding: clamp(18px, 4vw, 28px); text-align: center; }
@@ -3004,51 +3670,63 @@ class AgsMediaCard extends HTMLElement {
           to { opacity: 1; transform: translateX(0); }
         }
         @media (max-width: 768px) {
-          ha-card { max-width: 100%; height: min(358px, max(258px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 170px)))); min-height: min(258px, calc(var(--ags-card-stable-vh) - 80px)); }
+          ha-card { max-width: calc(100% - 24px); margin: 12px auto; height: min(344px, max(252px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 170px)))); min-height: min(252px, calc(var(--ags-card-stable-vh) - 80px)); border-radius: 24px; border: none !important; box-shadow: var(--shadow) !important; }
+          ha-card.card-player { border: none !important; box-shadow: none !important; background: transparent !important; }
           .card-header { padding: 14px 14px 12px; }
           .section-body { padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px)); }
-          .section-player { padding: 0; }
-          .player-view { border-radius: 0; }
-          .player-art-image { height: 100%; object-position: center 24%; }
-          .player-main { min-height: clamp(150px, 23vh, 200px); }
+          .section-player { padding: 0 !important; }
+          .player-view { border-radius: inherit; }
+          .player-art-image { height: 100%; object-position: center 32%; }
+          .player-main { min-height: clamp(164px, 24vh, 208px); }
           .player-top-bar { top: 10px; left: 12px; right: 12px; }
-          .player-bottom-panel { margin-top: -22px; padding: 9px 12px 10px; border-radius: 22px 22px 0 0; }
+          .player-bottom-panel { margin-top: -18px; padding: 10px 12px 11px; border-radius: 18px 18px 0 0; }
           .art-stack { min-height: inherit; }
           .buttons-row { gap: 7px; }
-          .buttons-row-full { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+          .buttons-row-full { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
           .volume-card-head { flex-direction: column; align-items: flex-start; }
           .room-toggle-btn { min-width: 104px; }
         }
         @media (max-width: 420px) {
-          .browse-grid { grid-template-columns: 1fr; }
-          ha-card { max-width: 100%; }
+          ha-card { max-width: calc(100% - 20px); margin: 10px auto; border-radius: 22px; border: none !important; }
+          ha-card.card-player { border: none !important; box-shadow: none !important; background: transparent !important; }
           .card-header { grid-template-columns: 1fr; }
           .header-picker-wrap,
           .header-actions { width: 100%; justify-content: stretch; }
           .header-meta-row { gap: 6px; width: 100%; }
           .header-meta-row > * { flex: 1 1 0; min-width: 0; }
           .hero-pill { max-width: 100%; text-align: center; }
-          .play-btn { width: 50px; height: 50px; }
-          .player-view { border-radius: 0; }
-          .player-art-image { height: 100%; object-position: center 22%; }
-          .player-main { min-height: 142px; }
+          .play-btn { width: 46px; height: 46px; }
+          .player-view { border-radius: inherit; }
+          .player-art-image { height: 100%; object-position: center 30%; }
+          .player-main { min-height: 158px; }
           .player-top-bar { top: 9px; left: 10px; right: 10px; }
-          .player-bottom-panel { margin-top: -20px; padding: 8px 10px 9px; border-radius: 20px 20px 0 0; }
+          .player-bottom-panel { margin-top: -16px; padding: 9px 10px 10px; border-radius: 16px 16px 0 0; }
           .art-stack { min-height: inherit; }
           .track-info { align-items: stretch; text-align: left; }
+          .player-ha-header { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 8px; min-height: 42px; }
+          .player-ha-leading,
+          .player-more-btn { width: 34px; height: 34px; min-width: 34px; }
+          .player-ha-leading ha-icon,
+          .player-more-btn ha-icon { --mdc-icon-size: 20px; }
+          .player-ha-room { font-size: 0.9rem; }
+          .player-ha-source { font-size: 0.72rem; }
           .track-source-row { gap: 6px; }
           .source-badge { min-height: 30px; max-width: min(100%, 180px); padding: 4px 7px; font-size: 0.56rem; }
           .source-badge ha-icon { --mdc-icon-size: 13px; }
           .track-action-pill { min-height: 30px; padding-inline: 7px; }
           .track-chip-row { justify-content: flex-start; }
-          .buttons-row-full { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+          .buttons-row-full { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
           .buttons-row-full .transport-btn,
           .buttons-row-full .play-btn,
           .buttons-row-full .source-toggle,
-          .buttons-row-full > .power-icon-btn { height: 44px; min-height: 44px; border-radius: 14px; }
-          .mini-player-main { min-height: 84px; grid-template-columns: 76px minmax(0, 1fr) auto; }
-          .mini-meta { padding: 12px 10px 12px 12px; }
-          .mini-actions { padding-right: 12px; gap: 6px; }
+          .buttons-row-full > .power-icon-btn { height: 40px; min-height: 40px; border-radius: 12px; }
+          .player-action-row { gap: 6px; }
+          .player-action-pill { min-height: 32px; padding: 0 8px; font-size: 0.68rem; }
+          .mini-player-main { min-height: 66px; grid-template-columns: minmax(0, 1fr) auto; padding: 8px 9px 8px 10px; }
+          .mini-meta { padding: 0; }
+          .mini-actions { padding-right: 0; gap: 5px; }
+          .mini-action-btn,
+          .mini-power { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
           .source-menu { padding: 8px; }
           .source-sheet { border-radius: 18px; }
           .quick-volume-menu { padding: 8px; }
@@ -3113,8 +3791,7 @@ class AgsMediaCard extends HTMLElement {
             <div class="transition-shell ${!isSystemOff && !isPlayerSection ? this._transitionPreset : ""}">
               ${isSystemOff
                 ? this.renderPlayerSection(ags, control, quickVolumeMenuId)
-                : this._section === "sources" ? this.renderSourcesSection(ags) :
-                  this._section === "browse" ? this.renderBrowse() :
+                : this._section === "browse" ? this.renderBrowse() :
                   this._section === "rooms" || this._section === "volumes" ? this.renderVolumesSection(ags) :
                   this.renderPlayerSection(ags, control, quickVolumeMenuId)}
             </div>
@@ -3139,33 +3816,121 @@ class AgsMediaCard extends HTMLElement {
     return this.renderVolumesSection(ags);
   }
 
+  renderTvSourceBrowse(ags) {
+    const sources = this.toArray(ags?.attributes?.source_list).filter(Boolean);
+    const current = ags?.attributes?.source || "";
+    const content = sources.length
+      ? `<div class="browse-grid list-view">${sources.map((source) => `
+          <button class="list-card browse-item action-card ${source === current ? "selected" : ""}" onclick="this.getRootNode().host.callService('media_player', 'select_source', {entity_id: '${ags.entity_id}', source: '${this.escapeJsString(source)}'})">
+            <div class="browse-item-contents">
+              <div class="browse-art no-image"><span class="browse-art-fallback" aria-hidden="true"><ha-icon icon="mdi:video-input-hdmi"></ha-icon></span></div>
+              <div class="browse-item-copy">
+                <div class="browse-label">${this.escapeHtml(source)}</div>
+                <div class="browse-meta">${source === current ? "Selected" : "TV Source"}</div>
+              </div>
+            </div>
+          </button>
+        `).join("")}</div>`
+      : '<div class="browse-empty"><ha-icon icon="mdi:video-input-component"></ha-icon><div>No TV sources available</div></div>';
+    return `
+      <div class="browse-section">
+        <div class="browse-toolbar">
+          <button class="icon-btn" onclick="this.getRootNode().host.setSection('player')" title="Back">
+            <ha-icon icon="mdi:chevron-left"></ha-icon>
+          </button>
+          <div class="browse-title">TV Sources</div>
+        </div>
+        ${content}
+      </div>
+    `;
+  }
+
   renderBrowse() {
+    const ags = this.getAgsPlayer();
+    if (ags?.attributes?.source_mode === "tv" || ags?.attributes?.ags_status === "ON TV") {
+      return this.renderTvSourceBrowse(ags);
+    }
+
     let content;
+    const items = this.getFilteredBrowseItems();
+    const gridClass = this._browseMode === 'list' ? 'browse-grid list-view' : this._browseMode === 'grid' ? 'browse-grid grid-view' : 'browse-grid';
+
     if (this._loadingBrowse) {
       content = '<div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>';
     } else if (this._browseError) {
       content = `<div class="browse-empty"><ha-icon icon="mdi:speaker-off"></ha-icon><div>${this.escapeHtml(this._browseError)}</div></div>`;
-    } else if (!this._browseItems.length) {
+    } else if (!this._browseLoadedOnce && !items.length) {
+      content = '<div class="loading-spin"><ha-circular-progress active></ha-circular-progress></div>';
+    } else if (!items.length) {
       content = '<div class="browse-empty"><ha-icon icon="mdi:music-off"></ha-icon><div>No items found</div></div>';
     } else {
-      content = `<div class="browse-grid">${this._browseItems.map((i, idx) => `
-        <button
-          type="button"
-          class="list-card browse-item action-card"
-          aria-label="${this.escapeAttribute(i.can_expand ? `Open ${i.title}` : i.can_play ? `Play ${i.title}` : `View ${i.title}`)}"
-          onclick="this.getRootNode().host._handleBrowseClick(${idx})"
-          ${!i.can_expand && !i.can_play ? "disabled" : ""}
-        >
-          ${this.renderBrowseArtwork(i)}
-          <div class="browse-label">${this.escapeHtml(i.title)}</div>
-          <div class="browse-meta">${this.escapeHtml(this.getBrowseItemMeta(i))}</div>
-        </button>`).join("")}</div>`;
+      content = `<div class="${gridClass}">${items.map((i, idx) => {
+        const sources = this.getFavoriteSources();
+        const itemSourceId = this.getBrowseItemSourceId(i);
+        const isCustom = sources.some(s => this.getSourceId(s) === itemSourceId);
+        const isFavorite = this.isAgsFavorite(i);
+        const canAction = i.can_play || i.can_expand;
+
+        return `
+          <div class="list-card browse-item action-card" title="${this.escapeAttribute(i.title)}" aria-label="${this.escapeAttribute(i.title)}">
+            <div class="browse-item-contents" title="${this.escapeAttribute(i.title)}" aria-label="${this.escapeAttribute(i.title)}" onclick="this.getRootNode().host._handleBrowseClick(${idx})">
+              ${this.renderBrowseArtwork(i)}
+              <div class="browse-item-copy">
+                <div class="browse-label" title="${this.escapeAttribute(i.title)}">${this.escapeHtml(i.title)}</div>
+                <div class="browse-meta">${this.escapeHtml(this.getBrowseItemMeta(i))}</div>
+              </div>
+            </div>
+            ${canAction ? `
+              <div class="filter-actions browse-item-actions">
+                ${isCustom ? `
+                  <button class="filter-icon-btn" title="Rename Favorite" onclick="this.getRootNode().host.renameAgsFavorite(${idx})">
+                    <ha-icon icon="mdi:pencil-outline"></ha-icon>
+                  </button>
+                ` : ""}
+                ${isFavorite ? `
+                  <button class="filter-icon-btn active" title="Hide from System" onclick="this.getRootNode().host.toggleAgsFavorite(${idx})">
+                    <ha-icon icon="mdi:eye-off"></ha-icon>
+                  </button>
+                ` : `
+                  <button class="filter-icon-btn" title="Add to Favorites" onclick="this.getRootNode().host.toggleAgsFavorite(${idx})">
+                    <ha-icon icon="mdi:star-plus-outline"></ha-icon>
+                  </button>
+                `}
+              </div>
+            ` : ''}
+          </div>
+        `;
+
+      }).join("")}</div>`;
     }
+
+    const isAtRoot = this._browseStack.length <= (this._browseView === 'favorites' ? 1 : 0);
+    const title = this._browseStack.length ? this._browseStack[this._browseStack.length - 1].title : 'Browse';
+
     return `
       <div class="browse-view">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-          ${this._browseStack.length ? `<button class="icon-btn" onclick="this.getRootNode().host.browseBack()"><ha-icon icon="mdi:arrow-left"></ha-icon></button>` : ''}
-          <div class="view-title" style="margin:0;">Library</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${!isAtRoot ? `
+              <button class="filter-icon-btn" onclick="this.getRootNode().host.browseBack()">
+                <ha-icon icon="mdi:arrow-left"></ha-icon>
+              </button>
+            ` : ''}
+            <div class="view-title" style="margin:0; font-size:0.9rem;">${this.escapeHtml(isAtRoot ? (this._browseView === 'favorites' ? 'Favorites' : 'Library') : title)}</div>
+          </div>
+          <div class="filter-actions">
+             ${isAtRoot ? `
+               <button class="filter-icon-btn ${this._browseView === 'favorites' ? 'active' : ''}" title="Favorites View" onclick="this.getRootNode().host.toggleBrowseView()">
+                 <ha-icon icon="${this._browseView === 'favorites' ? 'mdi:star' : 'mdi:star-outline'}"></ha-icon>
+               </button>
+             ` : ''}
+             <button class="filter-icon-btn ${this._browseSort === 'a-z' ? 'active' : ''}" title="Sort A-Z" onclick="this.getRootNode().host.toggleBrowseSort()">
+               <ha-icon icon="mdi:sort-alphabetical-ascending"></ha-icon>
+             </button>
+             <button class="filter-icon-btn" title="Toggle Grid/List" onclick="this.getRootNode().host.toggleBrowseMode()">
+               <ha-icon icon="${this._browseMode === 'list' ? 'mdi:view-grid' : 'mdi:view-list'}"></ha-icon>
+             </button>
+          </div>
         </div>
         ${content}
       </div>`;

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
@@ -13,6 +14,23 @@ from .ags_service import update_ags_sensors
 # isn't required. 30 seconds keeps them responsive without excessive work.
 SCAN_INTERVAL = timedelta(seconds=30)
 
+
+def schedule_ags_sensor_refresh_after_start(hass, ags_config):
+    """Refresh AGS sensor data after HA startup, never during platform setup."""
+    async def _refresh():
+        try:
+            await update_ags_sensors(ags_config, hass)
+        except Exception:
+            pass
+
+    async def _after_started(_event=None):
+        await _refresh()
+
+    if getattr(hass, "is_running", False):
+        hass.async_create_task(_after_started())
+        return None
+    return hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _after_started)
+
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     # Create your sensors
     ags_config = hass.data[DOMAIN]
@@ -21,34 +39,35 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     SCAN_INTERVAL = timedelta(seconds=interval)
 
     sensors = [
-        ConfiguredRoomsSensor(hass), 
-        ActiveRoomsSensor(hass), 
+        ConfiguredRoomsSensor(hass),
+        ActiveRoomsSensor(hass),
         ActiveSpeakersSensor(hass),
         InactiveSpeakersSensor(hass),
         AGSStatusSensor(hass),
         PrimarySpeakerSensor(hass),
         PreferredPrimarySpeakerSensor(hass),
-        AGSSourceSensor( hass),
+        AGSSourceSensor(hass),
         AGSInactiveTVSpeakersSensor(hass)
     ]
 
 
-    await update_ags_sensors(ags_config, hass)
-
     # Define a function to be called when a tracked entity changes its state
     async def state_changed_listener(event):
         """Refresh sensors when a tracked entity changes state."""
+        if not getattr(hass, "is_running", False):
+            return
+
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
-        
+
         if old_state is None or new_state is None:
             return
-            
+
         # Filter out spam: Only trigger if the actual state, group, or source changed
         state_changed = old_state.state != new_state.state
         group_changed = old_state.attributes.get("group_members") != new_state.attributes.get("group_members")
         source_changed = old_state.attributes.get("source") != new_state.attributes.get("source")
-        
+
         if not (state_changed or group_changed or source_changed):
             return  # Ignore media_position clock ticks
 
@@ -57,41 +76,42 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             # Still check source to be sure
             if not source_changed:
                 return
-            
+
         await update_ags_sensors(ags_config, hass)
 
     # Register sensors so other modules can refresh them immediately
     hass.data['ags_sensors'] = sensors
+    startup_refresh_unsub = schedule_ags_sensor_refresh_after_start(hass, ags_config)
 
     tracked_entities = set()
     unsubs = []
 
     def update_tracked_entities():
         nonlocal unsubs, tracked_entities
-        
+
         # Unsubscribe old trackers
         for unsub in unsubs:
             unsub()
         unsubs = []
         tracked_entities = set(['zone.home'])
-        
+
         cfg = hass.data[DOMAIN]
         rooms = cfg.get('rooms', [])
-        
+
         schedule_cfg = cfg.get('schedule_entity')
         if schedule_cfg and schedule_cfg.get('entity_id'):
             tracked_entities.add(schedule_cfg['entity_id'])
-            
+
         if cfg.get("create_sensors"):
             tracked_entities.add("switch.ags_actions")
-            
+
         for room in rooms:
             safe_room_id = "".join(c for c in room.get('room', '').lower().replace(' ', '_') if c.isalnum() or c == '_')
             if safe_room_id:
                 tracked_entities.add(f"switch.{safe_room_id}_media")
             for device in room.get("devices", []):
                 tracked_entities.add(device["device_id"])
-                
+
         # Create new trackers
         if tracked_entities:
             unsubs.append(async_track_state_change_event(
@@ -102,10 +122,26 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     update_tracked_entities()
 
     # Listen for hot reload to update tracking
-    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
+    reload_unsub = async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
+
+    cleanup_done = False
+
+    def remove_tracked_entities():
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        cleanup_done = True
+        reload_unsub()
+        if startup_refresh_unsub:
+            startup_refresh_unsub()
+        for unsub in unsubs:
+            unsub()
+
+    for sensor in sensors:
+        sensor.async_on_remove(remove_tracked_entities)
 
     # Add the sensors to Home Assistant
-    async_add_entities(sensors, True)
+    async_add_entities(sensors, False)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -201,8 +237,8 @@ class InactiveSpeakersSensor(SensorEntity):
         return inactive_speakers
 
 
-    
-## Sensor for Status 
+
+## Sensor for Status
 class AGSStatusSensor(SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = ["ON", "ON TV", "Override", "OFF"]
@@ -229,7 +265,7 @@ class AGSStatusSensor(SensorEntity):
 
         return ags_status
 
-    
+
 
 
 
@@ -254,7 +290,7 @@ class PrimarySpeakerSensor(SensorEntity):
         primary_speaker = self.hass.data.get('primary_speaker', None)
         return primary_speaker
 
-    
+
 # sensor for back up speaker if primary is none #
 class PreferredPrimarySpeakerSensor(SensorEntity):
     """Representation of a Sensor."""
@@ -276,7 +312,7 @@ class PreferredPrimarySpeakerSensor(SensorEntity):
         preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
         return preferred_primary_speaker
 
-   
+
 #sensor to see selected source #
 class AGSSourceSensor(SensorEntity):
     """Representation of a Sensor."""
@@ -316,4 +352,3 @@ class AGSInactiveTVSpeakersSensor(SensorEntity):
     def state(self):
         ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         return ags_inactive_tv_speakers
-   

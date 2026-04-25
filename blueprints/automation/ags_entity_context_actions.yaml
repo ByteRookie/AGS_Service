@@ -1,0 +1,163 @@
+blueprint:
+  name: AGS Source TV Actions
+  description: Pick the AGS media player once, then run actions for a chosen source based on the current source, primary room, active TVs, and whether those TVs are already running the requested app/content.
+  domain: automation
+  input:
+    ags_media_player:
+      name: AGS Whole Home Audio player
+      description: Select the main AGS media player. The blueprint reads AGS source, primary speaker, rooms, and TV context from this one entity.
+      selector:
+        entity:
+          domain: media_player
+    target_source_name:
+      name: AGS source to watch
+      description: "The friendly AGS source name that should activate these actions. Example: News."
+      default: News
+      selector:
+        text:
+    running_match:
+      name: Already-running match
+      description: "Text that means a TV is already doing the right thing. This is matched against TV source, app name, app id, media title, and media content id. Example: News."
+      default: News
+      selector:
+        text:
+    source_started_all_running_action:
+      name: Already running action
+      description: Runs when the watched source is selected and every active TV already matches the text above. Usually this can be left empty so nothing happens.
+      default: []
+      selector:
+        action:
+    source_started_needs_start_action:
+      name: Start TVs action
+      description: Runs when the watched source is selected and one or more active TVs are not already running it. Use tvs_needing_start for the TVs that need work.
+      default: []
+      selector:
+        action:
+    source_active_no_tv_action:
+      name: No active TV action
+      description: Runs when the watched source is selected but no TV is active in the primary room or active AGS rooms. Use this for speaker-only fallback behavior.
+      default: []
+      selector:
+        action:
+    active_tvs_changed_action:
+      name: Active TVs changed action
+      description: Runs while the watched source is selected when TVs enter or leave the active AGS context. Use added_tv_entities and removed_tv_entities to start or clean up only the TVs that changed.
+      default: []
+      selector:
+        action:
+    source_left_action:
+      name: Source changed away action
+      description: Runs when AGS changes away from the watched source. Use cleanup_tv_entities to turn off or reset TVs that were active for this source.
+      default: []
+      selector:
+        action:
+
+mode: queued
+max: 10
+
+trigger:
+  - platform: state
+    entity_id: !input ags_media_player
+    id: ags_context_changed
+
+variables:
+  ags_media_player: !input ags_media_player
+  target_source_name: !input target_source_name
+  running_match: !input running_match
+  trigger_entity_id: "{{ trigger.entity_id }}"
+  trigger_from_state: "{{ trigger.from_state.state if trigger.from_state else none }}"
+  trigger_to_state: "{{ trigger.to_state.state if trigger.to_state else none }}"
+  ags_status: "{{ state_attr(ags_media_player, 'ags_status') }}"
+  selected_source_name: "{{ state_attr(ags_media_player, 'selected_source_name') }}"
+  previous_source_name: >-
+    {% if trigger.from_state is not none %}
+      {{ trigger.from_state.attributes.get('selected_source_name') }}
+    {% else %}
+      {{ none }}
+    {% endif %}
+  ags_source_value: "{{ state_attr(ags_media_player, 'ags_source') }}"
+  primary_speaker: "{{ state_attr(ags_media_player, 'primary_speaker') }}"
+  primary_room: "{{ state_attr(ags_media_player, 'primary_speaker_room') }}"
+  preferred_primary_speaker: "{{ state_attr(ags_media_player, 'preferred_primary_speaker') }}"
+  control_device_id: "{{ state_attr(ags_media_player, 'control_device_id') }}"
+  active_rooms: "{{ state_attr(ags_media_player, 'active_rooms') or [] }}"
+  active_speakers: "{{ state_attr(ags_media_player, 'active_speakers') or [] }}"
+  active_tv_entities: "{{ state_attr(ags_media_player, 'active_tv_entities') or [] }}"
+  primary_room_devices: "{{ state_attr(ags_media_player, 'primary_room_devices') or [] }}"
+  primary_room_tv_entities: "{{ state_attr(ags_media_player, 'primary_room_tv_entities') or [] }}"
+  room_details: "{{ state_attr(ags_media_player, 'room_details') or [] }}"
+  previous_room_details: >-
+    {{ trigger.from_state.attributes.get('room_details', [])
+       if trigger.from_state is not none
+       else [] }}
+  previous_active_tv_entities: >-
+    {{ trigger.from_state.attributes.get('active_tv_entities', [])
+       if trigger.from_state is not none
+       else [] }}
+  cleanup_tv_entities: >-
+    {{ previous_active_tv_entities
+       if previous_active_tv_entities | count > 0
+       else active_tv_entities }}
+  added_tv_entities: "{{ active_tv_entities | reject('in', previous_active_tv_entities) | list }}"
+  removed_tv_entities: "{{ previous_active_tv_entities | reject('in', active_tv_entities) | list }}"
+  changed_tv_entities: "{{ (added_tv_entities + removed_tv_entities) | unique | list }}"
+  tvs_already_running: >-
+    {% set marker = running_match | lower %}
+    {% set ns = namespace(items=[]) %}
+    {% for entity_id in active_tv_entities %}
+      {% set haystack = [
+        states(entity_id),
+        state_attr(entity_id, 'source'),
+        state_attr(entity_id, 'app_name'),
+        state_attr(entity_id, 'app_id'),
+        state_attr(entity_id, 'media_title'),
+        state_attr(entity_id, 'media_content_id')
+      ] | reject('equalto', none) | join(' ') | lower %}
+      {% if marker and marker in haystack %}
+        {% set ns.items = ns.items + [entity_id] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.items }}
+  tvs_needing_start: "{{ active_tv_entities | reject('in', tvs_already_running) | list }}"
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ (selected_source_name | trim | lower == target_source_name | lower)
+         or (previous_source_name | trim | lower == target_source_name | lower) }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ previous_source_name | trim | lower == target_source_name | lower
+                 and selected_source_name | trim | lower != target_source_name | lower }}
+        sequence: !input source_left_action
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ selected_source_name | trim | lower == target_source_name | lower
+                 and changed_tv_entities | count > 0 }}
+        sequence: !input active_tvs_changed_action
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ selected_source_name | trim | lower == target_source_name | lower
+                 and active_tv_entities | count == 0 }}
+        sequence: !input source_active_no_tv_action
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ selected_source_name | trim | lower == target_source_name | lower
+                 and active_tv_entities | count > 0
+                 and tvs_needing_start | count == 0 }}
+        sequence: !input source_started_all_running_action
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ selected_source_name | trim | lower == target_source_name | lower
+                 and active_tv_entities | count > 0
+                 and tvs_needing_start | count > 0 }}
+        sequence: !input source_started_needs_start_action

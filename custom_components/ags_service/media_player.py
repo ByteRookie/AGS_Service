@@ -1,18 +1,23 @@
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.components.media_player import (
+    BrowseMedia,
+    DATA_COMPONENT as MEDIA_PLAYER_DATA_COMPONENT,
     MediaPlayerEntity,
     MediaPlayerDeviceClass,
     MediaPlayerEntityFeature,
 )
-from homeassistant.const import STATE_IDLE
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, STATE_IDLE
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers import entity_registry as er
 
-import asyncio
-from . import DOMAIN, SIGNAL_AGS_RELOAD
+from . import DOMAIN, SIGNAL_AGS_RELOAD, _async_save_config_with_backup
 from .ags_service import (
     update_ags_sensors,
     ags_select_source,
+    enqueue_media_action,
+    handle_ags_status_change,
+    wait_for_actions,
     resolve_music_source_name,
     has_active_music_playback,
     TV_MODE_TV_AUDIO,
@@ -20,55 +25,75 @@ from .ags_service import (
     TV_IGNORE_STATES,
     is_tv_mode_state,
 )
+from .source_utils import (
+    CONF_DEFAULT_SOURCE_ID,
+    CONF_HIDDEN_SOURCE_IDS,
+    CONF_LAST_DISCOVERED_SOURCES,
+    CONF_SOURCE_DISPLAY_NAMES,
+    CONF_SOURCE_FAVORITES,
+    SOURCE_ORIGIN_MEDIA_BROWSER,
+    combine_source_inventory,
+    find_source_by_name_or_id,
+    is_legacy_config_source,
+    normalize_source_entry,
+    normalize_source_list,
+    split_source_inventory,
+)
 
+import asyncio
+import copy
 import logging
 _LOGGER = logging.getLogger(__name__)
 
 STATE_REFRESH_DEBOUNCE = 0.15
+BROWSE_CALL_TIMEOUT = 6
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the media player platform."""
-    ags_config = hass.data[DOMAIN]
-
+    _LOGGER.info("AGS: Setting up media_player platform")
     # Create and add the AGS media player
-    ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, ags_config)
-    async_add_entities([ags_media_player], True)
-    
+    ags_media_player = AGSPrimarySpeakerMediaPlayer(hass, {})
+    hass.data.setdefault(DOMAIN, {})["media_player_entity"] = ags_media_player
+    async_add_entities([ags_media_player])
+
     # Ensure the media player is properly registered
     async def reload_handler(_):
         await ags_media_player.async_update()
-    
-    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, reload_handler)
-    
+        ags_media_player.async_write_ha_state()
+
+    ags_media_player.async_on_remove(
+        async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, reload_handler)
+    )
+
     tracked_entities = set()
     unsubs = []
 
     def update_tracked_entities():
         nonlocal unsubs, tracked_entities
-        
+
         # Unsubscribe old trackers
         for unsub in unsubs:
             unsub()
         unsubs = []
         tracked_entities = set(['zone.home'])
-        
+
         cfg = hass.data[DOMAIN]
         rooms = cfg.get('rooms', [])
-        
+
         schedule_cfg = cfg.get('schedule_entity')
         if schedule_cfg and schedule_cfg.get('entity_id'):
             tracked_entities.add(schedule_cfg['entity_id'])
-            
+
         if cfg.get("create_sensors"):
             tracked_entities.add("switch.ags_actions")
-            
+
         for room in rooms:
             safe_room_id = "".join(c for c in room.get('room', '').lower().replace(' ', '_') if c.isalnum() or c == '_')
             if safe_room_id:
                 tracked_entities.add(f"switch.{safe_room_id}_media")
             for device in room.get("devices", []):
                 tracked_entities.add(device["device_id"])
-                
+
         # Create new trackers
         if tracked_entities:
             unsubs.append(async_track_state_change_event(
@@ -79,7 +104,15 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     update_tracked_entities()
 
     # Listen for hot reload to update tracking
-    async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
+    ags_media_player.async_on_remove(
+        async_dispatcher_connect(hass, SIGNAL_AGS_RELOAD, update_tracked_entities)
+    )
+
+    def remove_tracked_entities():
+        for unsub in unsubs:
+            unsub()
+
+    ags_media_player.async_on_remove(remove_tracked_entities)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -92,6 +125,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         await super().async_added_to_hass()
+        _LOGGER.info("AGS: Media player added to Home Assistant")
         restored_source = None
         last_state = await self.async_get_last_state()
         if last_state:
@@ -100,27 +134,34 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 restored_source = last_state.attributes.get("source")
             if restored_source not in (None, "", "TV", "Unknown"):
                 self.hass.data["ags_media_player_source"] = restored_source
-        await self.async_update()
-        if (
-            restored_source not in (None, "", "TV", "Unknown")
-            and self.hass.data.get("ags_status") == "ON"
-            and self.hass.data.get("active_rooms")
-            and not has_active_music_playback(
-                self.hass,
-                self.hass.data.get("active_speakers", []),
-            )
-        ):
-            await ags_select_source(
-                self.ags_config,
-                self.hass,
-                ignore_playing=True,
+        self._refresh_from_data()
+        if self.entity_id:
+            self.async_write_ha_state()
+
+        async def _after_ha_started(_event=None):
+            await self._async_after_homeassistant_started()
+
+        if getattr(self.hass, "is_running", False):
+            self.hass.async_create_task(_after_ha_started())
+        else:
+            self.async_on_remove(
+                self.hass.bus.async_listen_once(
+                    EVENT_HOMEASSISTANT_STARTED,
+                    _after_ha_started,
+                )
             )
 
-    def __init__(self, hass, ags_config):
+    @property
+    def ags_config(self):
+        """Always return the latest config from hass.data."""
+        return self.hass.data.get(DOMAIN, {})
+
+    def __init__(self, hass, _unused_config):
         """Initialize the media player."""
+        self.hass = hass
         self._hass = hass
-        self.ags_config = ags_config
-        self._name = "Whole Home Audio"
+        self._attr_name = "Whole Home Audio"
+        self.entity_id = "media_player.ags_media_player"
         self._state = STATE_IDLE
         self.primary_speaker_entity_id = None
         self.primary_speaker_state = None   # Initialize the attribute
@@ -136,12 +177,35 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_inactive_tv_speakers = None
         self.primary_speaker_room = None
         self._pending_refresh_unsub = None
+        self._favorite_refresh_retry_unsub = None
+        self._source_inventory_refresh_unsub = None
+        self._source_inventory_enabled = False
+        self._last_source_mode = None
+        self._last_browse_target = None
+
+    async def _async_after_homeassistant_started(self):
+        """Start non-critical AGS refresh work after HA has completed startup."""
+        self._source_inventory_enabled = True
+        try:
+            await update_ags_sensors(self.ags_config, self.hass)
+            self._refresh_from_data()
+            if self.entity_id:
+                self.async_schedule_update_ha_state(True)
+        except Exception as err:
+            _LOGGER.debug("AGS post-start sensor refresh failed: %s", err)
+        self._schedule_source_inventory_refresh(delay=5, force=True)
 
     async def async_will_remove_from_hass(self):
         """Cancel scheduled refresh callbacks."""
         if self._pending_refresh_unsub:
             self._pending_refresh_unsub()
             self._pending_refresh_unsub = None
+        if self._favorite_refresh_retry_unsub:
+            self._favorite_refresh_retry_unsub()
+            self._favorite_refresh_retry_unsub = None
+        if self._source_inventory_refresh_unsub:
+            self._source_inventory_refresh_unsub()
+            self._source_inventory_refresh_unsub = None
         await super().async_will_remove_from_hass()
 
     def _schedule_media_call(self, service: str, data: dict) -> None:
@@ -157,7 +221,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         async def _update() -> None:
             await update_ags_sensors(self.ags_config, self.hass)
             self._refresh_from_data()
-            self.async_schedule_update_ha_state(True)
+            if self.entity_id:
+                self.async_schedule_update_ha_state(True)
 
         self.hass.loop.call_soon_threadsafe(
             lambda: self.hass.async_create_task(_update())
@@ -169,10 +234,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_update(self):
         """Fetch latest state."""
-        ### Move logic here for sensor to remove sensor.py ##
-
-        await update_ags_sensors(self.ags_config, self._hass)
-
+        # Use existing data from hass.data instead of triggering a full sensor update
+        # which can lead to circular dependencies.
         self._refresh_from_data()
 
     def _refresh_from_data(self) -> None:
@@ -182,6 +245,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.active_speakers = self.hass.data.get('active_speakers', None)
         self.inactive_speakers = self.hass.data.get('inactive_speakers', None)
         self.primary_speaker = self.hass.data.get('primary_speaker', "")
+        self.primary_speaker_entity_id = self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else None
         self.preferred_primary_speaker = self.hass.data.get('preferred_primary_speaker', None)
         self.browsing_fallback_speaker = self.hass.data.get('browsing_fallback_speaker', None)
         self.primary_speaker_room = None
@@ -194,14 +258,15 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         self.ags_inactive_tv_speakers = self.hass.data.get('ags_inactive_tv_speakers', None)
         self.ags_status = self.hass.data.get('ags_status', 'OFF')
 
-        found_room = False
-        for room in self.ags_config['rooms']:
-            for device in room["devices"]:
-                if device["device_id"] == self.hass.data.get('primary_speaker'):
-                    self.primary_speaker_room = room["room"]
-                    found_room = True
+        found_room_obj = None
+        rooms = self.ags_config.get('rooms', [])
+        for room in rooms:
+            for device in room.get("devices", []):
+                if device.get("device_id") == self.hass.data.get('primary_speaker'):
+                    self.primary_speaker_room = room.get("room") or room.get("name") or "Unknown"
+                    found_room_obj = room
                     break
-            if found_room:
+            if found_room_obj:
                 break
 
         tv_mode = self.hass.data.get("current_tv_mode", TV_MODE_TV_AUDIO)
@@ -210,30 +275,31 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             self.ags_status == "ON TV"
             and tv_mode != TV_MODE_NO_MUSIC
             and self.primary_speaker_room
+            and found_room_obj
         ):
             selected_device_id = None
 
             sorted_devices = sorted(
-                [device for device in room["devices"] if device["device_type"] != "speaker"],
-                key=lambda x: x['priority']
+                [device for device in found_room_obj.get("devices", []) if device.get("device_type") != "speaker"],
+                key=lambda x: x.get('priority', 999)
             )
 
             if sorted_devices:
                 tv_device = sorted_devices[0]
                 ott_devices = tv_device.get('ott_devices')
-                
+
                 if ott_devices:
                     # Fetch the TV's current state to see what input is active
                     tv_state = self.hass.states.get(tv_device['device_id'])
                     current_input = tv_state.attributes.get('source') if tv_state else None
-                    
+
                     # Try to find a matching input
                     found_ott = None
                     for ott in ott_devices:
                         if ott.get('tv_input') == current_input:
                             found_ott = ott['ott_device']
                             break
-                    
+
                     # Fallback to the first device in the list if no match
                     selected_device_id = found_ott if found_ott else ott_devices[0]['ott_device']
                 else:
@@ -247,28 +313,750 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
+        self._handle_source_mode_refresh()
 
-    def _get_homekit_player_entity_id(self):
-        """Return the configured HomeKit bridge player when available."""
-        entity_id = self.hass.data.get(DOMAIN, {}).get("homekit_player")
-        if not entity_id:
-            return None
-        return entity_id if self.hass.states.get(entity_id) is not None else None
+    def _get_source_mode(self):
+        if (
+            self.ags_status == "ON TV"
+            and not self.hass.data.get(DOMAIN, {}).get("disable_tv_source", False)
+        ):
+            return "tv"
+        return "music"
 
-    def _get_homekit_player_state(self):
-        """Return the configured HomeKit bridge entity state."""
-        entity_id = self._get_homekit_player_entity_id()
-        return self.hass.states.get(entity_id) if entity_id else None
+    def _handle_source_mode_refresh(self):
+        """Force HA state/source-list refresh when music and TV modes switch."""
+        mode = self._get_source_mode()
+        browse_target = self._get_browse_target_entity_id()
+        mode_changed = self._last_source_mode != mode
+        target_changed = self._last_browse_target != browse_target
+        if not mode_changed and not target_changed:
+            return
+        self._last_source_mode = mode
+        self._last_browse_target = browse_target
+        ags_data = self.hass.data.setdefault(DOMAIN, {})
+        ags_data["source_list_revision"] = int(ags_data.get("source_list_revision", 0) or 0) + 1
+        if mode == "music" and self._source_inventory_enabled:
+            self._schedule_source_inventory_refresh(delay=1, force=True)
+        self.async_schedule_update_ha_state(True)
 
     def _get_reference_player_state(self):
         """Return the best state object for metadata and command fallbacks."""
-        return self.primary_speaker_state or self._get_homekit_player_state()
+        if self.primary_speaker_state is not None:
+            return self.primary_speaker_state
+        target_entity_id = self._get_command_target_entity_id()
+        return self.hass.states.get(target_entity_id) if target_entity_id else None
 
     def _get_command_target_entity_id(self):
         """Return the entity that should receive direct transport commands."""
         if self.primary_speaker_entity_id and self.hass.states.get(self.primary_speaker_entity_id):
             return self.primary_speaker_entity_id
-        return self._get_homekit_player_entity_id()
+        return self._get_browse_target_entity_id()
+
+    def _dedupe_entity_ids(self, candidates):
+        """Return usable entity ids in order while preserving fallbacks."""
+        seen = set()
+        entity_ids = []
+        for entity_id in candidates:
+            normalized = str(entity_id or "").strip()
+            if (
+                not normalized
+                or normalized == "none"
+                or normalized == self.entity_id
+                or normalized in seen
+            ):
+                continue
+            seen.add(normalized)
+            entity_ids.append(normalized)
+        return entity_ids
+
+    def _get_browse_target_candidates(self, *, include_fallback: bool = True):
+        """Return physical media players that should handle media browsing."""
+        candidates = [
+            self.primary_speaker,
+            self.preferred_primary_speaker,
+        ]
+        if include_fallback:
+            candidates.append(self.browsing_fallback_speaker)
+            candidates.extend(self._get_configured_speaker_entity_ids())
+        return self._dedupe_entity_ids(candidates)
+
+    def _get_configured_speaker_entity_ids(self):
+        """Return all configured speakers in priority order."""
+        speakers = []
+        for room in self.ags_config.get("rooms", []) or []:
+            for device in room.get("devices", []) or []:
+                if device.get("device_type") == "speaker" and device.get("device_id"):
+                    speakers.append(device)
+        speakers.sort(key=lambda item: item.get("priority", 999))
+        return [speaker.get("device_id") for speaker in speakers]
+
+    def _get_top_configured_speaker_entity_id(self):
+        """Return the highest-priority configured speaker even when AGS is idle."""
+        speakers = self._get_configured_speaker_entity_ids()
+        if not speakers:
+            return None
+        for entity_id in speakers:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state != "unavailable":
+                return entity_id
+        return speakers[0]
+
+    def _get_browse_target_entity_id(self, *, include_fallback: bool = True):
+        """Return the best speaker target for browse/play_media requests."""
+        for entity_id in self._get_browse_target_candidates(
+            include_fallback=include_fallback
+        ):
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state != "unavailable":
+                return entity_id
+        return None
+
+    def _extract_browse_service_response(self, response, entity_id):
+        """Unwrap HA service response data for one browse target."""
+        if isinstance(response, dict):
+            if entity_id in response:
+                return response[entity_id]
+            if len(response) == 1:
+                return next(iter(response.values()))
+        return response
+
+    def _browse_attr(self, node, name, default=None):
+        """Read browse nodes returned as dicts or BrowseMedia objects."""
+        if isinstance(node, dict):
+            return node.get(name, default)
+        return getattr(node, name, default)
+
+    def _browse_children(self, node):
+        children = self._browse_attr(node, "children", []) or []
+        return list(children) if isinstance(children, (list, tuple)) else []
+
+    def _browse_result_has_real_content(self, node):
+        if node is None:
+            return False
+        children = self._browse_children(node)
+        if not children:
+            return not self._is_empty_browse_placeholder(node)
+        return any(not self._is_empty_browse_placeholder(child) for child in children)
+
+    def _is_empty_browse_placeholder(self, node):
+        """Return true for synthetic empty browse rows such as "No items"."""
+        title = str(
+            self._browse_attr(node, "title")
+            or self._browse_attr(node, "name")
+            or ""
+        ).strip().casefold()
+        content_id = str(self._browse_attr(node, "media_content_id") or "").strip().casefold()
+        media_class = str(self._browse_attr(node, "media_class") or "").strip().casefold()
+        return (
+            title in {"no item", "no items", "nothing found", "empty"}
+            or content_id in {"no item", "no items", "nothing found", "empty"}
+            or media_class == "empty"
+        )
+
+    def _normalize_favorite_source(self, node, folder_path=None):
+        if self._is_empty_browse_placeholder(node):
+            return None
+
+        children = self._browse_children(node)
+        can_expand = bool(self._browse_attr(node, "can_expand", False) or children)
+        title = str(
+            self._browse_attr(node, "title")
+            or self._browse_attr(node, "name")
+            or self._browse_attr(node, "media_content_id")
+            or ""
+        ).strip()
+        content_id = str(self._browse_attr(node, "media_content_id") or "").strip()
+        content_type = str(self._browse_attr(node, "media_content_type") or "music").strip()
+        can_play = bool(self._browse_attr(node, "can_play", False) or not can_expand)
+        if not title or not content_id or not can_play:
+            return None
+        source = normalize_source_entry({
+            "Source": title,
+            "Source_Value": content_id,
+            "media_content_type": content_type,
+            "source_default": False,
+            "origin": SOURCE_ORIGIN_MEDIA_BROWSER,
+            "folder_path": folder_path or [],
+        })
+        if source:
+            source["origin"] = SOURCE_ORIGIN_MEDIA_BROWSER
+            source["folder_path"] = folder_path or []
+        return source
+
+    def _browse_title(self, node):
+        """Return a readable title for a media-browser node."""
+        return str(
+            self._browse_attr(node, "title")
+            or self._browse_attr(node, "name")
+            or self._browse_attr(node, "media_content_id")
+            or ""
+        ).strip()
+
+    def _normalize_native_source(self, source):
+        source_name = str(source or "").strip()
+        if source_name in ("", "TV", "Unknown"):
+            return None
+        return normalize_source_entry({
+            "Source": source_name,
+            "Source_Value": source_name,
+            "media_content_type": "source",
+            "source_default": False,
+        })
+
+    def _get_native_source_list_sources(self, entity_id):
+        state = self.hass.states.get(entity_id)
+        source_list = state.attributes.get("source_list") if state else None
+        if not isinstance(source_list, (list, tuple)):
+            return []
+        return [
+            source
+            for source in (
+                self._normalize_native_source(source_name)
+                for source_name in source_list
+            )
+            if source
+        ]
+
+    async def _async_browse_on_entity(self, entity_id, media_content_type=None, media_content_id=None):
+        try:
+            result = await asyncio.wait_for(
+                self._async_browse_media_direct(
+                    entity_id,
+                    media_content_type,
+                    media_content_id,
+                ),
+                timeout=BROWSE_CALL_TIMEOUT,
+            )
+            if result is not None:
+                return result
+        except Exception:
+            pass
+        return await asyncio.wait_for(
+            self._async_browse_media_via_service(
+                entity_id,
+                media_content_type,
+                media_content_id,
+            ),
+            timeout=BROWSE_CALL_TIMEOUT,
+        )
+
+    async def _async_browse_candidate(self, entity_id, media_content_type=None, media_content_id=None):
+        try:
+            result = await asyncio.wait_for(
+                self._async_browse_media_direct(
+                    entity_id,
+                    media_content_type,
+                    media_content_id,
+                ),
+                timeout=BROWSE_CALL_TIMEOUT,
+            )
+            if result is not None:
+                return result
+        except Exception as err:
+            _LOGGER.debug(
+                "Falling back to service browse_media for %s: %s",
+                entity_id,
+                err,
+            )
+        return await asyncio.wait_for(
+            self._async_browse_media_via_service(
+                entity_id,
+                media_content_type,
+                media_content_id,
+            ),
+            timeout=BROWSE_CALL_TIMEOUT,
+        )
+
+    async def _async_crawl_favorite_sources(
+        self,
+        entity_id,
+        node,
+        results,
+        seen,
+        *,
+        max_depth=4,
+        max_items=500,
+        depth=0,
+        seen_nodes=None,
+        folder_path=None,
+    ):
+        if depth > max_depth or len(results) >= max_items:
+            return
+        if seen_nodes is None:
+            seen_nodes = set()
+        folder_path = list(folder_path or [])
+
+        for child in self._browse_children(node):
+            if len(results) >= max_items:
+                return
+            favorite = self._normalize_favorite_source(child, folder_path)
+            if favorite:
+                key = favorite["id"]
+                if key not in seen:
+                    seen.add(key)
+                    results.append(favorite)
+
+            if self._browse_attr(child, "can_expand", False):
+                content_type = self._browse_attr(child, "media_content_type")
+                content_id = self._browse_attr(child, "media_content_id")
+                child_path = folder_path + ([self._browse_title(child)] if self._browse_title(child) else [])
+
+                # If the folder already has children loaded, crawl them first
+                child_children = self._browse_children(child)
+                if child_children:
+                    await self._async_crawl_favorite_sources(
+                        entity_id,
+                        child,
+                        results,
+                        seen,
+                        max_depth=max_depth,
+                        max_items=max_items,
+                        depth=depth + 1,
+                        seen_nodes=seen_nodes,
+                        folder_path=child_path,
+                    )
+
+                if not content_id:
+                    continue
+
+                node_key = (str(content_type or ""), str(content_id or ""))
+                if node_key in seen_nodes:
+                    continue
+                seen_nodes.add(node_key)
+                try:
+                    expanded = await self._async_browse_on_entity(
+                        entity_id,
+                        content_type,
+                        content_id,
+                    )
+                    if expanded is not None:
+                        await self._async_crawl_favorite_sources(
+                            entity_id,
+                            expanded,
+                            results,
+                            seen,
+                            max_depth=max_depth,
+                            max_items=max_items,
+                            depth=depth + 1,
+                            seen_nodes=seen_nodes,
+                            folder_path=child_path,
+                        )
+                except Exception as err:
+                    _LOGGER.debug("Unable to crawl favorite folder %s: %s", content_id, err)
+
+    def _find_favorites_node(self, root):
+        """Find the native media-browser Favorites folder when present."""
+        return next(
+            (
+                child
+                for child in self._browse_children(root)
+                if self._browse_node_looks_like_favorites(child)
+            ),
+            None,
+        )
+
+    def _browse_node_looks_like_favorites(self, node):
+        """Return true when a browse node appears to be the user's favorites."""
+        values = (
+            self._browse_attr(node, "media_class", ""),
+            self._browse_attr(node, "title", ""),
+            self._browse_attr(node, "name", ""),
+            self._browse_attr(node, "media_content_id", ""),
+        )
+        return any(
+            any(keyword in str(value or "").casefold() for keyword in ("favorite", "fv:", "preserving"))
+            for value in values
+        )
+
+    async def _expand_browse_node(self, entity_id, node):
+        """Return an expanded browse node when the current node has a browse target."""
+        if node is None:
+            return None
+        content_id = self._browse_attr(node, "media_content_id", None)
+        if not content_id:
+            return node
+        return await self._async_browse_on_entity(
+            entity_id,
+            self._browse_attr(node, "media_content_type"),
+            content_id,
+        )
+
+    async def _async_find_favorites_browse_root(
+        self,
+        entity_id,
+        node,
+        *,
+        max_depth=3,
+        depth=0,
+        seen_nodes=None,
+    ):
+        """Find and expand a Favorites folder anywhere near the browser root."""
+        if node is None or depth > max_depth:
+            return None
+        if seen_nodes is None:
+            seen_nodes = set()
+
+        if self._browse_node_looks_like_favorites(node):
+            expanded = await self._expand_browse_node(entity_id, node)
+            return expanded if self._browse_result_has_real_content(expanded) else node
+
+        for child in self._browse_children(node):
+            if not self._browse_attr(child, "can_expand", False):
+                continue
+            if self._browse_node_looks_like_favorites(child):
+                expanded = await self._expand_browse_node(entity_id, child)
+                return expanded if self._browse_result_has_real_content(expanded) else child
+            child_type = self._browse_attr(child, "media_content_type")
+            child_id = self._browse_attr(child, "media_content_id")
+            node_key = (str(child_type or ""), str(child_id or ""))
+            if node_key in seen_nodes:
+                continue
+            seen_nodes.add(node_key)
+            try:
+                child_root = await self._expand_browse_node(entity_id, child)
+                found = await self._async_find_favorites_browse_root(
+                    entity_id,
+                    child_root,
+                    max_depth=max_depth,
+                    depth=depth + 1,
+                    seen_nodes=seen_nodes,
+                )
+                if found is not None:
+                    return found
+            except Exception as err:
+                _LOGGER.debug("Unable to inspect favorites candidate %s: %s", child_id, err)
+        return None
+
+    def _match_catalog_source(self, catalog, source):
+        """Return the browser-backed catalog item that best matches a legacy source."""
+        if not source:
+            return None
+        name = str(source.get("Source") or "").strip().casefold()
+        value = str(source.get("Source_Value") or "").strip().casefold()
+        source_id = str(source.get("id") or "").strip()
+        for candidate in catalog:
+            candidate_values = {
+                str(candidate.get("id") or "").strip(),
+                str(candidate.get("Source") or "").strip().casefold(),
+                str(candidate.get("Source_Value") or "").strip().casefold(),
+            }
+            if source_id in candidate_values or name in candidate_values or value in candidate_values:
+                return candidate
+        return None
+
+    def _merge_browser_favorites(self, ags_data, catalog, native_favorites):
+        """Build the visible AGS favorites list by merging existing, native, and legacy sources."""
+        hidden_ids = {
+            str(item).strip()
+            for item in ags_data.get(CONF_HIDDEN_SOURCE_IDS, []) or []
+            if str(item).strip()
+        }
+        
+        # 1. Get existing favorites (including those previously discovered)
+        existing = normalize_source_list(ags_data.get(CONF_SOURCE_FAVORITES, []) or [])
+        
+        merged = []
+        seen_ids = set()
+        seen_names = set()
+
+        def add_source(source, *, default=False):
+            normalized = normalize_source_entry(source)
+            if not normalized:
+                return
+            source_id = normalized["id"]
+            name_key = normalized["Source"].casefold()
+            value = str(normalized.get("Source_Value") or "").strip()
+            
+            # Skip if hidden
+            if source_id in hidden_ids or value in hidden_ids:
+                return
+            
+            # Deduplicate by ID or name
+            if source_id in seen_ids or name_key in seen_names:
+                return
+                
+            seen_ids.add(source_id)
+            seen_names.add(name_key)
+            merged.append({**normalized, "source_default": bool(default)})
+
+        # 2. Priority 1: Keep everything already in your favorites list
+        for source in existing:
+            add_source(source, default=source.get("source_default", False))
+
+        # 3. Priority 2: Add newly discovered native favorites
+        for source in native_favorites:
+            add_source(source)
+
+        # 4. Priority 3: Add top-level catalog items (legacy fallback)
+        # We only do this if we have VERY few favorites, to avoid clutter.
+        if len(merged) < 10:
+            for source in catalog:
+                add_source(source)
+
+        # 5. Handle Default Source ID logic
+        default_id = str(ags_data.get(CONF_DEFAULT_SOURCE_ID) or "").strip()
+        default_source = next((s for s in merged if s["id"] == default_id), None)
+        
+        if not default_source:
+            # Fallback to the one marked default in the list
+            default_marked = next((s for s in merged if s.get("source_default")), None)
+            default_id = default_marked["id"] if default_marked else (merged[0]["id"] if merged else None)
+
+        for source in merged:
+            source["source_default"] = bool(default_id and source["id"] == default_id)
+
+        _LOGGER.info("AGS: Merged sources result: %s items", len(merged))
+        return merged, default_id
+
+    def _append_discovered_sources(self, sources, results, seen):
+        for source in sources:
+            normalized = normalize_source_entry(source)
+            if not normalized:
+                continue
+            key = normalized["id"]
+            name_key = normalized["Source"].casefold()
+            if key in seen or name_key in seen:
+                continue
+            seen.add(key)
+            seen.add(name_key)
+            results.append(normalized)
+
+    def _source_to_browse_item(self, source):
+        name = str(source.get("Source") or "").strip()
+        value = str(source.get("Source_Value") or "").strip()
+        if not name or not value:
+            return None
+        content_type = str(source.get("media_content_type") or "music").strip()
+        return BrowseMedia(
+            title=name,
+            media_class="music",
+            media_content_id=value,
+            media_content_type=content_type,
+            can_play=True,
+            can_expand=False,
+        )
+
+    def _build_configured_sources_browse_root(self):
+        ags_data = self.hass.data.get(DOMAIN, {})
+        sources = [
+            source
+            for source in combine_source_inventory(ags_data)
+            if source.get("Source") not in (None, "", "Unknown")
+        ]
+
+        children = [
+            item
+            for item in (self._source_to_browse_item(source) for source in sources)
+            if item
+        ]
+        if not children:
+            return None
+        return BrowseMedia(
+            title="AGS Sources",
+            media_class="directory",
+            media_content_id="ags_sources",
+            media_content_type="library",
+            can_play=False,
+            can_expand=True,
+            children=children,
+        )
+
+    async def _async_refresh_source_inventory(self, *, force: bool = False):
+        """Populate generated music sources from the selected speaker media browser."""
+        ags_data = self.hass.data.get(DOMAIN, {})
+        if ags_data.get("_source_inventory_refreshing"):
+            return
+
+        ags_data["_source_inventory_refreshing"] = True
+        try:
+            all_discovered = []
+            all_native_favorites = []
+            candidates = self._get_browse_target_candidates()
+            _LOGGER.info("AGS source discovery starting with candidates: %s", candidates)
+
+            for entity_id in candidates:
+                try:
+                    state = self.hass.states.get(entity_id)
+                    if not state or state.state == "unavailable":
+                        continue
+
+                    root = await self._async_browse_on_entity(entity_id)
+                    if not self._browse_result_has_real_content(root):
+                        continue
+
+                    # 1. Search for native Favorites folder
+                    favorite_results = []
+                    browse_root = await self._async_find_favorites_browse_root(entity_id, root)
+                    if browse_root is not None and self._browse_result_has_real_content(browse_root):
+                        await self._async_crawl_favorite_sources(
+                            entity_id,
+                            browse_root,
+                            favorite_results,
+                            set(),
+                            max_depth=4,
+                            max_items=250,
+                            folder_path=["Favorites"],
+                        )
+                    
+                    if favorite_results:
+                        normalized_favs = normalize_source_list(favorite_results)
+                        all_native_favorites.extend(normalized_favs)
+                        _LOGGER.info("AGS: Found %s favorites on %s", len(normalized_favs), entity_id)
+
+                    # 2. Always get the top-level catalog as a fallback
+                    catalog_results = []
+                    await self._async_crawl_favorite_sources(
+                        entity_id,
+                        root,
+                        catalog_results,
+                        set(),
+                        max_depth=1,
+                        max_items=100,
+                    )
+                    if catalog_results:
+                        all_discovered.extend(normalize_source_list(catalog_results))
+
+                except Exception as err:
+                    _LOGGER.debug("Discovery error on %s: %s", entity_id, err)
+
+            # Deduplicate the master lists
+            discovered = normalize_source_list(all_discovered)
+            native_favorites = normalize_source_list(all_native_favorites)
+
+            _LOGGER.info("AGS: Discovery cycle found %s favorites and %s catalog items", len(native_favorites), len(discovered))
+
+            if not discovered and not native_favorites:
+                _LOGGER.debug("AGS: No sources found in this refresh cycle")
+                self._schedule_favorite_source_retry()
+                return
+
+            # Merge with existing data
+            next_favorites, next_default_id = self._merge_browser_favorites(
+                ags_data,
+                discovered,
+                native_favorites,
+            )
+            
+            existing_discovered = normalize_source_list(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or [])
+            existing_favorites = normalize_source_list(ags_data.get(CONF_SOURCE_FAVORITES, []) or [])
+
+            if (not force and 
+                discovered == existing_discovered and 
+                next_favorites == existing_favorites and 
+                next_default_id == ags_data.get(CONF_DEFAULT_SOURCE_ID)):
+                return
+
+            # Safely build the new config for persistence
+            stored_cache = ags_data.get("_stored_config_cache")
+            if isinstance(stored_cache, dict) and stored_cache.get("rooms"):
+                active_config = copy.deepcopy(stored_cache)
+            else:
+                # Fallback to reconstructing from live data
+                safe_keys = ("rooms", CONF_HIDDEN_SOURCE_IDS, CONF_SOURCE_DISPLAY_NAMES,
+                           "off_override", "create_sensors", "default_on", "static_name",
+                           "disable_tv_source", "interval_sync", "schedule_entity",
+                           "default_source_schedule", "batch_unjoin")
+                active_config = {k: copy.deepcopy(ags_data[k]) for k in safe_keys if k in ags_data}
+
+            active_config.update({
+                CONF_LAST_DISCOVERED_SOURCES: discovered,
+                CONF_SOURCE_FAVORITES: next_favorites,
+                CONF_DEFAULT_SOURCE_ID: next_default_id,
+            })
+
+            # Cleanup internal keys
+            for key in ("Sources", "favorite_sources", "ExcludedSources", "homekit_player", "media_player_entity"):
+                active_config.pop(key, None)
+
+            apply_config = ags_data.get("apply_config")
+            if apply_config:
+                apply_config(active_config)
+            
+            ags_data["_stored_config_cache"] = copy.deepcopy(active_config)
+            ags_data["source_list_revision"] = int(ags_data.get("source_list_revision", 0)) + 1
+
+            await _async_save_config_with_backup(self.hass, active_config, store=ags_data.get("store"))
+            if self.entity_id:
+                self.async_schedule_update_ha_state(True)
+
+        finally:
+            ags_data.pop("_source_inventory_refreshing", None)
+
+    def _schedule_source_inventory_refresh(self, *, delay: int = 1, force: bool = False):
+        """Schedule source discovery without blocking HA startup."""
+        if self._source_inventory_refresh_unsub:
+            self._source_inventory_refresh_unsub()
+            self._source_inventory_refresh_unsub = None
+
+        async def _refresh(_now):
+            self._source_inventory_refresh_unsub = None
+            try:
+                await self._async_refresh_source_inventory(force=force)
+            except Exception as err:
+                _LOGGER.debug("Scheduled AGS source inventory refresh failed: %s", err)
+
+        self._source_inventory_refresh_unsub = async_call_later(
+            self.hass,
+            delay,
+            _refresh,
+        )
+
+    def _schedule_favorite_source_retry(self):
+        """Retry native favorite import after HA media entities finish startup."""
+        if self._favorite_refresh_retry_unsub:
+            return
+
+        async def _retry(_now):
+            self._favorite_refresh_retry_unsub = None
+            await self._async_refresh_source_inventory()
+
+        self._favorite_refresh_retry_unsub = async_call_later(
+            self.hass,
+            30,
+            _retry,
+        )
+
+    async def _async_browse_media_via_service(
+        self,
+        entity_id,
+        media_content_type,
+        media_content_id,
+    ):
+        """Browse a real media_player through Home Assistant's service layer."""
+        payload = {"entity_id": entity_id}
+        if media_content_type is not None:
+            payload["media_content_type"] = media_content_type
+        if media_content_id is not None:
+            payload["media_content_id"] = media_content_id
+
+        response = await self.hass.services.async_call(
+            "media_player",
+            "browse_media",
+            payload,
+            blocking=True,
+            return_response=True,
+        )
+        return self._extract_browse_service_response(response, entity_id)
+
+    async def _async_browse_media_direct(
+        self,
+        entity_id,
+        media_content_type,
+        media_content_id,
+    ):
+        """Compatibility fallback for HA versions without service responses."""
+        component = self.hass.data.get(MEDIA_PLAYER_DATA_COMPONENT)
+        if component is None:
+            component = self.hass.data.get("entity_components", {}).get("media_player")
+        if not component:
+            return None
+        target_entity = component.get_entity(entity_id)
+        if not target_entity or not hasattr(target_entity, "async_browse_media"):
+            return None
+        return await target_entity.async_browse_media(
+            media_content_type,
+            media_content_id,
+        )
 
     def _derive_app_name_from_id(self, app_id):
         """Turn raw app IDs into a readable fallback label."""
@@ -311,13 +1099,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Handle state change events for tracked entities."""
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
-        
+
         if old_state is not None and new_state is not None:
             # Filter out spam: Only trigger if the actual state, group, or source changed
             state_changed = old_state.state != new_state.state
             group_changed = old_state.attributes.get("group_members") != new_state.attributes.get("group_members")
             source_changed = self._get_state_source_label(old_state) != self._get_state_source_label(new_state)
-            
+
             if not (state_changed or group_changed or source_changed):
                 return  # Ignore media_position clock ticks
 
@@ -341,15 +1129,48 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         )
 
     def _build_source_details(self):
-        """Expose AGS-configured sources for richer frontend rendering."""
+        """Expose visible generated AGS music sources for richer frontend rendering."""
         return [
             {
+                "id": source.get("id"),
                 "name": source.get("Source"),
                 "value": source.get("Source_Value"),
                 "media_content_type": source.get("media_content_type"),
                 "default": source.get("source_default", False),
             }
-            for source in self.hass.data[DOMAIN].get("Sources", [])
+            for source in combine_source_inventory(self.hass.data.get(DOMAIN, {}))
+            if source.get("Source")
+        ]
+
+    def _build_hidden_source_details(self):
+        """Expose hidden generated sources for the AGS Sources panel."""
+        _visible, hidden = split_source_inventory(self.hass.data.get(DOMAIN, {}))
+        return [
+            {
+                "id": source.get("id"),
+                "name": source.get("Source"),
+                "value": source.get("Source_Value"),
+                "media_content_type": source.get("media_content_type"),
+                "default": source.get("source_default", False),
+            }
+            for source in hidden
+            if source.get("Source")
+        ]
+
+    def _build_all_source_details(self):
+        """Expose all known generated music sources for settings UI."""
+        visible, hidden = split_source_inventory(self.hass.data.get(DOMAIN, {}))
+        hidden_ids = {source.get("id") for source in hidden}
+        return [
+            {
+                "id": source.get("id"),
+                "name": source.get("Source"),
+                "value": source.get("Source_Value"),
+                "media_content_type": source.get("media_content_type"),
+                "default": source.get("source_default", False),
+                "hidden": source.get("id") in hidden_ids,
+            }
+            for source in [*visible, *hidden]
             if source.get("Source")
         ]
 
@@ -660,7 +1481,28 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         return room_details
 
-    
+    def _build_active_tv_entities(self, room_details):
+        """Return active TV entities in active rooms, including the primary room."""
+        active_tvs = []
+        for room in room_details:
+            if not room.get("active") and room.get("name") != self.primary_speaker_room:
+                continue
+            for device in room.get("devices", []):
+                if device.get("device_type") != "tv":
+                    continue
+                state = self.hass.states.get(device.get("entity_id"))
+                if is_tv_mode_state(state):
+                    active_tvs.append(device["entity_id"])
+        return active_tvs
+
+    def _build_primary_room_devices(self, room_details):
+        """Return configured device ids for the current primary speaker room."""
+        for room in room_details:
+            if room.get("name") == self.primary_speaker_room:
+                return [device["entity_id"] for device in room.get("devices", [])]
+        return []
+
+
     @property
     def extra_state_attributes(self):
         """Return entity specific state attributes."""
@@ -678,6 +1520,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 dynamic_title = f"{rooms_text} + {room_count-1} Active"
             else:
                 dynamic_title = "All Rooms are Off"
+
+        room_details = self._build_room_details()
+        active_tv_entities = self._build_active_tv_entities(room_details)
+        primary_room_devices = self._build_primary_room_devices(room_details)
 
         attributes = {
             "dynamic_title": dynamic_title,
@@ -697,14 +1543,22 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "ags_inactive_tv_speakers": self.ags_inactive_tv_speakers or [],
             "primary_speaker_room": self.primary_speaker_room,
             "control_device_id": self._get_command_target_entity_id(),
-            "homekit_player_id": self._get_homekit_player_entity_id(),
-            "browse_entity_id": self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else (self.preferred_primary_speaker if self.preferred_primary_speaker and self.preferred_primary_speaker != "none" else self.browsing_fallback_speaker),
+            "browse_entity_id": self._get_browse_target_entity_id(),
+            "source_mode": self._get_source_mode(),
+            "source_list_revision": self.hass.data.get(DOMAIN, {}).get("source_list_revision", 0),
             "current_tv_mode": self.hass.data.get("current_tv_mode"),
+            "active_tv_entities": active_tv_entities,
+            "primary_room_devices": primary_room_devices,
+            "primary_room_tv_entities": [
+                entity_id for entity_id in primary_room_devices if entity_id in active_tv_entities
+            ],
             "ags_sources": self._build_source_details(),
+            "ags_hidden_sources": self._build_hidden_source_details(),
+            "ags_all_sources": self._build_all_source_details(),
             "logic_flags": self._build_logic_flags(),
             "room_diagnostics": self._build_room_diagnostics(),
             "speaker_candidates": self._build_speaker_candidates(),
-            "room_details": self._build_room_details(),
+            "room_details": room_details,
         }
         return attributes
 
@@ -718,8 +1572,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     def name(self):
         ags_config = self.hass.data['ags_service']
         static_name = ags_config.get('static_name')
-        if static_name: 
-            return static_name 
+        if static_name:
+            return static_name
         return "Whole Home Audio"
 
     @property
@@ -728,7 +1582,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         active = self.hass.data.get('active_speakers', [])
         if not active:
             return []
-        
+
         # Home Assistant typically expects the entity itself to be part of the group_members list
         if self.entity_id and self.entity_id not in active:
             return [self.entity_id] + active
@@ -739,21 +1593,17 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         # Check the status in hass.data
         if self.ags_status == 'OFF':
             return "off"
-        
+
         # Fetch the current state of the AGS Primary Speaker entity
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
-            
+
             # If self.primary_speaker_state is None, then the entity ID might be incorrect
             if self.primary_speaker_state is None:
                 return STATE_IDLE
-            
+
             # Return the state of the primary speaker
             return self.primary_speaker_state.state
-
-        reference_state = self._get_homekit_player_state()
-        if reference_state is not None:
-            return reference_state.state
 
         return STATE_IDLE
 
@@ -862,17 +1712,98 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             | MediaPlayerEntityFeature.PLAY_MEDIA
         )
 
-    async def async_play_media(self, media_content_type, media_content_id, **kwargs):
-        """Play media on the primary speaker."""
-        target_entity_id = self._get_command_target_entity_id()
-        if target_entity_id:
-            await self.hass.services.async_call('media_player', 'play_media', {
-                'entity_id': target_entity_id,
-                'media_content_id': media_content_id,
-                'media_content_type': media_content_type,
-                **kwargs
-            })
-            await self.async_update()
+    async def async_play_media(self, media_content_type=None, media_content_id=None, **kwargs):
+        """Play browser-selected media through AGS' queued state machine."""
+        # Home Assistant calls can pass these either as direct arguments or in kwargs,
+        # and often uses 'media_type'/'media_id' instead of the full names.
+        content_type = media_content_type or kwargs.get("media_content_type") or kwargs.pop("media_type", None)
+        content_id = media_content_id or kwargs.get("media_content_id") or kwargs.pop("media_id", None)
+
+        # Also pop the standard ones if they are in kwargs to avoid duplicates if spread
+        kwargs.pop("media_content_type", None)
+        kwargs.pop("media_content_id", None)
+
+        if content_type is None or content_id is None:
+            _LOGGER.error(
+                "Missing required media content arguments. type=%s, id=%s, kwargs=%s",
+                content_type,
+                content_id,
+                kwargs,
+            )
+            return
+
+        if content_type == "source":
+            self.hass.data["switch_media_system_state"] = True
+            await update_ags_sensors(self.ags_config, self.hass)
+            self._refresh_from_data()
+            target_entity_id = self._get_browse_target_entity_id(
+                include_fallback=False
+            ) or self._get_browse_target_entity_id()
+            if target_entity_id:
+                await self.hass.services.async_call(
+                    "media_player",
+                    "select_source",
+                    {
+                        "entity_id": target_entity_id,
+                        "source": content_id,
+                    },
+                )
+                self.hass.data["ags_media_player_source"] = content_id
+                await self.async_update()
+            return
+
+        self.hass.data["switch_media_system_state"] = True
+        self.hass.data["ags_browser_play_pending"] = True
+
+        try:
+            await update_ags_sensors(self.ags_config, self.hass)
+            status = self.hass.data.get("ags_status", "OFF")
+
+            if status == "OFF":
+                _LOGGER.warning(
+                    "Ignoring browser play request because AGS remained OFF after wake request"
+                )
+                return
+
+            await handle_ags_status_change(
+                self.hass,
+                self.ags_config,
+                status,
+                status,
+            )
+            self._refresh_from_data()
+
+            active_speakers = self.hass.data.get("active_speakers", [])
+            if not active_speakers:
+                _LOGGER.warning(
+                    "Ignoring browser play request because no AGS rooms are active"
+                )
+                return
+
+            target_entity_id = self._get_browse_target_entity_id(
+                include_fallback=False
+            )
+            if not target_entity_id:
+                _LOGGER.warning(
+                    "Ignoring browser play request because no active speaker target is available"
+                )
+                return
+
+            await enqueue_media_action(
+                self.hass,
+                "play_media",
+                {
+                    "entity_id": target_entity_id,
+                    "media_content_id": content_id,
+                    "media_content_type": content_type,
+                    **kwargs,
+                },
+            )
+            await wait_for_actions(self.hass)
+        finally:
+            self.hass.data.pop("ags_browser_play_pending", None)
+
+        await self.async_update()
 
     async def async_join_media(self, group_members):
         """Join speakers to the primary speaker's group."""
@@ -897,27 +1828,62 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Proxy media browsing through the current AGS control speaker."""
-        target_entity_id = self.primary_speaker if self.primary_speaker and self.primary_speaker != "none" else (self.preferred_primary_speaker if self.preferred_primary_speaker and self.preferred_primary_speaker != "none" else self.browsing_fallback_speaker)
-
-        if target_entity_id and target_entity_id != self.entity_id and target_entity_id != "none":
-            try:
-                # browse_media is not a HA service — call the entity method directly
-                # via the entity component so integrations like Sonos/Spotify work correctly.
-                component = self.hass.data.get("entity_components", {}).get("media_player")
-                if component:
-                    target_entity = component.get_entity(target_entity_id)
-                    if target_entity and hasattr(target_entity, "async_browse_media"):
-                        return await target_entity.async_browse_media(
-                            media_content_type, media_content_id
-                        )
-            except Exception as err:
-                _LOGGER.error("Error proxying browse_media to %s: %s", target_entity_id, err)
-
         from homeassistant.components import media_source
-        return await media_source.async_browse_media(
-            self.hass,
-            media_content_id,
+
+        self._refresh_from_data()
+
+        is_media_source_request = bool(
+            media_content_id
+            and getattr(media_source, "is_media_source_id", lambda _value: False)(
+                media_content_id
+            )
         )
+        last_error = None
+
+        for target_entity_id in self._get_browse_target_candidates():
+            try:
+                result = await self._async_browse_candidate(
+                    target_entity_id,
+                    media_content_type,
+                    media_content_id,
+                )
+                if result is not None:
+                    if not media_content_id and not self._browse_result_has_real_content(result):
+                        last_error = RuntimeError(
+                            f"{target_entity_id} returned an empty browse placeholder"
+                        )
+                        continue
+                    return result
+                last_error = RuntimeError(
+                    f"{target_entity_id} returned no browse media"
+                )
+            except Exception as err:
+                last_error = err
+                _LOGGER.debug("Error browsing media on %s: %s", target_entity_id, err)
+
+        if not media_content_id:
+            fallback_root = self._build_configured_sources_browse_root()
+            if fallback_root is not None:
+                return fallback_root
+
+        if last_error is not None and not is_media_source_request:
+            _LOGGER.warning(
+                "Unable to browse native media from AGS speaker candidates: %s",
+                last_error,
+            )
+            raise last_error
+
+        try:
+            return await media_source.async_browse_media(
+                self.hass,
+                media_content_id,
+            )
+        except TypeError:
+            return await media_source.async_browse_media(
+                self.hass,
+                media_content_type,
+                media_content_id,
+            )
 
     # Implement methods to control the AGS Primary Speaker
 
@@ -959,13 +1925,17 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     async def async_turn_on(self):
         """Turn on."""
+        _LOGGER.info("AGS: Turning on system via media player")
         self.hass.data['switch_media_system_state'] = True
-        await self.async_update()
+        await update_ags_sensors(self.ags_config, self.hass)
+        self.async_write_ha_state()
 
     async def async_turn_off(self):
         """Turn off."""
+        _LOGGER.info("AGS: Turning off system via media player")
         self.hass.data['switch_media_system_state'] = False
-        await self.async_update()
+        await update_ags_sensors(self.ags_config, self.hass)
+        self.async_write_ha_state()
 
     async def async_media_previous_track(self):
         """Previous track."""
@@ -975,7 +1945,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 'entity_id': target_entity_id
             })
             await self.async_update()
-  
+
     async def async_media_seek(self, position):
         """Seek to a specific point in the media on the primary speaker."""
         target_entity_id = self._get_command_target_entity_id()
@@ -985,20 +1955,31 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 'seek_position': position
             })
             await self.async_update()
+
+    def _get_tv_source_list(self):
+        """Return source inputs from the active TV/OTT control target."""
+        if self._get_source_mode() != "tv":
+            return []
+        target_entity_id = self._get_command_target_entity_id()
+        state = self.hass.states.get(target_entity_id) if target_entity_id else None
+        source_list = state.attributes.get("source_list") if state else None
+        if not isinstance(source_list, (list, tuple)):
+            return []
+        return [str(source).strip() for source in source_list if str(source or "").strip()]
+
     @property
     def source_list(self):
-        """List of available sources."""
-        sources = [source_dict["Source"] for source_dict in self.hass.data['ags_service']['Sources']]
+        """Return the current AGS source list for music or TV/OTT mode."""
+        self._refresh_from_data()
+        tv_sources = self._get_tv_source_list()
+        if tv_sources:
+            return tv_sources
 
-        # Merge sources from the primary speaker if available
-        reference_state = self._get_reference_player_state()
-        if reference_state and reference_state.attributes.get('source_list'):
-            speaker_sources = reference_state.attributes.get('source_list')
-            for src in speaker_sources:
-                if src not in sources:
-                    sources.append(src)
-
-        return sources
+        return [
+            source["Source"]
+            for source in combine_source_inventory(self.hass.data.get(DOMAIN, {}))
+            if source.get("Source")
+        ]
 
     @property
     def source(self):
@@ -1006,37 +1987,59 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         reference_state = self._get_reference_player_state()
         active_source = self._get_state_source_label(reference_state)
         if self.ags_status == "ON TV":
+            if self.hass.data.get(DOMAIN, {}).get("disable_tv_source", False):
+                return self.hass.data.get("ags_media_player_source")
             return active_source or "TV"
-        else:
-            ags_source = self.hass.data.get("ags_media_player_source")
-            current_spk_source = active_source
-            # Once AGS has left TV mode, prefer the remembered AGS source over
-            # a stale speaker-reported "TV" source so the UI reflects the
-            # source AGS is actually trying to restore.
-            if ags_source and current_spk_source == "TV":
-                return ags_source
-            # If the primary speaker is playing a source not in our
-            # ags_media_player_source, reflect it.
-            if current_spk_source and current_spk_source != ags_source:
-                 # Check if the speaker source is one of our globals. If not, just show the speaker source.
-                 is_global = any(s["Source"] == current_spk_source for s in self.hass.data['ags_service']['Sources'])
-                 if not is_global and current_spk_source in self.source_list:
-                      return current_spk_source
-            return ags_source
+
+        ags_data = self.hass.data.get(DOMAIN, {})
+        selected_source = find_source_by_name_or_id(
+            ags_data,
+            self.hass.data.get("ags_media_player_source_id"),
+        )
+        if not selected_source:
+            selected_source = find_source_by_name_or_id(
+                ags_data,
+                self.hass.data.get("ags_media_player_source"),
+            )
+        if selected_source:
+            return selected_source["Source"]
+
+        matched_active = find_source_by_name_or_id(ags_data, active_source)
+        if matched_active:
+            return matched_active["Source"]
+
+        return active_source
 
     def get_source_value_by_name(self, source_name):
-        for source_dict in self.hass.data['ags_service']['Sources']:
-            if source_dict["Source"] == source_name:
-                return source_dict["Source_Value"]
-        return None  # if not found
+        ags_data = self.hass.data.get(DOMAIN, {})
+        source = find_source_by_name_or_id(ags_data, source_name)
+        return source["Source_Value"] if source else None
 
     async def async_select_source(self, source):
         """Select the desired source and play it on the primary speaker."""
-        # Check if source is one of our configured global sources
-        is_global_source = any(source_dict["Source"] == source for source_dict in self.hass.data['ags_service']['Sources'])
+        ags_data = self.hass.data.get(DOMAIN, {})
 
-        if is_global_source:
-            self.hass.data["ags_media_player_source"] = source
+        if source == "TV" and ags_data.get("disable_tv_source", False):
+            return
+
+        tv_sources = self._get_tv_source_list()
+        if tv_sources and source in tv_sources:
+            target_entity_id = self._get_command_target_entity_id()
+            if target_entity_id:
+                await self.hass.services.async_call('media_player', 'select_source', {
+                    'entity_id': target_entity_id,
+                    'source': source
+                })
+            await self.async_update()
+            return
+
+        source_entry = find_source_by_name_or_id(ags_data, source)
+        if source_entry or source == "TV":
+            if source_entry:
+                self.hass.data["ags_media_player_source_id"] = source_entry["id"]
+                self.hass.data["ags_media_player_source"] = source_entry["Source"]
+            else:
+                self.hass.data["ags_media_player_source"] = source
             state_obj = self.hass.states.get("switch.ags_actions")
             actions_enabled = state_obj.state == "on" if state_obj else True
             if actions_enabled:
@@ -1046,7 +2049,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                     ignore_playing=True,
                 )
         else:
-            # It must be a source from the primary speaker itself
+            # It might be a native source from the current control hardware.
             target_entity_id = self._get_command_target_entity_id()
             if target_entity_id:
                 await self.hass.services.async_call('media_player', 'select_source', {
@@ -1054,7 +2057,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                     'source': source
                 })
 
-        await self.async_update()           
+        await self.async_update()
 
     @property
     def shuffle(self):

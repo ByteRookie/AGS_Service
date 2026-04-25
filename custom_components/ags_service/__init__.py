@@ -9,11 +9,23 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.components import websocket_api, persistent_notification
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.panel_custom import async_register_panel
 from homeassistant.components.frontend import add_extra_js_url
-from .ags_service import ensure_action_queue
+from .ags_service import ensure_action_queue, update_ags_sensors
+from .source_utils import (
+    CONF_DEFAULT_SOURCE_ID,
+    CONF_HIDDEN_SOURCE_IDS,
+    CONF_LAST_DISCOVERED_SOURCES,
+    CONF_SOURCE_DISPLAY_NAMES,
+    CONF_SOURCE_FAVORITES,
+    normalize_source_list,
+    normalize_source_storage,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
-FRONTEND_ASSET_VERSION = "2.0.6"
+BACKUP_STORAGE_KEY = "ags_service.backup.json"
+FRONTEND_ASSET_VERSION = "2.2.4"
 
 # Signal for dynamic entity updates
 SIGNAL_AGS_RELOAD = "ags_service_reload"
@@ -45,11 +58,15 @@ CONF_OTT_DEVICE = 'ott_device'
 CONF_OTT_DEVICES = 'ott_devices'
 CONF_BATCH_UNJOIN = 'batch_unjoin'
 CONF_SOURCES = 'Sources'
+CONF_FAVORITE_SOURCES = 'favorite_sources'
 CONF_SOURCE = 'Source'
 CONF_MEDIA_CONTENT_TYPE = 'media_content_type'
 CONF_SOURCE_VALUE = 'Source_Value'
 CONF_SOURCE_DEFAULT = 'source_default'
 CONF_TV_MODE = 'tv_mode'
+CONF_HA_AREA_ID = 'ha_area_id'
+CONF_HA_AREA_NAME = 'ha_area_name'
+CONF_HA_AREA_LINKED = 'ha_area_linked'
 
 TV_MODE_TV_AUDIO = 'tv_audio'
 TV_MODE_NO_MUSIC = 'no_music'
@@ -71,13 +88,6 @@ DEVICE_SCHEMA = vol.Schema(
         vol.Optional(CONF_OTT_DEVICE): cv.entity_id,
         vol.Optional(CONF_OTT_DEVICES): vol.All(cv.ensure_list, [OTT_DEVICE_SCHEMA]),
         vol.Optional(CONF_TV_MODE): vol.In([TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]),
-        vol.Optional("source_overrides"): vol.All(cv.ensure_list, [vol.Schema({
-            vol.Required("mode"): vol.In(["source", "script"]),
-            vol.Required("source_name"): cv.string,
-            vol.Optional("script_entity"): cv.entity_id,
-            vol.Optional("source_value"): cv.string,
-            vol.Optional("run_when_tv_off", default=False): cv.boolean,
-        }, extra=vol.ALLOW_EXTRA)]),
     }, extra=vol.ALLOW_EXTRA
 )
 
@@ -85,11 +95,15 @@ ROOM_SCHEMA = vol.Schema(
     {
         vol.Required("room"): cv.string,
         vol.Required("devices"): vol.All(cv.ensure_list, [DEVICE_SCHEMA]),
+        vol.Optional(CONF_HA_AREA_ID): cv.string,
+        vol.Optional(CONF_HA_AREA_NAME): cv.string,
+        vol.Optional(CONF_HA_AREA_LINKED, default=False): cv.boolean,
     }, extra=vol.ALLOW_EXTRA
 )
 
 SOURCE_SCHEMA = vol.Schema(
     {
+        vol.Optional("id"): cv.string,
         vol.Required("Source"): cv.string,
         vol.Required("Source_Value"): cv.string,
         vol.Required(CONF_MEDIA_CONTENT_TYPE): cv.string,
@@ -101,7 +115,15 @@ SOURCE_SCHEMA = vol.Schema(
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional("rooms"): vol.All(cv.ensure_list, [ROOM_SCHEMA]),
+        vol.Optional(CONF_SOURCE_FAVORITES): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
+        vol.Optional(CONF_HIDDEN_SOURCE_IDS): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional(CONF_SOURCE_DISPLAY_NAMES): dict,
+        vol.Optional(CONF_DEFAULT_SOURCE_ID, default=None): vol.Any(None, cv.string),
+        vol.Optional(CONF_LAST_DISCOVERED_SOURCES): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
+        # Legacy source keys are accepted only for migration.
+        vol.Optional(CONF_FAVORITE_SOURCES): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
         vol.Optional("Sources"): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
+        vol.Optional("ExcludedSources"): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional(CONF_OFF_OVERRIDE, default=False): cv.boolean,
         vol.Optional(CONF_HOMEKIT_PLAYER, default=None): vol.Any(None, cv.string),
         vol.Optional(CONF_CREATE_SENSORS, default=False): cv.boolean,
@@ -125,6 +147,227 @@ CONFIG_SCHEMA = vol.Schema({
 }, extra=vol.ALLOW_EXTRA)
 
 
+def _config_has_user_data(cfg: dict | None) -> bool:
+    """Return true when a config contains user-defined AGS setup."""
+    if not isinstance(cfg, dict):
+        return False
+    return bool(
+        cfg.get("rooms")
+        or cfg.get(CONF_SOURCE_FAVORITES)
+        or cfg.get(CONF_LAST_DISCOVERED_SOURCES)
+        or cfg.get(CONF_FAVORITE_SOURCES)
+        or cfg.get("Sources")
+    )
+
+
+def _merge_missing_config(primary: dict, fallback: dict | None) -> tuple[dict, bool]:
+    """Fill missing or empty top-level config keys from a fallback config."""
+    if not isinstance(fallback, dict) or not fallback:
+        return primary, False
+
+    merged = copy.deepcopy(primary or {})
+    changed = False
+    for key, value in fallback.items():
+        if value is None:
+            continue
+        current = merged.get(key)
+        if key not in merged or current in (None, "", []) or current == {}:
+            merged[key] = copy.deepcopy(value)
+            changed = True
+    return merged, changed
+
+
+def _remove_legacy_homekit_media_player(hass: HomeAssistant) -> None:
+    """Remove the retired AGS HomeKit media-player entity from the registry."""
+    try:
+        registry = er.async_get(hass)
+    except Exception:
+        return
+
+    entries = getattr(registry, "entities", {})
+    iterable = list(entries.values()) if hasattr(entries, "values") else []
+    for entry in iterable:
+        if (
+            getattr(entry, "platform", None) == DOMAIN
+            and getattr(entry, "domain", None) == "media_player"
+            and getattr(entry, "unique_id", None) == "ags_homekit_media_system"
+        ):
+            try:
+                registry.async_remove(entry.entity_id)
+                _LOGGER.info("Removed retired AGS HomeKit media player %s", entry.entity_id)
+            except Exception as err:
+                _LOGGER.debug("Unable to remove retired AGS media player %s: %s", entry.entity_id, err)
+
+
+async def _async_save_config_with_backup(
+    hass: HomeAssistant,
+    config: dict,
+    *,
+    store: Store | None = None,
+) -> None:
+    """Save config and keep a last-known-good backup for storage recovery."""
+    store = store or hass.data[DOMAIN]["store"]
+    backup_store = hass.data[DOMAIN].get("backup_store")
+    if backup_store is None:
+        backup_store = Store(hass, STORAGE_VERSION, BACKUP_STORAGE_KEY)
+        hass.data[DOMAIN]["backup_store"] = backup_store
+
+    current_config = hass.data.get(DOMAIN, {}).get("_stored_config_cache")
+    if _config_has_user_data(current_config):
+        await backup_store.async_save(current_config)
+
+    await store.async_save(config)
+
+    if _config_has_user_data(config):
+        await backup_store.async_save(config)
+
+
+def _registry_values(registry, attr: str) -> list:
+    """Return registry collection values across HA registry API variants."""
+    values = getattr(registry, attr, {})
+    if not values and attr == "areas" and hasattr(registry, "async_list_areas"):
+        values = registry.async_list_areas()
+    if callable(values):
+        try:
+            values = values()
+        except TypeError:
+            values = {}
+    if hasattr(values, "values"):
+        return list(values.values())
+    return list(values or [])
+
+
+def _area_name(area) -> str:
+    return str(getattr(area, "name", "") or getattr(area, "id", "") or "Area")
+
+
+def _device_is_tv_like(hass: HomeAssistant, entity_id: str, entity_entry=None) -> bool:
+    state = hass.states.get(entity_id)
+    attrs = getattr(state, "attributes", {}) or {}
+    candidates = [
+        attrs.get("device_class"),
+        attrs.get("friendly_name"),
+        entity_id,
+        getattr(entity_entry, "original_name", None),
+        getattr(entity_entry, "name", None),
+    ]
+    return any("tv" in str(candidate or "").lower() for candidate in candidates)
+
+
+def _get_ha_areas_with_media_players(hass: HomeAssistant) -> list[dict]:
+    """Return HA areas with media_player entities resolved through registries."""
+    area_registry = ar.async_get(hass)
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+
+    areas = sorted(_registry_values(area_registry, "areas"), key=_area_name)
+    entity_entries = _registry_values(entity_registry, "entities")
+    devices = _registry_values(device_registry, "devices")
+    devices_by_area: dict[str, set[str]] = {}
+    for device in devices:
+        area_id = getattr(device, "area_id", None)
+        device_id = getattr(device, "id", None)
+        if area_id and device_id:
+            devices_by_area.setdefault(area_id, set()).add(device_id)
+
+    result = []
+    for area in areas:
+        area_id = getattr(area, "id", "")
+        if not area_id:
+            continue
+
+        entities = []
+        seen: set[str] = set()
+        for entry in entity_entries:
+            if getattr(entry, "domain", None) != "media_player":
+                continue
+            entry_area_id = getattr(entry, "area_id", None)
+            device_id = getattr(entry, "device_id", None)
+            if entry_area_id != area_id and device_id not in devices_by_area.get(area_id, set()):
+                continue
+            entity_id = getattr(entry, "entity_id", "")
+            if not entity_id or entity_id in seen:
+                continue
+            seen.add(entity_id)
+            state = hass.states.get(entity_id)
+            entities.append(
+                {
+                    "entity_id": entity_id,
+                    "name": (
+                        (getattr(state, "attributes", {}) or {}).get("friendly_name")
+                        or getattr(entry, "original_name", None)
+                        or getattr(entry, "name", None)
+                        or entity_id
+                    ),
+                    "device_type": "tv" if _device_is_tv_like(hass, entity_id, entry) else "speaker",
+                }
+            )
+
+        result.append(
+            {
+                "area_id": area_id,
+                "name": _area_name(area),
+                "media_players": sorted(entities, key=lambda item: item["name"].lower()),
+            }
+        )
+
+    return result
+
+
+def sync_linked_area_rooms(hass: HomeAssistant, raw_cfg: dict | None) -> dict:
+    """Mirror linked AGS rooms to their HA area media players."""
+    cfg = copy.deepcopy(raw_cfg or {})
+    area_map = {
+        area["area_id"]: area
+        for area in _get_ha_areas_with_media_players(hass)
+    }
+
+    next_priority = 1
+    for room in cfg.get("rooms", []) or []:
+        for device in room.get("devices", []) or []:
+            try:
+                next_priority = max(next_priority, int(device.get("priority", 0) or 0) + 1)
+            except (TypeError, ValueError):
+                continue
+
+    for room in cfg.get("rooms", []) or []:
+        area_id = str(room.get(CONF_HA_AREA_ID) or "").strip()
+        if not room.get(CONF_HA_AREA_LINKED) or not area_id or area_id not in area_map:
+            continue
+
+        area = area_map[area_id]
+        existing_by_id = {
+            str(device.get("device_id") or "").strip(): copy.deepcopy(device)
+            for device in room.get("devices", []) or []
+            if str(device.get("device_id") or "").strip()
+        }
+
+        synced_devices = []
+        for entity in area["media_players"]:
+            entity_id = entity["entity_id"]
+            device = existing_by_id.get(entity_id)
+            if device is None:
+                device = {
+                    "device_id": entity_id,
+                    "device_type": entity["device_type"],
+                    "priority": next_priority,
+                    "override_content": "",
+                }
+                next_priority += 1
+            else:
+                device["device_id"] = entity_id
+                device.setdefault("device_type", entity["device_type"])
+                device.setdefault("priority", next_priority)
+                device.setdefault("override_content", "")
+            synced_devices.append(device)
+
+        room["devices"] = synced_devices
+        room[CONF_HA_AREA_NAME] = area["name"]
+        room[CONF_HA_AREA_LINKED] = True
+
+    return cfg
+
+
 def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
     """Normalize runtime config and auto-fix safe conflicts."""
     cfg = copy.deepcopy(raw_cfg or {})
@@ -141,7 +384,8 @@ def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
             if not device_id:
                 continue
             if device_id in seen_devices:
-                raise vol.Invalid(f"Duplicate device entity configured: {device_id}")
+                _LOGGER.warning("Duplicate device entity %s found in room %s, skipping", device_id, room_name)
+                continue
             seen_devices.add(device_id)
 
             normalized_device = copy.deepcopy(device)
@@ -154,6 +398,7 @@ def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
             except (TypeError, ValueError):
                 priority = original_index + 1
             normalized_device["priority"] = max(1, priority)
+            normalized_device.pop("source_overrides", None)
 
             if normalized_device["device_type"] == "tv":
                 normalized_device.setdefault(CONF_TV_MODE, TV_MODE_TV_AUDIO)
@@ -176,57 +421,70 @@ def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
                 key=lambda pair: (pair[1].get("priority", 999), pair[0]),
             )
         ]
-        for index, device in enumerate(ordered_devices, start=1):
-            device["priority"] = index
 
         normalized_rooms.append(
             {
                 **copy.deepcopy(room),
                 "room": room_name,
                 "devices": ordered_devices,
+                CONF_HA_AREA_ID: str(room.get(CONF_HA_AREA_ID) or "").strip(),
+                CONF_HA_AREA_NAME: str(room.get(CONF_HA_AREA_NAME) or "").strip(),
+                CONF_HA_AREA_LINKED: bool(room.get(CONF_HA_AREA_LINKED)),
             }
         )
 
-    normalized_sources = []
-    seen_source_names: set[str] = set()
-    default_assigned = False
+    all_devices = [
+        (room_index, device_index, device)
+        for room_index, room in enumerate(normalized_rooms)
+        for device_index, device in enumerate(room.get("devices", []) or [])
+    ]
+    for rank, (_, _, device) in enumerate(
+        sorted(
+            all_devices,
+            key=lambda item: (item[2].get("priority", 999), item[0], item[1]),
+        ),
+        start=1,
+    ):
+        device["priority"] = rank
 
-    for source in cfg.get("Sources", []) or []:
-        source_name = str(source.get("Source", "")).strip()
-        source_value = str(source.get("Source_Value", "")).strip()
+    source_cfg = normalize_source_storage(cfg)
+    normalized_sources = normalize_source_list(source_cfg.get(CONF_SOURCE_FAVORITES, []))
+    discovered_sources = normalize_source_list(source_cfg.get(CONF_LAST_DISCOVERED_SOURCES, []))
+    known_source_ids = {source["id"] for source in normalized_sources + discovered_sources}
+    hidden_source_ids = [
+        str(item).strip()
+        for item in source_cfg.get(CONF_HIDDEN_SOURCE_IDS, []) or []
+        if str(item).strip()
+    ]
+    source_display_names = {
+        str(key).strip(): str(value).strip()
+        for key, value in (source_cfg.get(CONF_SOURCE_DISPLAY_NAMES, {}) or {}).items()
+        if str(key).strip() and str(value).strip()
+    }
+    default_source_id = str(source_cfg.get(CONF_DEFAULT_SOURCE_ID) or "").strip()
+    if default_source_id and default_source_id not in known_source_ids:
+        default_source_id = ""
 
-        if not source_name or not source_value:
-            continue
-
-        normalized_key = source_name.casefold()
-        if normalized_key in seen_source_names:
-            raise vol.Invalid(f"Duplicate source name configured: {source_name}")
-        seen_source_names.add(normalized_key)
-
-        normalized_source = copy.deepcopy(source)
-        normalized_source["Source"] = source_name
-        normalized_source["Source_Value"] = source_value
-        is_default = bool(normalized_source.get(CONF_SOURCE_DEFAULT)) and not default_assigned
-        normalized_source[CONF_SOURCE_DEFAULT] = is_default
-        default_assigned = default_assigned or is_default
-        normalized_sources.append(normalized_source)
-
-    valid_source_names = {source["Source"] for source in normalized_sources}
+    valid_source_names = {source["Source"] for source in normalized_sources + discovered_sources}
     default_source_schedule = cfg.get("default_source_schedule")
     if default_source_schedule and default_source_schedule.get("source_name") not in valid_source_names:
         default_source_schedule = None
 
-    homekit_player = cfg.get(CONF_HOMEKIT_PLAYER)
-    if homekit_player == "":
-        homekit_player = None
-
-    return {
+    normalized_cfg = {
         **cfg,
         "rooms": normalized_rooms,
-        "Sources": normalized_sources,
-        CONF_HOMEKIT_PLAYER: homekit_player,
+        CONF_SOURCE_FAVORITES: normalized_sources,
+        CONF_HIDDEN_SOURCE_IDS: hidden_source_ids,
+        CONF_SOURCE_DISPLAY_NAMES: source_display_names,
+        CONF_DEFAULT_SOURCE_ID: default_source_id or None,
+        CONF_LAST_DISCOVERED_SOURCES: discovered_sources,
         "default_source_schedule": default_source_schedule,
     }
+    normalized_cfg.pop("Sources", None)
+    normalized_cfg.pop(CONF_FAVORITE_SOURCES, None)
+    normalized_cfg.pop("ExcludedSources", None)
+    normalized_cfg.pop(CONF_HOMEKIT_PLAYER, None)
+    return normalized_cfg
 
 # Add a custom logging handler to capture AGS specific logs
 class AGSLogHandler(logging.Handler):
@@ -252,7 +510,8 @@ logging.getLogger(__name__).setLevel(logging.INFO)
 
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the custom component."""
-    await _async_initialize_runtime(hass, config)
+    # YAML config is passed as the full config dict
+    await _async_initialize_runtime(hass, config.get(DOMAIN, {}), is_yaml=True)
 
     if not hass.config_entries.async_entries(DOMAIN):
         # Legacy YAML mode: discover platforms directly.
@@ -262,72 +521,167 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
     return True
 
+def apply_config(hass: HomeAssistant, cfg: dict):
+    """Apply validated configuration to hass.data."""
+    try:
+        cfg = sanitize_runtime_config(cfg)
+    except vol.Invalid as err:
+        _LOGGER.error("Configuration validation failed: %s", err)
 
-async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+
+    rooms = cfg.get('rooms', [])
+
+    hass.data[DOMAIN].update({
+        'rooms': rooms,
+        CONF_SOURCE_FAVORITES: cfg.get(CONF_SOURCE_FAVORITES, []),
+        CONF_HIDDEN_SOURCE_IDS: cfg.get(CONF_HIDDEN_SOURCE_IDS, []),
+        CONF_SOURCE_DISPLAY_NAMES: cfg.get(CONF_SOURCE_DISPLAY_NAMES, {}),
+        CONF_DEFAULT_SOURCE_ID: cfg.get(CONF_DEFAULT_SOURCE_ID),
+        CONF_LAST_DISCOVERED_SOURCES: cfg.get(CONF_LAST_DISCOVERED_SOURCES, []),
+        'off_override': cfg.get(CONF_OFF_OVERRIDE, False),
+        'create_sensors': cfg.get(CONF_CREATE_SENSORS, False),
+        'default_on': cfg.get(CONF_DEFAULT_ON, False),
+        'static_name': cfg.get(CONF_STATIC_NAME, ""),
+        'disable_tv_source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
+        'interval_sync': cfg.get(CONF_INTERVAL_SYNC, 30),
+        'schedule_entity': cfg.get(CONF_SCHEDULE_ENTITY),
+        'default_source_schedule': cfg.get("default_source_schedule"),
+        'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
+    })
+    hass.data['configured_rooms'] = [room.get('room') for room in rooms if room.get('room')]
+
+async def _async_initialize_runtime(hass: HomeAssistant, config: dict, is_yaml: bool = False):
     """Initialize shared runtime state, storage, websocket endpoints, and panel."""
-    if DOMAIN in hass.data and hass.data[DOMAIN].get("_runtime_initialized"):
-        return True
+    # Ensure domain data exists
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+
+    is_init = hass.data[DOMAIN].get("_runtime_initialized")
+
+    # Track YAML config for migration/merging
+    if is_yaml:
+        hass.data[DOMAIN]["_yaml_config"] = config
 
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     stored_config = await store.async_load()
+    hass.data[DOMAIN]["store"] = store
+    backup_store = Store(hass, STORAGE_VERSION, BACKUP_STORAGE_KEY)
+    backup_config = await backup_store.async_load()
+    hass.data[DOMAIN]["backup_store"] = backup_store
 
-    legacy_config = config.get(DOMAIN, {})
-    
-    if stored_config is None:
-        if legacy_config:
-            # Migration from legacy YAML
-            _LOGGER.info("Migrating legacy AGS configuration to JSON storage")
-            stored_config = legacy_config
-            await store.async_save(stored_config)
-            
-            persistent_notification.async_create(
-                hass,
-                "AGS has migrated to a UI-driven configuration. Please remove the `ags_service:` block from your `configuration.yaml` and restart.",
-                title="AGS Configuration Migrated",
-                notification_id="ags_migration"
-            )
+    if is_init:
+        legacy_config = hass.data[DOMAIN].get("_yaml_config", {})
+        entry_config = config if not is_yaml else {}
+        active_config = stored_config if isinstance(stored_config, dict) else {}
+        if not _config_has_user_data(active_config):
+            if _config_has_user_data(legacy_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring runtime config from YAML"
+                )
+                active_config = copy.deepcopy(legacy_config)
+                await _async_save_config_with_backup(hass, active_config, store=store)
+            elif _config_has_user_data(entry_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring runtime config from config entry"
+                )
+                active_config = copy.deepcopy(entry_config)
+                await _async_save_config_with_backup(hass, active_config, store=store)
+            elif _config_has_user_data(backup_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring runtime config from backup"
+                )
+                active_config = copy.deepcopy(backup_config)
+                await _async_save_config_with_backup(hass, active_config, store=store)
         else:
-            # New installation
-            stored_config = {
-                "rooms": [],
-                "Sources": [],
-                "off_override": False,
-                "create_sensors": True,
-                "interval_sync": 30
-            }
+            for fallback_name, fallback_config in (
+                ("YAML", legacy_config),
+                ("config entry", entry_config),
+            ):
+                if not _config_has_user_data(fallback_config):
+                    continue
+                active_config, merged = _merge_missing_config(
+                    active_config,
+                    fallback_config,
+                )
+                if merged:
+                    _LOGGER.info(
+                        "AGS: Merged missing %s settings into storage",
+                        fallback_name,
+                    )
+                    await _async_save_config_with_backup(hass, active_config, store=store)
 
-    # Internal helper to apply config to hass.data
-    def apply_config(cfg):
-        cfg = sanitize_runtime_config(cfg)
-        # Validate device-specific constraints
-        for room in cfg.get('rooms', []):
-            for device in room.get('devices', []):
-                if (CONF_OTT_DEVICE in device or CONF_OTT_DEVICES in device) and device.get('device_type') != 'tv':
-                    raise vol.Invalid("ott_device is only allowed for devices with device_type 'tv'")
-                if CONF_TV_MODE in device and device.get('device_type') != 'tv':
-                    raise vol.Invalid("tv_mode is only allowed for devices with device_type 'tv'")
-                if device.get('device_type') == 'tv' and CONF_TV_MODE not in device:
-                    device[CONF_TV_MODE] = TV_MODE_TV_AUDIO
+        active_config = sanitize_runtime_config(sync_linked_area_rooms(hass, active_config))
+        await _async_save_config_with_backup(hass, active_config, store=store)
+        hass.data[DOMAIN]["_stored_config_cache"] = copy.deepcopy(active_config)
+        apply_config(hass, active_config)
+        _remove_legacy_homekit_media_player(hass)
+        return True
 
-        hass.data[DOMAIN].update({
-            'rooms': cfg.get('rooms', []),
-            'Sources': cfg.get('Sources', []),
-            'off_override': cfg.get(CONF_OFF_OVERRIDE, False),
-            'homekit_player': cfg.get(CONF_HOMEKIT_PLAYER, None),
-            'create_sensors': cfg.get(CONF_CREATE_SENSORS, False),
-            'default_on': cfg.get(CONF_DEFAULT_ON, False),
-            'static_name': cfg.get(CONF_STATIC_NAME, ""),
-            'disable_tv_source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
-            'disable_Tv_Source': cfg.get(CONF_DISABLE_TV_SOURCE, False),
-            'schedule_entity': cfg.get(CONF_SCHEDULE_ENTITY),
-            'default_source_schedule': cfg.get("default_source_schedule"),
-            'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
-        })
+    legacy_config = hass.data[DOMAIN].get("_yaml_config", {})
+    entry_config = config if not is_yaml else {}
 
-    existing = hass.data.get(DOMAIN, {})
-    hass.data[DOMAIN] = {**existing, 'store': store}
-    apply_config(stored_config)
-    hass.data[DOMAIN]['apply_config'] = apply_config
+    if not isinstance(stored_config, dict):
+        if legacy_config:
+            _LOGGER.info("Migrating legacy AGS configuration to JSON storage")
+            stored_config = copy.deepcopy(legacy_config)
+            await _async_save_config_with_backup(hass, stored_config, store=store)
+        elif _config_has_user_data(entry_config):
+            _LOGGER.info("Migrating AGS config entry data to JSON storage")
+            stored_config = copy.deepcopy(entry_config)
+            await _async_save_config_with_backup(hass, stored_config, store=store)
+        elif _config_has_user_data(backup_config):
+            _LOGGER.warning("Recovering AGS configuration from backup storage")
+            stored_config = copy.deepcopy(backup_config)
+            await _async_save_config_with_backup(hass, stored_config, store=store)
+        else:
+            # Entry data might have something if it's not a fresh install
+            stored_config = config if not is_yaml else {}
+            if not stored_config:
+                stored_config = {
+                    "rooms": [],
+                    CONF_SOURCE_FAVORITES: [],
+                    "off_override": False,
+                    "create_sensors": True,
+                }
+    else:
+        if not _config_has_user_data(stored_config):
+            if _config_has_user_data(legacy_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring from YAML instead of loading blank settings"
+                )
+                stored_config = copy.deepcopy(legacy_config)
+                await _async_save_config_with_backup(hass, stored_config, store=store)
+            elif _config_has_user_data(entry_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring from config entry instead of loading blank settings"
+                )
+                stored_config = copy.deepcopy(entry_config)
+                await _async_save_config_with_backup(hass, stored_config, store=store)
+            elif _config_has_user_data(backup_config):
+                _LOGGER.warning(
+                    "AGS stored config is empty; restoring from backup instead of loading blank settings"
+                )
+                stored_config = copy.deepcopy(backup_config)
+                await _async_save_config_with_backup(hass, stored_config, store=store)
+        else:
+            for fallback_config in (legacy_config, entry_config):
+                if not _config_has_user_data(fallback_config):
+                    continue
+                stored_config, merged = _merge_missing_config(
+                    stored_config,
+                    fallback_config,
+                )
+                if merged:
+                    await _async_save_config_with_backup(hass, stored_config, store=store)
+
+    stored_config = sanitize_runtime_config(sync_linked_area_rooms(hass, stored_config))
+    await _async_save_config_with_backup(hass, stored_config, store=store)
+    apply_config(hass, stored_config)
+    hass.data[DOMAIN]["_stored_config_cache"] = copy.deepcopy(stored_config)
+    hass.data[DOMAIN]['apply_config'] = lambda cfg: apply_config(hass, cfg)
+    _remove_legacy_homekit_media_player(hass)
 
     # Cancel existing action worker if it's already running (from a previous setup)
     if "action_worker" in hass.data[DOMAIN]:
@@ -337,35 +691,41 @@ async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
     await ensure_action_queue(hass)
 
     # Initialize synchronization primitives used for sensor updates
-    hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
+    if "sensor_lock" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["sensor_lock"] = asyncio.Lock()
+    if "status_handler_lock" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["status_handler_lock"] = asyncio.Lock()
 
+    if not hass.data[DOMAIN].get("_frontend_registered"):
+        # Register WebSocket API endpoints
+        websocket_api.async_register_command(hass, ws_get_config)
+        websocket_api.async_register_command(hass, ws_save_config)
+        websocket_api.async_register_command(hass, ws_list_areas)
+        websocket_api.async_register_command(hass, ws_get_logs)
+        websocket_api.async_register_command(hass, ws_refresh_sources)
 
-    # Register WebSocket API endpoints
-    websocket_api.async_register_command(hass, ws_get_config)
-    websocket_api.async_register_command(hass, ws_save_config)
-    websocket_api.async_register_command(hass, ws_get_logs)
+        # Register static path for panel
+        import os
+        panel_path = os.path.join(os.path.dirname(__file__), "frontend")
+        await hass.http.async_register_static_paths([
+            StaticPathConfig("/ags-static", panel_path, True)
+        ])
 
-    # Register static path for panel
-    import os
-    panel_path = os.path.join(os.path.dirname(__file__), "frontend")
-    await hass.http.async_register_static_paths([
-        StaticPathConfig("/ags-static", panel_path, True)
-    ])
+        # Register custom panel
+        await async_register_panel(
+            hass,
+            frontend_url_path="ags-service",
+            webcomponent_name="ags-panel",
+            sidebar_title="AGS Service",
+            sidebar_icon="mdi:account-group",
+            module_url=f"/ags-static/ags-panel.js?v={FRONTEND_ASSET_VERSION}",
+            embed_iframe=False,
+            trust_external=False,
+        )
 
-    # Register custom panel
-    await async_register_panel(
-        hass,
-        frontend_url_path="ags-service",
-        webcomponent_name="ags-panel",
-        sidebar_title="AGS Service",
-        sidebar_icon="mdi:account-group",
-        module_url=f"/ags-static/ags-panel.js?v={FRONTEND_ASSET_VERSION}",
-        embed_iframe=False,
-        trust_external=False,
-    )
-
-    # Register Lovelace Custom Card
-    add_extra_js_url(hass, f"/ags-static/ags-media-card.js?v={FRONTEND_ASSET_VERSION}")
+        # Register Lovelace Custom Card
+        add_extra_js_url(hass, f"/ags-static/ags-media-card.js?v={FRONTEND_ASSET_VERSION}")
+        hass.data[DOMAIN]["_frontend_registered"] = True
 
     hass.data[DOMAIN]["_runtime_initialized"] = True
 
@@ -374,7 +734,7 @@ async def _async_initialize_runtime(hass: HomeAssistant, config: dict):
 
 async def async_setup_entry(hass: HomeAssistant, entry):
     """Set up AGS Service from a config entry."""
-    await _async_initialize_runtime(hass, {DOMAIN: entry.data or {}})
+    await _async_initialize_runtime(hass, entry.data or {}, is_yaml=False)
     await hass.config_entries.async_forward_entry_setups(
         entry, ["sensor", "switch", "media_player"]
     )
@@ -386,21 +746,57 @@ async def async_setup_entry(hass: HomeAssistant, entry):
 @callback
 def ws_get_config(hass, connection, msg):
     """Handle get config command."""
-    config = hass.data[DOMAIN]
+    live_config = hass.data[DOMAIN]
+    config_source = live_config.get("_stored_config_cache") or {
+        "rooms": live_config.get("rooms", []),
+        CONF_SOURCE_FAVORITES: live_config.get(CONF_SOURCE_FAVORITES, []),
+        CONF_HIDDEN_SOURCE_IDS: live_config.get(CONF_HIDDEN_SOURCE_IDS, []),
+        CONF_SOURCE_DISPLAY_NAMES: live_config.get(CONF_SOURCE_DISPLAY_NAMES, {}),
+        CONF_DEFAULT_SOURCE_ID: live_config.get(CONF_DEFAULT_SOURCE_ID),
+        CONF_LAST_DISCOVERED_SOURCES: live_config.get(CONF_LAST_DISCOVERED_SOURCES, []),
+        "off_override": live_config.get("off_override", False),
+        "create_sensors": live_config.get("create_sensors", False),
+        "default_on": live_config.get("default_on", False),
+        "static_name": live_config.get("static_name", ""),
+        "disable_tv_source": live_config.get("disable_tv_source", False),
+        "interval_sync": live_config.get("interval_sync", 30),
+        "schedule_entity": live_config.get("schedule_entity", None),
+        "default_source_schedule": live_config.get("default_source_schedule", None),
+        "batch_unjoin": live_config.get("batch_unjoin", False),
+    }
+    config = sync_linked_area_rooms(hass, config_source)
+    config = sanitize_runtime_config(config)
+    hass.data[DOMAIN]['apply_config'](config)
+    hass.data[DOMAIN]["_stored_config_cache"] = copy.deepcopy(config)
+    store = hass.data[DOMAIN].get("store")
+    if store:
+        hass.async_create_task(_async_save_config_with_backup(hass, config, store=store))
     data = {
         "rooms": config.get("rooms", []),
-        "Sources": config.get("Sources", []),
+        CONF_SOURCE_FAVORITES: config.get(CONF_SOURCE_FAVORITES, []),
+        CONF_HIDDEN_SOURCE_IDS: config.get(CONF_HIDDEN_SOURCE_IDS, []),
+        CONF_SOURCE_DISPLAY_NAMES: config.get(CONF_SOURCE_DISPLAY_NAMES, {}),
+        CONF_DEFAULT_SOURCE_ID: config.get(CONF_DEFAULT_SOURCE_ID),
+        CONF_LAST_DISCOVERED_SOURCES: config.get(CONF_LAST_DISCOVERED_SOURCES, []),
         "off_override": config.get("off_override", False),
-        "homekit_player": config.get("homekit_player", None),
         "create_sensors": config.get("create_sensors", False),
         "default_on": config.get("default_on", False),
         "static_name": config.get("static_name", ""),
         "disable_tv_source": config.get("disable_tv_source", False),
+        "interval_sync": config.get("interval_sync", 30),
         "schedule_entity": config.get("schedule_entity", None),
         "default_source_schedule": config.get("default_source_schedule", None),
         "batch_unjoin": config.get("batch_unjoin", False),
     }
     connection.send_result(msg["id"], data)
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "ags_service/areas/list",
+})
+@callback
+def ws_list_areas(hass, connection, msg):
+    """Expose HA areas and media players for room import."""
+    connection.send_result(msg["id"], {"areas": _get_ha_areas_with_media_players(hass)})
 
 @websocket_api.websocket_command({
     vol.Required("type"): "ags_service/config/save",
@@ -410,26 +806,51 @@ def ws_get_config(hass, connection, msg):
 def ws_save_config(hass, connection, msg):
     """Handle save config command with validation and hot-reload."""
     new_config = msg["config"]
-    
+
     # Phase 2: Configuration Validation
     try:
         validated_config = CONFIG_SCHEMA({DOMAIN: new_config})[DOMAIN]
+        validated_config = sync_linked_area_rooms(hass, validated_config)
         validated_config = sanitize_runtime_config(validated_config)
     except vol.Invalid as err:
         connection.send_error(msg["id"], "invalid_config", str(err))
         return
 
+    existing_config = hass.data[DOMAIN].get("_stored_config_cache")
+    yaml_config = hass.data[DOMAIN].get("_yaml_config")
+    if (
+        not _config_has_user_data(validated_config)
+        and (
+            _config_has_user_data(existing_config)
+            or _config_has_user_data(yaml_config)
+        )
+        and not new_config.get("_allow_empty_config")
+    ):
+        connection.send_error(
+            msg["id"],
+            "empty_config_blocked",
+            "Refusing to overwrite existing AGS rooms or sources with an empty config.",
+        )
+        return
+
     # Update live memory
     hass.data[DOMAIN]['apply_config'](validated_config)
-    
+    hass.data[DOMAIN]["source_list_revision"] = int(
+        hass.data[DOMAIN].get("source_list_revision", 0) or 0
+    ) + 1
+
     # Phase 2: Hot-Reload Engine
     # Signal entities to refresh themselves based on new config
     async_dispatcher_send(hass, SIGNAL_AGS_RELOAD)
-    
+
     # Trigger storage save
     store = hass.data[DOMAIN]["store"]
-    hass.async_create_task(store.async_save(validated_config))
-    
+    hass.async_create_task(
+        _async_save_config_with_backup(hass, validated_config, store=store)
+    )
+    hass.data[DOMAIN]["_stored_config_cache"] = copy.deepcopy(validated_config)
+    hass.async_create_task(update_ags_sensors(validated_config, hass))
+
     connection.send_result(msg["id"])
 
 @websocket_api.websocket_command({
@@ -440,15 +861,41 @@ def ws_get_logs(hass, connection, msg):
     """Expose AGS specific logs via WebSocket."""
     connection.send_result(msg["id"], ags_log_handler.logs)
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "ags_service/sources/refresh",
+})
+@callback
+def ws_refresh_sources(hass, connection, msg):
+    """Trigger AGS media-browser source discovery on demand."""
+    media_player_entity = hass.data.get(DOMAIN, {}).get("media_player_entity")
+    if media_player_entity is None or not hasattr(media_player_entity, "_async_refresh_source_inventory"):
+        connection.send_error(
+            msg["id"],
+            "media_player_missing",
+            "AGS media player entity is not ready.",
+        )
+        return
+
+    async def _refresh():
+        try:
+            media_player_entity._source_inventory_enabled = True
+            await media_player_entity._async_refresh_source_inventory(force=True)
+            config = hass.data.get(DOMAIN, {})
+            connection.send_result(
+                msg["id"],
+                {
+                    "source_favorites": len(config.get(CONF_SOURCE_FAVORITES, []) or []),
+                    "last_discovered_sources": len(config.get(CONF_LAST_DISCOVERED_SOURCES, []) or []),
+                    "default_source_id": config.get(CONF_DEFAULT_SOURCE_ID),
+                },
+            )
+        except Exception as err:
+            connection.send_error(msg["id"], "refresh_failed", str(err))
+
+    hass.async_create_task(_refresh())
+
 async def async_unload_entry(hass, entry):
     """Unload a config entry and cancel background tasks."""
-    # Cancel the action queue worker
-    if DOMAIN in hass.data and "action_worker" in hass.data[DOMAIN]:
-        hass.data[DOMAIN]["action_worker"].cancel()
-        hass.data[DOMAIN].pop("action_worker", None)
-        hass.data[DOMAIN].pop("action_queue", None)
-        hass.data[DOMAIN].pop("_runtime_initialized", None)
-    
     # Unload platforms (sensor, switch, media_player)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "media_player"])
     return unload_ok
