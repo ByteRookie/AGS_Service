@@ -34,7 +34,7 @@ DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
 BACKUP_STORAGE_KEY = "ags_service.backup.json"
-FRONTEND_ASSET_VERSION = "2.2.4"
+FRONTEND_ASSET_VERSION = "2.2.11"
 
 # Signal for dynamic entity updates
 SIGNAL_AGS_RELOAD = "ags_service_reload"
@@ -766,11 +766,6 @@ def ws_get_config(hass, connection, msg):
     }
     config = sync_linked_area_rooms(hass, config_source)
     config = sanitize_runtime_config(config)
-    hass.data[DOMAIN]['apply_config'](config)
-    hass.data[DOMAIN]["_stored_config_cache"] = copy.deepcopy(config)
-    store = hass.data[DOMAIN].get("store")
-    if store:
-        hass.async_create_task(_async_save_config_with_backup(hass, config, store=store))
     data = {
         "rooms": config.get("rooms", []),
         CONF_SOURCE_FAVORITES: config.get(CONF_SOURCE_FAVORITES, []),

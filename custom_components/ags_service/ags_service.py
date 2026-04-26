@@ -299,6 +299,156 @@ def resolve_music_source_name(ags_config, hass, preferred_source=None):
 
     return source
 
+
+def _ranked_available_speakers_for_source(ags_config, hass):
+    """Return active speakers first, then configured speakers, in AGS rank order."""
+    ranked = get_ranked_speaker_entity_ids(ags_config.get("rooms", []))
+    active = set(hass.data.get("active_speakers", []) or [])
+    ordered = [entity_id for entity_id in ranked if entity_id in active] or ranked
+    available = []
+    for entity_id in ordered:
+        state = hass.states.get(entity_id)
+        if state is not None and state.state.lower() not in TV_IGNORE_STATES:
+            available.append(entity_id)
+    return available
+
+
+def _source_available_on_speaker(source, speaker_entity_id):
+    """Return true when source discovery knows a source is available on a speaker."""
+    available_on = source.get("available_on") or []
+    if not available_on:
+        return True
+    return speaker_entity_id in available_on
+
+
+def _pick_source_and_speaker(configured_sources, source_entry, primary_speaker, ags_config, hass):
+    """Fail over source playback using per-speaker browser discovery metadata."""
+    if not source_entry or not primary_speaker:
+        return source_entry, primary_speaker
+
+    if _source_available_on_speaker(source_entry, primary_speaker):
+        return source_entry, primary_speaker
+
+    ranked_speakers = _ranked_available_speakers_for_source(ags_config, hass)
+    for entity_id in ranked_speakers:
+        if _source_available_on_speaker(source_entry, entity_id):
+            hass.data["primary_speaker"] = entity_id
+            return source_entry, entity_id
+
+    for fallback_source in configured_sources:
+        if fallback_source.get("id") == source_entry.get("id"):
+            continue
+        if _source_available_on_speaker(fallback_source, primary_speaker):
+            return fallback_source, primary_speaker
+
+    return source_entry, primary_speaker
+
+
+def _browse_attr(node, name, default=None):
+    if isinstance(node, dict):
+        return node.get(name, default)
+    return getattr(node, name, default)
+
+
+def _browse_children(node):
+    children = _browse_attr(node, "children", []) or []
+    return list(children) if isinstance(children, (list, tuple)) else []
+
+
+def _extract_browse_response(response, entity_id):
+    if isinstance(response, dict):
+        if entity_id in response:
+            return response[entity_id]
+        if len(response) == 1:
+            return next(iter(response.values()))
+    return response
+
+
+async def _browse_media_node(hass, entity_id, media_type, media_id):
+    payload = {"entity_id": entity_id}
+    if media_type:
+        payload["media_content_type"] = media_type
+    if media_id:
+        payload["media_content_id"] = media_id
+    response = await hass.services.async_call(
+        "media_player",
+        "browse_media",
+        payload,
+        blocking=True,
+        return_response=True,
+    )
+    return _extract_browse_response(response, entity_id)
+
+
+async def _find_first_playable_in_browse_node(
+    hass,
+    entity_id,
+    node,
+    *,
+    max_depth=3,
+    depth=0,
+    seen=None,
+):
+    """Return the first playable child in a bounded media-browser folder walk."""
+    if node is None or depth > max_depth:
+        return None
+    if seen is None:
+        seen = set()
+
+    for child in _browse_children(node):
+        child_id = str(_browse_attr(child, "media_content_id", "") or "").strip()
+        child_type = str(_browse_attr(child, "media_content_type", "") or "").strip()
+        can_play = bool(_browse_attr(child, "can_play", False))
+        can_expand = bool(_browse_attr(child, "can_expand", False) or _browse_children(child))
+
+        if can_play and child_id and child_type:
+            return {
+                "media_content_id": child_id,
+                "media_content_type": child_type,
+            }
+
+        if not can_expand or not child_id:
+            continue
+
+        node_key = (child_type, child_id)
+        if node_key in seen:
+            continue
+        seen.add(node_key)
+
+        nested = child
+        if not _browse_children(child):
+            try:
+                nested = await _browse_media_node(hass, entity_id, child_type, child_id)
+            except Exception as err:
+                _LOGGER.debug("Unable to expand favorited source folder %s: %s", child_id, err)
+                continue
+        playable = await _find_first_playable_in_browse_node(
+            hass,
+            entity_id,
+            nested,
+            max_depth=max_depth,
+            depth=depth + 1,
+            seen=seen,
+        )
+        if playable:
+            return playable
+    return None
+
+
+async def _resolve_folder_source_to_playable(hass, entity_id, source_info):
+    """Resolve a favorited folder source to its first playable child."""
+    try:
+        root = await _browse_media_node(
+            hass,
+            entity_id,
+            source_info.get("type"),
+            source_info.get("value"),
+        )
+    except Exception as err:
+        _LOGGER.warning("Unable to browse favorited folder source %s: %s", source_info.get("value"), err)
+        return None
+    return await _find_first_playable_in_browse_node(hass, entity_id, root)
+
 ### Sensor Functions ###
 
 ## update all Sensors Function ##
@@ -924,14 +1074,6 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
             _LOGGER.error("No available speakers found for source selection")
             return
 
-        source_dict = {
-            src["Source"]: {
-                "id": src.get("id"),
-                "value": src["Source_Value"],
-                "type": src.get("media_content_type") or "music",
-            }
-            for src in configured_sources
-        }
         disable_tv_source = ags_config.get("disable_tv_source", False)
 
         if source == "TV":
@@ -954,6 +1096,30 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
 
         if source == "Unknown" or status != "ON":
             return
+
+        if source_entry:
+            source_entry, primary_speaker_entity_id = _pick_source_and_speaker(
+                configured_sources,
+                source_entry,
+                primary_speaker_entity_id,
+                ags_config,
+                hass,
+            )
+            source = source_entry["Source"]
+            hass.data["ags_media_player_source_id"] = source_entry["id"]
+            hass.data["ags_media_player_source"] = source
+            state = hass.states.get(primary_speaker_entity_id)
+
+        source_dict = {
+            src["Source"]: {
+                "id": src.get("id"),
+                "value": src["Source_Value"],
+                "type": src.get("media_content_type") or "music",
+                "can_play": src.get("can_play", True),
+                "can_expand": src.get("can_expand", False),
+            }
+            for src in configured_sources
+        }
 
         # When coming back from TV mode, some speakers can stay logically stuck
         # on the TV input unless we explicitly push them off it before starting
@@ -982,6 +1148,25 @@ async def ags_select_source(ags_config, hass, ignore_playing: bool = False):
         if not source_info:
             _LOGGER.warning("Source %s was selected but is not available in AGS sources", source)
             return
+        if source_info.get("can_play") is False:
+            if not source_info.get("can_expand"):
+                _LOGGER.warning("Source %s is not playable", source)
+                return
+            playable = await _resolve_folder_source_to_playable(
+                hass,
+                primary_speaker_entity_id,
+                source_info,
+            )
+            if not playable:
+                _LOGGER.warning("Source %s folder did not contain a playable item", source)
+                return
+            source_info = {
+                **source_info,
+                "value": playable["media_content_id"],
+                "type": playable["media_content_type"],
+                "can_play": True,
+                "can_expand": False,
+            }
 
         media_id = str(source_info["value"])
         media_type = source_info["type"]

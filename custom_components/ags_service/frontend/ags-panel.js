@@ -20,6 +20,9 @@ class AGSPanel extends HTMLElement {
     this._resetScrollAfterRender = false;
     this.loadingBrowseResults = false;
     this.refreshingSources = false;
+    this.loadingSourceCatalog = false;
+    this.browserCatalogSources = [];
+    this._sourceCatalogLoaded = false;
     this._initRunId = 0;
     this.sourceSearch = "";
     this.sourcesFolderView = false;
@@ -29,6 +32,7 @@ class AGSPanel extends HTMLElement {
     this.areaImportError = "";
     this.haAreas = [];
     this.draggingDeviceKey = null;
+    this.draggingSourceId = null;
     this._configDirty = false;
     this._savingConfig = false;
     this._saveStatus = "";
@@ -409,10 +413,14 @@ class AGSPanel extends HTMLElement {
     }
     normalized.source_favorites = normalized.source_favorites
       .filter((source) => !this.isLegacyConfigSource(source))
-      .map((source) => ({
+      .map((source, sourceIndex) => ({
         ...source,
+        priority: Number.isFinite(Number(source.priority)) && Number(source.priority) > 0
+          ? Number(source.priority)
+          : sourceIndex + 1,
         source_default: source.id === normalized.default_source_id,
-      }));
+      }))
+      .sort((a, b) => (a.priority || 999) - (b.priority || 999));
     if (
       normalized.default_source_id
       && !normalized.source_favorites.some((source) => source.id === normalized.default_source_id)
@@ -443,6 +451,17 @@ class AGSPanel extends HTMLElement {
     return String(source?.id || (value ? `${mediaType}::${value}` : "")).trim();
   }
 
+  getBrowserSourceId(item) {
+    const mediaType = String(item?.media_content_type || "music").trim() || "music";
+    const value = String(item?.media_content_id || item?.Source_Value || "").trim();
+    const title = String(item?.title || item?.Source || "").trim();
+    const path = Array.isArray(item?.folder_path)
+      ? item.folder_path.map((part) => String(part || "").trim().toLowerCase()).filter(Boolean).join("::")
+      : "";
+    if (!value) return "";
+    return `browser::${[mediaType.toLowerCase(), value.toLowerCase(), ...(path ? path.split("::") : []), title.toLowerCase()].join("::")}`;
+  }
+
   normalizeSourceEntries(sources) {
     const seenIds = new Set();
     const seenNames = new Set();
@@ -463,6 +482,10 @@ class AGSPanel extends HTMLElement {
           ...(source?.origin ? { origin: String(source.origin) } : {}),
           ...(source?.folder_path ? { folder_path: source.folder_path } : {}),
           ...(source?.priority ? { priority: Number(source.priority) } : {}),
+          ...(source?.can_play !== undefined ? { can_play: Boolean(source.can_play) } : {}),
+          ...(source?.can_expand !== undefined ? { can_expand: Boolean(source.can_expand) } : {}),
+          ...(source?.media_class ? { media_class: String(source.media_class) } : {}),
+          ...(Array.isArray(source?.available_on) ? { available_on: source.available_on } : {}),
         };
       })
       .filter((source) => {
@@ -500,10 +523,17 @@ class AGSPanel extends HTMLElement {
       media_content_type: source.media_content_type,
       source_default: source.default || source.source_default,
       folder_path: source.folder_path,
+      can_play: source.can_play,
+      can_expand: source.can_expand,
+      media_class: source.media_class,
+      available_on: source.available_on,
     })));
   }
 
   getAllKnownSources(config = this.config) {
+    if (this.browserCatalogSources.length) {
+      return this.browserCatalogSources;
+    }
     const fromEntity = this.getAgsSourceEntries("ags_all_sources");
     if (fromEntity.length) return fromEntity;
 
@@ -600,6 +630,8 @@ class AGSPanel extends HTMLElement {
       const result = await this.hass.callWS({ type: "ags_service/sources/refresh" });
       const config = await this.hass.callWS({ type: "ags_service/config/get" });
       this.config = this.normalizeConfig(config);
+      this._sourceCatalogLoaded = false;
+      await this.ensureSourceCatalogLoaded(true);
       this.logs = await this.hass.callWS({ type: "ags_service/get_logs" });
       this.hass.callService("persistent_notification", "create", {
         title: "AGS Source Refresh",
@@ -799,13 +831,13 @@ class AGSPanel extends HTMLElement {
   getBrowseEntityCandidates() {
     const ags = this.getAgsState();
     const candidates = [
+      ags?.entity_id,
       ags?.attributes?.control_device_id,
       ags?.attributes?.browse_entity_id,
       ags?.attributes?.primary_speaker,
       ags?.attributes?.preferred_primary_speaker,
       ...(ags?.attributes?.active_speakers || []),
       this.getPreferredSpeakerEntityId(),
-      ags?.entity_id,
     ];
     const seen = new Set();
     return candidates.filter((entityId) => {
@@ -1193,6 +1225,9 @@ class AGSPanel extends HTMLElement {
     if (shouldAutosave) {
       await this.saveConfig({ silent: true });
     }
+    if (tab === "sources") {
+      this.ensureSourceCatalogLoaded();
+    }
   }
 
   updateConfig(path, value) {
@@ -1499,6 +1534,55 @@ class AGSPanel extends HTMLElement {
     this.draggingDeviceKey = null;
     if (sourceKey) {
       this.moveDeviceRankByKey(sourceKey, targetIndex);
+    }
+  }
+
+  getRankedSources() {
+    return [...(this.config?.source_favorites || [])]
+      .filter((source) => !this.isLegacyConfigSource(source))
+      .sort((a, b) => (a.priority || 999) - (b.priority || 999));
+  }
+
+  moveSourceRankById(sourceId, targetIndex) {
+    const ranked = this.getRankedSources();
+    const fromIndex = ranked.findIndex((source) => this.getSourceId(source) === sourceId);
+    if (fromIndex < 0 || targetIndex < 0 || targetIndex >= ranked.length || fromIndex === targetIndex) {
+      return;
+    }
+    const [moved] = ranked.splice(fromIndex, 1);
+    ranked.splice(targetIndex, 0, moved);
+    ranked.forEach((source, index) => {
+      source.priority = index + 1;
+    });
+    this.config.source_favorites = ranked;
+    this.config = this.normalizeConfig(this.config);
+    this.markConfigDirty();
+    this.render();
+  }
+
+  moveSourceRank(sourceId, direction) {
+    const ranked = this.getRankedSources();
+    const currentIndex = ranked.findIndex((source) => this.getSourceId(source) === sourceId);
+    this.moveSourceRankById(sourceId, currentIndex + direction);
+  }
+
+  setSourcePriority(sourceId, requestedPriority) {
+    const safePriority = Math.max(1, parseInt(requestedPriority, 10) || 1);
+    this.moveSourceRankById(sourceId, safePriority - 1);
+  }
+
+  handleSourceDragStart(event, sourceId) {
+    this.draggingSourceId = sourceId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", sourceId);
+  }
+
+  handleSourceDrop(event, targetIndex) {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain") || this.draggingSourceId;
+    this.draggingSourceId = null;
+    if (sourceId) {
+      this.moveSourceRankById(sourceId, targetIndex);
     }
   }
 
@@ -1825,13 +1909,17 @@ class AGSPanel extends HTMLElement {
     }
 
     if (node.can_play && node.title && node.media_content_id) {
-      const key = `${node.media_content_type || "media"}::${node.media_content_id}`;
+      const key = this.getBrowserSourceId(node);
       if (!seen.has(key)) {
         seen.add(key);
         results.push({
+          id: key,
           Source: node.title,
           Source_Value: node.media_content_id,
           media_content_type: node.media_content_type || "music",
+          can_play: Boolean(node.can_play),
+          can_expand: Boolean(node.can_expand),
+          origin: "user_favorite",
         });
       }
     }
@@ -1841,6 +1929,117 @@ class AGSPanel extends HTMLElement {
     }
 
     return results;
+  }
+
+  sourceFromBrowseItem(item, folderPath = []) {
+    if (!item || typeof item !== "object" || this.isEmptyBrowsePlaceholder(item)) {
+      return null;
+    }
+    const mediaContentId = String(item.media_content_id || "").trim();
+    if (!mediaContentId) {
+      return null;
+    }
+    const mediaContentType = String(item.media_content_type || "music").trim() || "music";
+    const title = String(item.title || item.name || mediaContentId).trim();
+    const canExpand = Boolean(item.can_expand || (Array.isArray(item.children) && item.children.length));
+    const canPlay = Boolean(item.can_play || (!canExpand && mediaContentType && mediaContentId));
+    if (!canPlay && !canExpand) {
+      return null;
+    }
+    const sourceLike = {
+      ...item,
+      title,
+      media_content_id: mediaContentId,
+      media_content_type: mediaContentType,
+      folder_path: folderPath,
+    };
+    return {
+      id: this.getBrowserSourceId(sourceLike),
+      Source: title,
+      Source_Value: mediaContentId,
+      media_content_type: mediaContentType,
+      can_play: canPlay,
+      can_expand: canExpand,
+      media_class: String(item.media_class || mediaContentType || (canExpand ? "folder" : "music")).trim(),
+      folder_path: folderPath,
+      origin: "media_browser",
+    };
+  }
+
+  appendBrowseCatalogItem(item, folderPath, results, seen) {
+    const source = this.sourceFromBrowseItem(item, folderPath);
+    if (!source) return;
+    const id = this.getSourceId(source);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    results.push(source);
+  }
+
+  async browseCatalogNode(entityId, node = null, folderPath = [], results = [], seen = new Set(), depth = 0) {
+    if (results.length >= 250 || depth > 2) {
+      return results;
+    }
+
+    let response = node;
+    if (!response || this.hasCompleteBrowseTarget(response)) {
+      const payload = { type: "media_player/browse_media", entity_id: entityId };
+      if (response) {
+        let type = String(response.media_content_type || "").trim();
+        let id = String(response.media_content_id || "").trim();
+        if (id && !type) type = response.can_expand ? "library" : "music";
+        if (type) payload.media_content_type = type;
+        if (id) payload.media_content_id = id;
+      }
+      response = await this.hass.callWS(payload);
+    }
+
+    const normalized = this.normalizeBrowseResponse(response);
+    const children = Array.isArray(normalized?.children) ? normalized.children : [];
+    for (const child of children) {
+      if (results.length >= 250) break;
+      const childTitle = String(child.title || child.name || "").trim();
+      this.appendBrowseCatalogItem(child, folderPath, results, seen);
+      const canExpand = Boolean(child.can_expand || (Array.isArray(child.children) && child.children.length));
+      if (!canExpand) continue;
+      const nextPath = [...folderPath, childTitle || "Folder"];
+      if (Array.isArray(child.children) && child.children.length) {
+        await this.browseCatalogNode(entityId, child, nextPath, results, seen, depth + 1);
+      } else if (this.hasCompleteBrowseTarget(child)) {
+        try {
+          await this.browseCatalogNode(entityId, child, nextPath, results, seen, depth + 1);
+        } catch (error) {
+          console.warn("AGS source catalog crawl skipped folder", child.title, error);
+        }
+      }
+    }
+    return results;
+  }
+
+  async ensureSourceCatalogLoaded(force = false) {
+    if (!this.hass || this.loadingSourceCatalog) return;
+    if (!force && this._sourceCatalogLoaded) return;
+    this.loadingSourceCatalog = true;
+    this.render();
+    try {
+      const candidates = this.getBrowseEntityCandidates();
+      let catalog = [];
+      for (const entityId of candidates) {
+        try {
+          const seen = new Set();
+          catalog = await this.browseCatalogNode(entityId, null, [], [], seen);
+          if (catalog.length) break;
+        } catch (error) {
+          console.warn("AGS source catalog browse failed for", entityId, error);
+        }
+      }
+      this.browserCatalogSources = this.normalizeSourceEntries(catalog);
+      this._sourceCatalogLoaded = true;
+    } catch (error) {
+      this.error = error.message || String(error);
+    } finally {
+      this.loadingSourceCatalog = false;
+      this.render();
+    }
   }
 
   async importSpeakerSourceList() {
@@ -2029,9 +2228,13 @@ class AGSPanel extends HTMLElement {
     if (item.can_play) {
       const added = this.mergeSources([
         {
+          id: this.getBrowserSourceId(item),
           Source: item.title,
           Source_Value: item.media_content_id,
           media_content_type: item.media_content_type || "music",
+          can_play: Boolean(item.can_play),
+          can_expand: Boolean(item.can_expand),
+          origin: "user_favorite",
         },
       ]);
       if (!added) {
@@ -2619,17 +2822,32 @@ class AGSPanel extends HTMLElement {
   }
 
   renderSources() {
+    if (!this._sourceCatalogLoaded && !this.loadingSourceCatalog) {
+      setTimeout(() => this.ensureSourceCatalogLoaded(), 0);
+    }
     const visibleSources = this.getFilteredSourceRows(this.getVisibleSources());
     const hiddenSources = this.getFilteredSourceRows(this.getHiddenSources());
+    const rankedSourceIds = this.getRankedSources().map((source) => this.getSourceId(source));
     const sourceRow = (source, index, hidden = false) => {
       const id = this.getSourceId(source);
+      const rankIndex = hidden ? index : Math.max(0, rankedSourceIds.indexOf(id));
       const name = this.getSourceDisplayName(source);
       const isDefault = this.config.default_source_id === id || source.source_default;
       const mediaType = this.humanizeBrowseLabel(source.media_content_type || "music", "Music");
       const folderLabel = this.getSourceFolderLabel(source);
       return `
-        <div class="list-select" style="padding:12px 14px; min-height:0; gap:12px; align-items:center;">
-          <div style="width:28px; height:28px; border-radius:6px; background:${hidden ? 'var(--ags-subtle-strong)' : 'var(--ags-primary)'}; color:${hidden ? 'inherit' : 'var(--ags-on-primary)'}; display:flex; align-items:center; justify-content:center; font-size:0.72rem; font-weight:900; flex-shrink:0;">${index + 1}</div>
+        <div
+          class="list-select source-rank-row"
+          style="padding:12px 14px; min-height:0; gap:12px; align-items:center;"
+          ${hidden ? "" : `
+            draggable="true"
+            ondragstart="this.getRootNode().host.handleSourceDragStart(event, '${this.escapeJsString(id)}')"
+            ondragover="event.preventDefault()"
+            ondrop="this.getRootNode().host.handleSourceDrop(event, ${rankIndex})"
+          `}
+        >
+          ${hidden ? "" : `<div class="drag-handle" title="Drag to rank"><ha-icon icon="mdi:drag"></ha-icon></div>`}
+          <div class="rank-badge">${rankIndex + 1}</div>
           <div style="flex:1; min-width:0;">
             ${hidden ? `
               <div style="font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${this.escapeHtml(name)}</div>
@@ -2652,6 +2870,8 @@ class AGSPanel extends HTMLElement {
               <button class="secondary-btn ${isDefault ? 'active' : ''}" style="padding:6px; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center;" title="Set Default" onclick="this.getRootNode().host.setDefaultSourceId('${this.escapeJsString(id)}')">
                 <ha-icon icon="${isDefault ? 'mdi:star' : 'mdi:star-outline'}" style="--mdc-icon-size: 18px;"></ha-icon>
               </button>
+              <button class="secondary-btn icon-only-btn" title="Move up" ${rankIndex === 0 ? "disabled" : ""} onclick="this.getRootNode().host.moveSourceRank('${this.escapeJsString(id)}', -1)"><ha-icon icon="mdi:chevron-up"></ha-icon></button>
+              <button class="secondary-btn icon-only-btn" title="Move down" ${rankIndex === rankedSourceIds.length - 1 ? "disabled" : ""} onclick="this.getRootNode().host.moveSourceRank('${this.escapeJsString(id)}', 1)"><ha-icon icon="mdi:chevron-down"></ha-icon></button>
               <button class="secondary-btn" style="padding:6px; border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center;" title="Hide from Source List" onclick="this.getRootNode().host.hideSource('${this.escapeJsString(id)}')">
                 <ha-icon icon="mdi:eye-off" style="--mdc-icon-size: 18px;"></ha-icon>
               </button>
@@ -2662,6 +2882,9 @@ class AGSPanel extends HTMLElement {
     };
     const sourceRows = (sources, hidden = false) => {
       if (!sources.length) {
+        if (hidden && this.loadingSourceCatalog) {
+          return '<div class="empty-state">Loading media browser sources...</div>';
+        }
         return hidden
           ? '<div class="empty-state">No matching discovered sources outside Music Sources.</div>'
           : '<div class="empty-state">No matching music sources. Add one from Hidden Sources.</div>';
@@ -3511,7 +3734,8 @@ class AGSPanel extends HTMLElement {
         }
 
         .device-title-row,
-        .rank-row {
+        .rank-row,
+        .source-rank-row {
           display: flex;
           align-items: center;
           gap: 12px;

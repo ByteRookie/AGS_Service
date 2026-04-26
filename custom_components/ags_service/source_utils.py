@@ -19,11 +19,88 @@ SOURCE_ORIGIN_LEGACY_CONFIG = "legacy_config"
 SOURCE_ORIGIN_MEDIA_BROWSER = "media_browser"
 
 
+def _source_folder_parts(source: dict | None) -> list[str]:
+    folder_path = source.get("folder_path") if isinstance(source, dict) else None
+    if isinstance(folder_path, (list, tuple)):
+        return [
+            str(part).strip()
+            for part in folder_path
+            if str(part or "").strip()
+        ]
+    if str(folder_path or "").strip():
+        return [str(folder_path).strip()]
+    return []
+
+
+def is_media_browser_favorite_source(source: dict | None) -> bool:
+    """Return true for items discovered from the native Favorites subtree."""
+    if not isinstance(source, dict):
+        return False
+    parts = _source_folder_parts(source)
+    values = [
+        *parts,
+        source.get("Source"),
+        source.get("Source_Value"),
+        source.get("media_content_type"),
+        source.get("media_class"),
+        source.get("id"),
+    ]
+    return any("favorite" in str(value or "").casefold() for value in values)
+
+
+def looks_like_global_media_source(source: dict | None) -> bool:
+    """Return true for broad HA library rows that should not become AGS sources."""
+    if not isinstance(source, dict):
+        return False
+    value = str(source.get("Source_Value") or "").strip()
+    media_type = str(source.get("media_content_type") or "").strip()
+    folder_parts = _source_folder_parts(source)
+    if value.startswith("media-source://radio_browser"):
+        return True
+    if media_type == "app" and value.startswith("media-source://"):
+        return True
+    return bool(folder_parts and folder_parts[0].casefold() == "radio browser")
+
+
+def filter_discovered_sources(sources: Any) -> list[dict]:
+    """Keep only stable AGS source-discovery data, dropping broad library crawls."""
+    discovered = normalize_source_list(sources)
+    favorites = [source for source in discovered if is_media_browser_favorite_source(source)]
+    if favorites:
+        return favorites
+    if len(discovered) > 40 and any(looks_like_global_media_source(source) for source in discovered):
+        return []
+    return discovered
+
+
 def make_source_id(media_content_type: Any, source_value: Any) -> str:
     """Return the stable AGS id for a playable source."""
     source_type = str(media_content_type or "music").strip() or "music"
     value = str(source_value or "").strip()
     return f"{source_type}::{value}"
+
+
+def make_browser_source_id(
+    media_content_type: Any,
+    source_value: Any,
+    title: Any = "",
+    folder_path: Any = None,
+) -> str:
+    """Return a stable id for Media Browser items, even with generic content ids."""
+    source_type = str(media_content_type or "music").strip() or "music"
+    value = str(source_value or "").strip()
+    path_parts = []
+    if isinstance(folder_path, (list, tuple)):
+        path_parts = [
+            str(part).strip().casefold()
+            for part in folder_path
+            if str(part or "").strip()
+        ]
+    elif str(folder_path or "").strip():
+        path_parts = [str(folder_path).strip().casefold()]
+    title_part = str(title or "").strip().casefold()
+    key = "::".join([source_type.casefold(), value.casefold(), *path_parts, title_part])
+    return f"browser::{key}"
 
 
 def normalize_source_entry(source: dict | None) -> dict | None:
@@ -79,24 +156,65 @@ def normalize_source_entry(source: dict | None) -> dict | None:
             normalized["priority"] = int(source.get("priority"))
         except (TypeError, ValueError):
             pass
+    if source.get("can_play") is not None:
+        normalized["can_play"] = bool(source.get("can_play"))
+    if source.get("can_expand") is not None:
+        normalized["can_expand"] = bool(source.get("can_expand"))
+    media_class = str(source.get("media_class") or "").strip()
+    if media_class:
+        normalized["media_class"] = media_class
+    available_on = source.get("available_on")
+    if isinstance(available_on, (list, tuple, set)):
+        normalized["available_on"] = [
+            str(entity_id).strip()
+            for entity_id in available_on
+            if str(entity_id or "").strip()
+        ]
+    elif str(available_on or "").strip():
+        normalized["available_on"] = [str(available_on).strip()]
     return normalized
+
+
+def merge_source_metadata(existing: dict, incoming: dict) -> dict:
+    """Merge source metadata collected from multiple browser targets."""
+    merged = deepcopy(existing)
+    available = []
+    for source in (existing, incoming):
+        for entity_id in source.get("available_on") or []:
+            if entity_id and entity_id not in available:
+                available.append(entity_id)
+    if available:
+        merged["available_on"] = available
+    for key in ("can_play", "can_expand", "media_class", "origin", "folder_path"):
+        if key not in merged and incoming.get(key) is not None:
+            merged[key] = deepcopy(incoming[key])
+    return merged
 
 
 def normalize_source_list(sources: Any) -> list[dict]:
     """Normalize and dedupe source entries while preserving order."""
     normalized_sources = []
     seen_ids = set()
-    seen_names = set()
+    seen_names = {}
+    id_indexes = {}
     for source in sources or []:
         normalized = normalize_source_entry(source)
         if not normalized:
             continue
         source_id = normalized["id"]
         name_key = normalized["Source"].casefold()
-        if source_id in seen_ids or name_key in seen_names:
+        existing_index = id_indexes.get(source_id)
+        if existing_index is None:
+            existing_index = seen_names.get(name_key)
+        if existing_index is not None:
+            normalized_sources[existing_index] = merge_source_metadata(
+                normalized_sources[existing_index],
+                normalized,
+            )
             continue
+        id_indexes[source_id] = len(normalized_sources)
         seen_ids.add(source_id)
-        seen_names.add(name_key)
+        seen_names[name_key] = len(normalized_sources)
         normalized_sources.append(normalized)
     return normalized_sources
 
@@ -139,7 +257,7 @@ def apply_source_presentation(
     if display_name:
         presented["Source"] = display_name
     presented["source_default"] = (
-        bool(source_id == default_source_id)
+        bool(source_id == default_source_id or presented.get("source_default", False))
         if default_source_id
         else bool(presented.get("source_default", False))
     )
@@ -156,7 +274,7 @@ def combine_source_inventory(
     default_source_id = ags_data.get(CONF_DEFAULT_SOURCE_ID)
     hidden_ids = {str(item).strip() for item in ags_data.get(CONF_HIDDEN_SOURCE_IDS, []) or []}
 
-    catalog = normalize_source_list(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or [])
+    catalog = filter_discovered_sources(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or [])
     catalog_by_name = {source["Source"].casefold(): source for source in catalog}
     catalog_by_value = {
         str(source.get("Source_Value") or "").strip().casefold(): source
@@ -207,7 +325,7 @@ def split_source_inventory(ags_data: dict) -> tuple[list[dict], list[dict]]:
 
     hidden = []
     seen_ids = set()
-    for source in normalize_source_list(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or []):
+    for source in filter_discovered_sources(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or []):
         source_id = source.get("id")
         value = str(source.get("Source_Value") or "").strip()
         if not source_id or source_id in seen_ids:
@@ -247,6 +365,7 @@ def normalize_source_storage(cfg: dict) -> dict:
     """Migrate legacy source storage into the AGS-managed source model."""
     normalized = deepcopy(cfg or {})
 
+    using_legacy_sources = normalized.get(CONF_SOURCE_FAVORITES) is None
     legacy_sources = normalized.get(CONF_SOURCE_FAVORITES)
     if legacy_sources is None:
         legacy_sources = normalized.get(LEGACY_FAVORITE_SOURCES)
@@ -258,12 +377,12 @@ def normalize_source_storage(cfg: dict) -> dict:
         if normalized.get(CONF_SOURCE_FAVORITES) is not None
         else legacy_sources
     )
-    last_discovered = normalize_source_list(normalized.get(CONF_LAST_DISCOVERED_SOURCES))
+    last_discovered = filter_discovered_sources(normalized.get(CONF_LAST_DISCOVERED_SOURCES))
 
     source_favorites = [
         (
             {**source, "origin": SOURCE_ORIGIN_LEGACY_CONFIG}
-            if is_legacy_config_source(source)
+            if using_legacy_sources or is_legacy_config_source(source)
             else source
         )
         for source in source_favorites

@@ -100,8 +100,10 @@ def test_source_utils():
             CONF_SOURCE_FAVORITES,
             CONF_SOURCE_DISPLAY_NAMES,
             combine_source_inventory,
+            make_browser_source_id,
             make_source_id,
             normalize_source_storage,
+            normalize_source_list,
             split_source_inventory,
         )
 
@@ -126,14 +128,31 @@ def test_source_utils():
         chill_id = make_source_id("favorite_item_id", "FV:chill")
         assert migrated[CONF_DEFAULT_SOURCE_ID] == top_hit_id
         assert chill_id in migrated[CONF_HIDDEN_SOURCE_IDS]
+        assert combine_source_inventory(migrated) == []
+
+        browser_top_hit = {
+            "id": make_browser_source_id("favorite_item_id", "FV:top-hit", "Top Hit", ["Favorites"]),
+            "Source": "Top Hit",
+            "Source_Value": "FV:top-hit",
+            "media_content_type": "favorite_item_id",
+            "origin": "media_browser",
+        }
+        browser_chill = {
+            "id": make_browser_source_id("favorite_item_id", "FV:chill", "Chill", ["Favorites"]),
+            "Source": "Chill",
+            "Source_Value": "FV:chill",
+            "media_content_type": "favorite_item_id",
+            "origin": "media_browser",
+        }
+        migrated["last_discovered_sources"] = [browser_top_hit, browser_chill]
 
         migrated[CONF_SOURCE_DISPLAY_NAMES] = {top_hit_id: "Top Hits"}
         visible, hidden = split_source_inventory(migrated)
-        assert visible[0]["Source"] == "Top Hits"
+        assert visible[0]["Source"] == "Top Hit"
         assert hidden[0]["Source"] == "Chill"
 
         migrated[CONF_SOURCE_FAVORITES] = migrated[CONF_SOURCE_FAVORITES][:1]
-        assert combine_source_inventory(migrated)[0]["id"] == top_hit_id
+        assert combine_source_inventory(migrated)[0]["id"] == browser_top_hit["id"]
 
         legacy_only = normalize_source_storage({
             "source_favorites": [
@@ -148,6 +167,32 @@ def test_source_utils():
             "default_source_id": "source::Top Hit",
         })
         assert combine_source_inventory(legacy_only) == []
+
+        generic_sources = normalize_source_list([
+            {
+                "id": make_browser_source_id("favorites_folder", "object.item", "Jazz", ["Favorites"]),
+                "Source": "Jazz",
+                "Source_Value": "object.item",
+                "media_content_type": "favorites_folder",
+                "available_on": ["media_player.a"],
+            },
+            {
+                "id": make_browser_source_id("favorites_folder", "object.item", "Rock", ["Favorites"]),
+                "Source": "Rock",
+                "Source_Value": "object.item",
+                "media_content_type": "favorites_folder",
+                "available_on": ["media_player.a"],
+            },
+            {
+                "id": make_browser_source_id("favorites_folder", "object.item", "Jazz", ["Favorites"]),
+                "Source": "Jazz",
+                "Source_Value": "object.item",
+                "media_content_type": "favorites_folder",
+                "available_on": ["media_player.b"],
+            },
+        ])
+        assert len(generic_sources) == 2
+        assert generic_sources[0]["available_on"] == ["media_player.a", "media_player.b"]
         assert split_source_inventory(legacy_only) == ([], [])
 
         catalog_top_id = make_source_id("favorite_item_id", "FV:top-hit")

@@ -35,6 +35,7 @@ from .source_utils import (
     combine_source_inventory,
     find_source_by_name_or_id,
     is_legacy_config_source,
+    make_browser_source_id,
     normalize_source_entry,
     normalize_source_list,
     split_source_inventory,
@@ -47,6 +48,8 @@ _LOGGER = logging.getLogger(__name__)
 
 STATE_REFRESH_DEBOUNCE = 0.15
 BROWSE_CALL_TIMEOUT = 6
+FAVORITES_CRAWL_DEPTH = 4
+FAVORITES_CRAWL_LIMIT = 250
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the media player platform."""
@@ -453,7 +456,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             or media_class == "empty"
         )
 
-    def _normalize_favorite_source(self, node, folder_path=None):
+    def _normalize_favorite_source(self, node, folder_path=None, *, entity_id=None, include_folders=False):
         if self._is_empty_browse_placeholder(node):
             return None
 
@@ -467,16 +470,29 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         ).strip()
         content_id = str(self._browse_attr(node, "media_content_id") or "").strip()
         content_type = str(self._browse_attr(node, "media_content_type") or "music").strip()
-        can_play = bool(self._browse_attr(node, "can_play", False) or not can_expand)
-        if not title or not content_id or not can_play:
+        can_play = bool(self._browse_attr(node, "can_play", False) or (not can_expand and content_id))
+        if not title or not content_id:
             return None
+        if not can_play and not (include_folders and can_expand):
+            return None
+        source_id = make_browser_source_id(
+            content_type,
+            content_id,
+            title,
+            folder_path or [],
+        )
         source = normalize_source_entry({
+            "id": source_id,
             "Source": title,
             "Source_Value": content_id,
             "media_content_type": content_type,
             "source_default": False,
             "origin": SOURCE_ORIGIN_MEDIA_BROWSER,
             "folder_path": folder_path or [],
+            "can_play": can_play,
+            "can_expand": can_expand,
+            "media_class": self._browse_attr(node, "media_class", "") or ("folder" if can_expand else "music"),
+            "available_on": [entity_id] if entity_id else [],
         })
         if source:
             source["origin"] = SOURCE_ORIGIN_MEDIA_BROWSER
@@ -579,6 +595,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         depth=0,
         seen_nodes=None,
         folder_path=None,
+        include_folders=False,
     ):
         if depth > max_depth or len(results) >= max_items:
             return
@@ -589,7 +606,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         for child in self._browse_children(node):
             if len(results) >= max_items:
                 return
-            favorite = self._normalize_favorite_source(child, folder_path)
+            favorite = self._normalize_favorite_source(
+                child,
+                folder_path,
+                entity_id=entity_id,
+                include_folders=include_folders,
+            )
             if favorite:
                 key = favorite["id"]
                 if key not in seen:
@@ -614,6 +636,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                         depth=depth + 1,
                         seen_nodes=seen_nodes,
                         folder_path=child_path,
+                        include_folders=include_folders,
                     )
 
                 if not content_id:
@@ -640,6 +663,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                             depth=depth + 1,
                             seen_nodes=seen_nodes,
                             folder_path=child_path,
+                            include_folders=include_folders,
                         )
                 except Exception as err:
                     _LOGGER.debug("Unable to crawl favorite folder %s: %s", content_id, err)
@@ -701,11 +725,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             return expanded if self._browse_result_has_real_content(expanded) else node
 
         for child in self._browse_children(node):
-            if not self._browse_attr(child, "can_expand", False):
-                continue
             if self._browse_node_looks_like_favorites(child):
                 expanded = await self._expand_browse_node(entity_id, child)
                 return expanded if self._browse_result_has_real_content(expanded) else child
+            child_children = self._browse_children(child)
+            if not self._browse_attr(child, "can_expand", False) and not child_children:
+                continue
             child_type = self._browse_attr(child, "media_content_type")
             child_id = self._browse_attr(child, "media_content_id")
             node_key = (str(child_type or ""), str(child_id or ""))
@@ -713,7 +738,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 continue
             seen_nodes.add(node_key)
             try:
-                child_root = await self._expand_browse_node(entity_id, child)
+                child_root = child if child_children else await self._expand_browse_node(entity_id, child)
                 found = await self._async_find_favorites_browse_root(
                     entity_id,
                     child_root,
@@ -745,60 +770,85 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         return None
 
     def _merge_browser_favorites(self, ags_data, catalog, native_favorites):
-        """Build the visible AGS favorites list by merging existing, native, and legacy sources."""
+        """Build the visible AGS favorites list from AGS favorites or native Favorites."""
         hidden_ids = {
             str(item).strip()
             for item in ags_data.get(CONF_HIDDEN_SOURCE_IDS, []) or []
             if str(item).strip()
         }
-        
-        # 1. Get existing favorites (including those previously discovered)
+        catalog = normalize_source_list(catalog or [])
+        native_favorites = normalize_source_list(native_favorites or [])
+        browser_catalog = normalize_source_list([*native_favorites, *catalog])
+
         existing = normalize_source_list(ags_data.get(CONF_SOURCE_FAVORITES, []) or [])
-        
+
         merged = []
         seen_ids = set()
         seen_names = set()
+        legacy_default_id = str(ags_data.get(CONF_DEFAULT_SOURCE_ID) or "").strip()
+        matched_default_id = None
 
         def add_source(source, *, default=False):
+            nonlocal matched_default_id
             normalized = normalize_source_entry(source)
             if not normalized:
                 return
             source_id = normalized["id"]
             name_key = normalized["Source"].casefold()
             value = str(normalized.get("Source_Value") or "").strip()
-            
-            # Skip if hidden
+
             if source_id in hidden_ids or value in hidden_ids:
                 return
-            
-            # Deduplicate by ID or name
+
             if source_id in seen_ids or name_key in seen_names:
                 return
-                
+
             seen_ids.add(source_id)
             seen_names.add(name_key)
-            merged.append({**normalized, "source_default": bool(default)})
+            next_source = {**normalized, "source_default": bool(default)}
+            merged.append(next_source)
+            if default:
+                matched_default_id = source_id
 
-        # 2. Priority 1: Keep everything already in your favorites list
+        # Keep user-managed favorites when they still map to a browser item.
+        # Legacy config-only source rows are migration hints; they are never
+        # exposed unless a real Media Browser item matches them.
         for source in existing:
-            add_source(source, default=source.get("source_default", False))
+            matched = self._match_catalog_source(browser_catalog, source)
+            if matched:
+                add_source(
+                    {
+                        **matched,
+                        "source_default": bool(
+                            source.get("source_default")
+                            or legacy_default_id in {
+                                str(source.get("id") or "").strip(),
+                                str(matched.get("id") or "").strip(),
+                            }
+                        ),
+                    },
+                    default=bool(
+                        source.get("source_default")
+                        or legacy_default_id in {
+                            str(source.get("id") or "").strip(),
+                            str(matched.get("id") or "").strip(),
+                        }
+                    ),
+                )
+            elif source.get("origin") == "user_favorite" and not is_legacy_config_source(source):
+                add_source(source, default=source.get("source_default", False))
 
-        # 3. Priority 2: Add newly discovered native favorites
-        for source in native_favorites:
-            add_source(source)
-
-        # 4. Priority 3: Add top-level catalog items (legacy fallback)
-        # We only do this if we have VERY few favorites, to avoid clutter.
-        if len(merged) < 10:
-            for source in catalog:
+        # First successful discovery defaults AGS favorites to the native Media
+        # Browser Favorites folder. The broader catalog only feeds Hidden
+        # Sources so random top-level browse items do not become HA inputs.
+        if not merged:
+            for source in native_favorites:
                 add_source(source)
 
-        # 5. Handle Default Source ID logic
-        default_id = str(ags_data.get(CONF_DEFAULT_SOURCE_ID) or "").strip()
-        default_source = next((s for s in merged if s["id"] == default_id), None)
-        
-        if not default_source:
-            # Fallback to the one marked default in the list
+        default_id = matched_default_id or str(ags_data.get(CONF_DEFAULT_SOURCE_ID) or "").strip()
+        if default_id and default_id not in seen_ids:
+            default_id = None
+        if not default_id:
             default_marked = next((s for s in merged if s.get("source_default")), None)
             default_id = default_marked["id"] if default_marked else (merged[0]["id"] if merged else None)
 
@@ -869,7 +919,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         ags_data["_source_inventory_refreshing"] = True
         try:
-            all_discovered = []
             all_native_favorites = []
             candidates = self._get_browse_target_candidates()
             _LOGGER.info("AGS source discovery starting with candidates: %s", candidates)
@@ -893,9 +942,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                             browse_root,
                             favorite_results,
                             set(),
-                            max_depth=4,
-                            max_items=250,
+                            max_depth=FAVORITES_CRAWL_DEPTH,
+                            max_items=FAVORITES_CRAWL_LIMIT,
                             folder_path=["Favorites"],
+                            include_folders=True,
                         )
                     
                     if favorite_results:
@@ -903,30 +953,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                         all_native_favorites.extend(normalized_favs)
                         _LOGGER.info("AGS: Found %s favorites on %s", len(normalized_favs), entity_id)
 
-                    # 2. Always get the top-level catalog as a fallback
-                    catalog_results = []
-                    await self._async_crawl_favorite_sources(
-                        entity_id,
-                        root,
-                        catalog_results,
-                        set(),
-                        max_depth=1,
-                        max_items=100,
-                    )
-                    if catalog_results:
-                        all_discovered.extend(normalize_source_list(catalog_results))
-
                 except Exception as err:
                     _LOGGER.debug("Discovery error on %s: %s", entity_id, err)
 
-            # Deduplicate the master lists
-            discovered = normalize_source_list(all_discovered)
             native_favorites = normalize_source_list(all_native_favorites)
+            discovered = normalize_source_list(native_favorites)
 
-            _LOGGER.info("AGS: Discovery cycle found %s favorites and %s catalog items", len(native_favorites), len(discovered))
+            _LOGGER.info("AGS: Discovery cycle found %s Media Browser favorite source(s)", len(native_favorites))
 
-            if not discovered and not native_favorites:
-                _LOGGER.debug("AGS: No sources found in this refresh cycle")
+            if not native_favorites:
+                _LOGGER.debug("AGS: No Media Browser Favorites folder sources found in this refresh cycle")
                 self._schedule_favorite_source_retry()
                 return
 
@@ -963,6 +999,21 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 CONF_SOURCE_FAVORITES: next_favorites,
                 CONF_DEFAULT_SOURCE_ID: next_default_id,
             })
+            valid_hidden_ids = {
+                str(source.get("id") or "").strip()
+                for source in [*discovered, *next_favorites]
+                if str(source.get("id") or "").strip()
+            }
+            valid_hidden_values = {
+                str(source.get("Source_Value") or "").strip()
+                for source in [*discovered, *next_favorites]
+                if str(source.get("Source_Value") or "").strip()
+            }
+            active_config[CONF_HIDDEN_SOURCE_IDS] = [
+                hidden_id
+                for hidden_id in active_config.get(CONF_HIDDEN_SOURCE_IDS, []) or []
+                if hidden_id in valid_hidden_ids or hidden_id in valid_hidden_values
+            ]
 
             # Cleanup internal keys
             for key in ("Sources", "favorite_sources", "ExcludedSources", "homekit_player", "media_player_entity"):
@@ -1137,6 +1188,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "value": source.get("Source_Value"),
                 "media_content_type": source.get("media_content_type"),
                 "default": source.get("source_default", False),
+                "can_play": source.get("can_play", True),
+                "can_expand": source.get("can_expand", False),
+                "folder_path": source.get("folder_path", []),
+                "available_on": source.get("available_on", []),
             }
             for source in combine_source_inventory(self.hass.data.get(DOMAIN, {}))
             if source.get("Source")
@@ -1152,6 +1207,10 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "value": source.get("Source_Value"),
                 "media_content_type": source.get("media_content_type"),
                 "default": source.get("source_default", False),
+                "can_play": source.get("can_play", True),
+                "can_expand": source.get("can_expand", False),
+                "folder_path": source.get("folder_path", []),
+                "available_on": source.get("available_on", []),
             }
             for source in hidden
             if source.get("Source")
