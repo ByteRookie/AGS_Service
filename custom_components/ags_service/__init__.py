@@ -34,7 +34,7 @@ DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
 BACKUP_STORAGE_KEY = "ags_service.backup.json"
-FRONTEND_ASSET_VERSION = "2.2.11"
+FRONTEND_ASSET_VERSION = "2.3.1"
 
 # Signal for dynamic entity updates
 SIGNAL_AGS_RELOAD = "ags_service_reload"
@@ -57,6 +57,7 @@ CONF_SCHEDULE_ENTITY = 'schedule_entity'
 CONF_OTT_DEVICE = 'ott_device'
 CONF_OTT_DEVICES = 'ott_devices'
 CONF_BATCH_UNJOIN = 'batch_unjoin'
+CONF_NATIVE_ROOM_POPUP = 'native_room_popup'
 CONF_SOURCES = 'Sources'
 CONF_FAVORITE_SOURCES = 'favorite_sources'
 CONF_SOURCE = 'Source'
@@ -74,20 +75,27 @@ TV_MODE_NO_MUSIC = 'no_music'
 
 # Define the configuration schema for an OTT device mapping
 OTT_DEVICE_SCHEMA = vol.Schema({
-    vol.Required("ott_device"): cv.entity_id,
+    vol.Required("ott_device"): cv.string,
     vol.Optional("tv_input"): cv.string,
 }, extra=vol.ALLOW_EXTRA)
 
 # Define the configuration schema for a device
 DEVICE_SCHEMA = vol.Schema(
     {
-        vol.Required("device_id"): cv.entity_id,
-        vol.Required("device_type"): cv.string,
+        vol.Optional("device_id", default=""): cv.string,
+        vol.Required("device_type"): vol.In(["speaker", "tv", "ott"]),
         vol.Required("priority"): cv.positive_int,
         vol.Optional("override_content"): cv.string,
-        vol.Optional(CONF_OTT_DEVICE): cv.entity_id,
+        vol.Optional(CONF_OTT_DEVICE): cv.string,
         vol.Optional(CONF_OTT_DEVICES): vol.All(cv.ensure_list, [OTT_DEVICE_SCHEMA]),
         vol.Optional(CONF_TV_MODE): vol.In([TV_MODE_TV_AUDIO, TV_MODE_NO_MUSIC]),
+        vol.Optional("volume_offset", default=0): vol.Coerce(int),
+        vol.Optional("tv_speaker_mode"): cv.string,
+        vol.Optional("election_toggle"): vol.In(["primary", "follower"]),
+        vol.Optional("tv_input"): cv.string,
+        vol.Optional("parent_tv"): cv.string,
+        vol.Optional("unique_id"): cv.string,
+        vol.Optional("disabled", default=False): cv.boolean,
     }, extra=vol.ALLOW_EXTRA
 )
 
@@ -132,17 +140,18 @@ CONFIG_SCHEMA = vol.Schema({
         vol.Optional(CONF_DISABLE_TV_SOURCE, default=False): cv.boolean,
         vol.Optional(CONF_INTERVAL_SYNC, default=30): cv.positive_int,
         vol.Optional(CONF_SCHEDULE_ENTITY, default=None): vol.Any(None, vol.Schema({
-            vol.Required('entity_id'): cv.entity_id,
+            vol.Required('entity_id'): cv.string,
             vol.Optional('on_state', default='on'): cv.string,
             vol.Optional('off_state', default='off'): cv.string,
             vol.Optional('schedule_override', default=False): cv.boolean,
         }, extra=vol.ALLOW_EXTRA)),
         vol.Optional("default_source_schedule", default=None): vol.Any(None, vol.Schema({
-            vol.Required("entity_id"): cv.entity_id,
+            vol.Required("entity_id"): cv.string,
             vol.Required("source_name"): cv.string,
             vol.Optional("on_state", default="on"): cv.string,
         }, extra=vol.ALLOW_EXTRA)),
         vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
+        vol.Optional(CONF_NATIVE_ROOM_POPUP, default=True): cv.boolean,
     }, extra=vol.ALLOW_EXTRA)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -352,6 +361,7 @@ def sync_linked_area_rooms(hass: HomeAssistant, raw_cfg: dict | None) -> dict:
                     "device_type": entity["device_type"],
                     "priority": next_priority,
                     "override_content": "",
+                    "disabled": False,
                 }
                 next_priority += 1
             else:
@@ -359,6 +369,7 @@ def sync_linked_area_rooms(hass: HomeAssistant, raw_cfg: dict | None) -> dict:
                 device.setdefault("device_type", entity["device_type"])
                 device.setdefault("priority", next_priority)
                 device.setdefault("override_content", "")
+                device.setdefault("disabled", False)
             synced_devices.append(device)
 
         room["devices"] = synced_devices
@@ -377,22 +388,72 @@ def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
 
     for room in cfg.get("rooms", []) or []:
         room_name = str(room.get("room", "")).strip() or "Room"
+        devices = room.get("devices", []) or []
+
+        # Migration: Pull legacy nested ott_devices into top-level list
+        legacy_otts = []
+        for device in devices:
+            d_type = str(device.get("device_type", "")).lower()
+            if (d_type == "tv" or d_type == "television") and "ott_devices" in device:
+                for mapping in device["ott_devices"] or []:
+                    ott_id = mapping.get("ott_device")
+                    if ott_id:
+                        # Check if this OTT already exists at top level for this TV
+                        exists = any(
+                            d.get("device_id") == ott_id and 
+                            str(d.get("device_type", "")).lower() == "ott" and 
+                            d.get("parent_tv") == device.get("device_id")
+                            for d in devices
+                        )
+                        if not exists:
+                            import random, string
+                            legacy_otts.append({
+                                "device_id": ott_id,
+                                "device_type": "ott",
+                                "parent_tv": device.get("device_id"),
+                                "tv_input": mapping.get("tv_input", ""),
+                                "priority": device.get("priority", 999),
+                                "unique_id": ''.join(random.choices(string.ascii_lowercase + string.digits, k=9))
+                            })
+
+        if legacy_otts:
+            devices.extend(legacy_otts)
+            room["devices"] = devices
+
         devices_with_order = []
+        room_primary_entities: set[str] = set()
 
         for original_index, device in enumerate(room.get("devices", []) or []):
             device_id = str(device.get("device_id", "")).strip()
             if not device_id:
                 continue
-            if device_id in seen_devices:
-                _LOGGER.warning("Duplicate device entity %s found in room %s, skipping", device_id, room_name)
-                continue
-            seen_devices.add(device_id)
+
+            d_type = device.get("device_type")
+            if d_type in ["speaker", "tv"]:
+                if device_id in room_primary_entities:
+                    _LOGGER.warning("Duplicate primary device entity %s found in room %s, skipping", device_id, room_name)
+                    continue
+                room_primary_entities.add(device_id)
+
+            # Global duplicate check (optional, but keep it if we want to ensure uniqueness across the whole system for speakers/tvs)
+            # The requirement says 'per room', so let's stick to that.
+            if d_type != "ott" and device_id in seen_devices:
+                 _LOGGER.warning("Primary device entity %s already assigned to another room, skipping", device_id)
+                 continue
+            if d_type != "ott":
+                seen_devices.add(device_id)
 
             normalized_device = copy.deepcopy(device)
             normalized_device["device_id"] = device_id
-            normalized_device["device_type"] = (
-                "tv" if normalized_device.get("device_type") == "tv" else "speaker"
-            )
+            if not normalized_device.get("unique_id"):
+                import random, string
+                normalized_device["unique_id"] = ''.join(random.choices(string.ascii_lowercase + string.digits, k=9))
+
+            d_type = normalized_device.get("device_type")
+            if d_type not in ["speaker", "tv", "ott"]:
+                d_type = "speaker"
+            normalized_device["device_type"] = d_type
+
             try:
                 priority = int(normalized_device.get("priority", original_index + 1) or 1)
             except (TypeError, ValueError):
@@ -407,10 +468,26 @@ def sanitize_runtime_config(raw_cfg: dict | None) -> dict:
                     for mapping in normalized_device.get(CONF_OTT_DEVICES, []) or []
                     if mapping.get("ott_device") or mapping.get("tv_input")
                 ]
-            else:
+                normalized_device.pop("volume_offset", None)
+                normalized_device.pop("tv_speaker_mode", None)
+                normalized_device.pop("election_toggle", None)
+                normalized_device.pop("tv_input", None)
+                normalized_device.pop("parent_tv", None)
+            elif normalized_device["device_type"] == "speaker":
+                normalized_device.setdefault("volume_offset", 0)
+                normalized_device.setdefault("election_toggle", "primary")
                 normalized_device.pop(CONF_OTT_DEVICE, None)
                 normalized_device.pop(CONF_OTT_DEVICES, None)
                 normalized_device.pop(CONF_TV_MODE, None)
+                normalized_device.pop("tv_input", None)
+                normalized_device.pop("parent_tv", None)
+            elif normalized_device["device_type"] == "ott":
+                normalized_device.pop(CONF_OTT_DEVICE, None)
+                normalized_device.pop(CONF_OTT_DEVICES, None)
+                normalized_device.pop(CONF_TV_MODE, None)
+                normalized_device.pop("volume_offset", None)
+                normalized_device.pop("tv_speaker_mode", None)
+                normalized_device.pop("election_toggle", None)
 
             devices_with_order.append((original_index, normalized_device))
 
@@ -549,6 +626,7 @@ def apply_config(hass: HomeAssistant, cfg: dict):
         'schedule_entity': cfg.get(CONF_SCHEDULE_ENTITY),
         'default_source_schedule': cfg.get("default_source_schedule"),
         'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
+        'native_room_popup': cfg.get(CONF_NATIVE_ROOM_POPUP, True),
     })
     hass.data['configured_rooms'] = [room.get('room') for room in rooms if room.get('room')]
 
@@ -725,6 +803,7 @@ async def _async_initialize_runtime(hass: HomeAssistant, config: dict, is_yaml: 
 
         # Register Lovelace Custom Card
         add_extra_js_url(hass, f"/ags-static/ags-media-card.js?v={FRONTEND_ASSET_VERSION}")
+        add_extra_js_url(hass, f"/ags-static/ags-native-room-popup.js?v={FRONTEND_ASSET_VERSION}")
         hass.data[DOMAIN]["_frontend_registered"] = True
 
     hass.data[DOMAIN]["_runtime_initialized"] = True
@@ -763,6 +842,7 @@ def ws_get_config(hass, connection, msg):
         "schedule_entity": live_config.get("schedule_entity", None),
         "default_source_schedule": live_config.get("default_source_schedule", None),
         "batch_unjoin": live_config.get("batch_unjoin", False),
+        "native_room_popup": live_config.get("native_room_popup", True),
     }
     config = sync_linked_area_rooms(hass, config_source)
     config = sanitize_runtime_config(config)
@@ -782,6 +862,7 @@ def ws_get_config(hass, connection, msg):
         "schedule_entity": config.get("schedule_entity", None),
         "default_source_schedule": config.get("default_source_schedule", None),
         "batch_unjoin": config.get("batch_unjoin", False),
+        "native_room_popup": config.get("native_room_popup", True),
     }
     connection.send_result(msg["id"], data)
 

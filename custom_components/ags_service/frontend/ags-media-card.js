@@ -265,6 +265,7 @@ class AgsMediaCard extends HTMLElement {
       folder_path: source.folder_path,
       media_class: source.media_class,
       available_on: source.available_on,
+      thumbnail: source.thumbnail || source.entity_picture || source.media_image_url || source.image,
     })));
   }
 
@@ -307,6 +308,9 @@ class AgsMediaCard extends HTMLElement {
           ...(source?.can_expand !== undefined ? { can_expand: Boolean(source.can_expand) } : {}),
           ...(source?.media_class ? { media_class: String(source.media_class) } : {}),
           ...(Array.isArray(source?.available_on) ? { available_on: source.available_on } : {}),
+          ...(source?.thumbnail || source?.entity_picture || source?.media_image_url || source?.image
+            ? { thumbnail: String(source.thumbnail || source.entity_picture || source.media_image_url || source.image).trim() }
+            : {}),
         };
       })
       .filter((source) => {
@@ -2134,7 +2138,7 @@ class AgsMediaCard extends HTMLElement {
     if (normalized.includes("spotify")) {
       return { icon: "mdi:spotify", color: "#1db954", label: "Spotify" };
     }
-    if (normalized.includes("apple music")) {
+    if (normalized.includes("apple music") || normalized === "music") {
       return { icon: "mdi:music-circle", color: "#fa243c", label: "Apple Music" };
     }
     if (normalized.includes("pandora")) {
@@ -2219,10 +2223,33 @@ class AgsMediaCard extends HTMLElement {
     this._volumeTimers.delete(entityId);
     const percent = this._pendingVolume.get(entityId);
     if (percent === undefined) return;
+    this.unmuteForVolumeChange(entityId);
     this._hass.callService("media_player", "volume_set", {
       entity_id: entityId,
       volume_level: this.clamp(Number(percent || 0), 0, 100) / 100,
     });
+  }
+
+  unmuteForVolumeChange(entityId) {
+    if (!entityId || !this._hass) return;
+    const ags = this.getAgsPlayer();
+    if (ags?.entity_id === entityId) {
+      const mutedSpeakers = this.toArray(ags.attributes.active_speakers)
+        .filter((speakerId) => this.isMuted(speakerId));
+      if (mutedSpeakers.length) {
+        this._hass.callService("media_player", "volume_mute", {
+          entity_id: mutedSpeakers.length === 1 ? mutedSpeakers[0] : mutedSpeakers,
+          is_volume_muted: false,
+        });
+      }
+      return;
+    }
+    if (this.isMuted(entityId)) {
+      this._hass.callService("media_player", "volume_mute", {
+        entity_id: entityId,
+        is_volume_muted: false,
+      });
+    }
   }
 
   queueVolumeSet(entityId, percent) {
@@ -2345,6 +2372,18 @@ class AgsMediaCard extends HTMLElement {
         <ha-icon icon="${icon}"></ha-icon>
       </span>
     `;
+  }
+
+  getRoomSpeaker(room, ags) {
+    const devices = Array.isArray(room?.devices) ? room.devices : [];
+    const activeSpeakers = this.toArray(ags?.attributes?.active_speakers);
+    return devices.find((device) => device.device_type === "speaker")
+      || devices.find((device) => {
+        const entityId = device.entity_id || device.device_id || "";
+        return entityId && activeSpeakers.includes(entityId);
+      })
+      || devices.find((device) => device.entity_id || device.device_id)
+      || null;
   }
 
   renderArtworkFallback(snapshot, variant = "full") {
@@ -2700,6 +2739,8 @@ class AgsMediaCard extends HTMLElement {
             <button
               type="button"
               class="icon-btn master-mute-btn ${groupMuted ? "active" : ""}"
+              aria-label="${groupMuted ? "Unmute all active rooms" : "Mute all active rooms"}"
+              title="${groupMuted ? "Unmute" : "Mute"}"
               onclick="this.getRootNode().host.toggleMuteTargets([${activeSpeakers.map((entityId) => `'${entityId}'`).join(", ")}], ${groupMuted ? "true" : "false"})"
             >
               <ha-icon icon="${groupMuted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
@@ -2709,7 +2750,8 @@ class AgsMediaCard extends HTMLElement {
 
         <div class="room-list">
           ${rooms.map(r => {
-            const spkId = r.devices?.find(d => d.device_type === "speaker")?.entity_id;
+            const speaker = this.getRoomSpeaker(r, ags);
+            const spkId = speaker?.entity_id || speaker?.device_id || "";
             const spkState = spkId ? this._hass.states[spkId] : null;
             const v = this.getDisplayedVolume(spkId || spkState);
             const muted = this.isMuted(spkState);
@@ -2741,6 +2783,8 @@ class AgsMediaCard extends HTMLElement {
                         type="button"
                         class="room-action-btn mute-btn ${muted ? "active" : ""}"
                         ${!spkId ? 'disabled' : ''}
+                        aria-label="${muted ? `Unmute ${this.escapeAttribute(r.name)}` : `Mute ${this.escapeAttribute(r.name)}`}"
+                        title="${muted ? "Unmute" : "Mute"}"
                         onclick="this.getRootNode().host.toggleMuteTargets('${spkId}', ${muted ? "true" : "false"})"
                       >
                         <ha-icon icon="${muted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>
@@ -3990,17 +4034,282 @@ class AgsMediaCard extends HTMLElement {
           background: transparent !important;
           color: var(--art-readable) !important;
         }
+
+        /* AGS custom player visual overhaul */
+        ha-card {
+          height: min(432px, max(340px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 300px))));
+          min-height: 340px;
+          border-radius: 22px;
+          background: linear-gradient(180deg, var(--card-bg-strong), var(--card-bg-soft));
+          border: 1px solid var(--outline);
+        }
+        ha-card.card-player {
+          background: linear-gradient(180deg, var(--card-bg-strong), var(--card-bg-soft)) !important;
+          border: 1px solid var(--outline) !important;
+          box-shadow: var(--ha-card-box-shadow, var(--shadow)) !important;
+        }
+        .player-view {
+          grid-template-rows: minmax(218px, 1fr) auto;
+          background: var(--card-bg-strong);
+        }
+        .player-main {
+          min-height: clamp(218px, 33vh, 292px);
+        }
+        .player-art-image {
+          object-position: center center;
+          filter: saturate(1.02) contrast(1.01);
+        }
+        .player-art-scrim {
+          background:
+            linear-gradient(180deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.06) 38%, rgba(0, 0, 0, 0.18) 62%, rgba(0, 0, 0, 0.76) 100%),
+            radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.12), transparent 48%);
+        }
+        .player-top-bar {
+          top: 14px;
+          left: 14px;
+          right: 14px;
+        }
+        .player-ha-header {
+          min-height: 44px;
+          grid-template-columns: 38px minmax(0, 1fr) 38px;
+          gap: 10px;
+          padding: 4px 6px 4px 4px;
+          border-radius: 16px;
+          background: rgba(5, 9, 16, 0.22);
+          border: 1px solid rgba(255, 255, 255, 0.14);
+          backdrop-filter: blur(14px) saturate(1.08);
+          -webkit-backdrop-filter: blur(14px) saturate(1.08);
+        }
+        .player-ha-leading,
+        .player-more-btn {
+          width: 34px;
+          height: 34px;
+          min-width: 34px;
+          border-radius: 12px;
+          background: rgba(255, 255, 255, 0.12);
+        }
+        .player-ha-room {
+          font-size: 0.94rem;
+          font-weight: 800;
+        }
+        .player-ha-source {
+          font-size: 0.74rem;
+          font-weight: 750;
+        }
+        .player-bottom-panel {
+          margin-top: 0;
+          padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+          gap: 10px;
+          background:
+            linear-gradient(180deg, rgba(10, 15, 24, 0.54), rgba(10, 15, 24, 0.76)),
+            var(--player-panel-bg);
+          border-top: 1px solid rgba(255, 255, 255, 0.12);
+          box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.24);
+          backdrop-filter: blur(18px) saturate(1.08);
+          -webkit-backdrop-filter: blur(18px) saturate(1.08);
+        }
+        .track-info {
+          gap: 4px;
+        }
+        .track-title {
+          font-size: clamp(1.02rem, 2.2vw, 1.2rem);
+          font-weight: 850;
+          line-height: 1.14;
+        }
+        .track-subtitle {
+          font-size: 0.8rem;
+          line-height: 1.2;
+        }
+        .playback-controls {
+          gap: 6px;
+        }
+        .progress-shell {
+          padding: 2px 0 0;
+        }
+        .progress-bar {
+          height: 6px;
+          background: rgba(255, 255, 255, 0.24);
+        }
+        .progress-fill {
+          background: var(--art-readable);
+        }
+        .time-meta {
+          margin-top: 0;
+          font-size: 0.64rem;
+          color: rgba(255, 255, 255, 0.78);
+        }
+        .buttons-row-full {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 7px;
+          margin-top: 2px;
+        }
+        .ha-media-icon-btn,
+        .ha-media-icon-btn.on,
+        .ha-media-icon-btn.off,
+        .ha-media-icon-btn.power-toggle,
+        .ha-media-icon-btn.power-toggle.on,
+        .ha-media-icon-btn.power-toggle.off {
+          width: 100% !important;
+          height: 42px !important;
+          min-height: 42px !important;
+          border-radius: 13px !important;
+          background: rgba(255, 255, 255, 0.12) !important;
+          border: 1px solid rgba(255, 255, 255, 0.14) !important;
+          color: var(--art-readable) !important;
+          box-shadow: none !important;
+        }
+        .ha-media-icon-btn:hover,
+        .ha-media-icon-btn:focus-visible {
+          background: rgba(255, 255, 255, 0.2) !important;
+        }
+        .ha-media-play-btn {
+          background: var(--art-readable) !important;
+          color: rgba(10, 15, 24, 0.96) !important;
+        }
+        .ha-media-play-btn:hover,
+        .ha-media-play-btn:focus-visible {
+          background: #fff !important;
+          color: rgba(10, 15, 24, 0.96) !important;
+        }
+        .media-count-badge {
+          top: -5px;
+          right: -5px;
+          min-width: 18px;
+          height: 18px;
+          border: 2px solid rgba(10, 15, 24, 0.72);
+        }
+        .fallback-art-focal .fallback-art-glyph {
+          width: 96px;
+          height: 96px;
+          border-radius: 24px;
+        }
+        .volumes-view {
+          gap: 12px;
+          color: var(--text);
+          text-shadow: none;
+        }
+        .view-header {
+          margin: 0;
+          padding: 12px;
+          border-radius: 16px;
+          background: var(--glass-heavy);
+          border: 1px solid var(--outline);
+        }
+        .view-title {
+          margin: 0;
+          color: var(--text);
+          font-size: 1rem;
+          letter-spacing: 0;
+          text-transform: none;
+        }
+        .master-chip-wrap {
+          gap: 10px;
+        }
+        .stepper-controls {
+          min-height: 38px;
+          gap: 3px;
+          padding: 4px;
+          border-radius: 12px;
+        }
+        .step-btn {
+          width: 30px;
+          height: 30px;
+          border-radius: 9px;
+        }
+        .step-btn ha-icon {
+          --mdc-icon-size: 17px;
+        }
+        .vol-num-input {
+          width: 36px;
+          font-size: 0.86rem;
+        }
+        .master-mute-btn {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
+        }
+        .room-list {
+          gap: 8px;
+        }
+        .room-row-minimal {
+          display: grid;
+          grid-template-columns: minmax(92px, 1fr) auto;
+          align-items: center;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 14px;
+          background: var(--glass-heavy);
+        }
+        .room-row-minimal.is-off {
+          opacity: 0.72;
+        }
+        .room-info-area {
+          flex: none;
+          margin: 0;
+          min-width: 0;
+        }
+        .room-dot {
+          width: 8px;
+          height: 8px;
+        }
+        .room-label {
+          font-size: 0.9rem;
+          line-height: 1.2;
+        }
+        .room-control-area {
+          flex: none;
+          gap: 8px;
+          justify-content: end;
+        }
+        .minimal-stepper {
+          min-height: 36px;
+          border: 1px solid var(--outline);
+          background: var(--card-bg);
+        }
+        .room-row-actions {
+          gap: 6px;
+        }
+        .room-action-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 11px;
+          border: 1px solid var(--outline);
+          background: var(--card-bg);
+        }
+        .room-action-btn ha-icon {
+          --mdc-icon-size: 17px;
+        }
+        .browse-head {
+          padding: 10px 12px;
+          background: var(--glass-heavy);
+          border: 1px solid var(--outline);
+        }
+        .browse-grid {
+          gap: 10px;
+        }
+        .browse-grid.grid-view {
+          grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        }
+        .browse-item {
+          border-radius: 14px;
+          background: var(--glass-heavy);
+        }
+        .browse-art {
+          border-radius: 12px;
+          background: linear-gradient(160deg, var(--primary-soft), var(--card-bg-soft));
+        }
         @media (max-width: 768px) {
-          ha-card { max-width: calc(100% - 24px); margin: 12px auto; height: min(344px, max(252px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 170px)))); min-height: min(252px, calc(var(--ags-card-stable-vh) - 80px)); border-radius: 24px; border: none !important; box-shadow: var(--shadow) !important; }
-          ha-card.card-player { border: none !important; box-shadow: none !important; background: transparent !important; }
+          ha-card { max-width: calc(100% - 24px); margin: 12px auto; height: min(410px, max(330px, calc(var(--ags-card-stable-vh) - var(--ags-card-viewport-offset, 170px)))); min-height: 330px; border-radius: 22px; border: 1px solid var(--outline) !important; box-shadow: var(--shadow) !important; }
+          ha-card.card-player { border: 1px solid var(--outline) !important; box-shadow: var(--shadow) !important; background: linear-gradient(180deg, var(--card-bg-strong), var(--card-bg-soft)) !important; }
           .card-header { padding: 14px 14px 12px; }
           .section-body { padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px)); }
           .section-player { padding: 0 !important; }
           .player-view { border-radius: inherit; }
           .player-art-image { height: 100%; object-position: center 32%; }
-          .player-main { min-height: clamp(164px, 24vh, 208px); }
+          .player-main { min-height: clamp(204px, 28vh, 254px); }
           .player-top-bar { top: 10px; left: 12px; right: 12px; }
-          .player-bottom-panel { margin-top: -18px; padding: 10px 12px 11px; border-radius: 18px 18px 0 0; }
+          .player-bottom-panel { margin-top: 0; padding: 13px 12px 12px; border-radius: 0; }
           .art-stack { min-height: inherit; }
           .buttons-row { gap: 7px; }
           .buttons-row-full { gap: 10px; }
@@ -4008,8 +4317,8 @@ class AgsMediaCard extends HTMLElement {
           .room-toggle-btn { min-width: 104px; }
         }
         @media (max-width: 420px) {
-          ha-card { max-width: calc(100% - 20px); margin: 10px auto; border-radius: 22px; border: none !important; }
-          ha-card.card-player { border: none !important; box-shadow: none !important; background: transparent !important; }
+          ha-card { max-width: calc(100% - 20px); margin: 10px auto; border-radius: 20px; border: 1px solid var(--outline) !important; }
+          ha-card.card-player { border: 1px solid var(--outline) !important; box-shadow: var(--shadow) !important; background: linear-gradient(180deg, var(--card-bg-strong), var(--card-bg-soft)) !important; }
           .card-header { grid-template-columns: 1fr; }
           .header-picker-wrap,
           .header-actions { width: 100%; justify-content: stretch; }
@@ -4019,9 +4328,9 @@ class AgsMediaCard extends HTMLElement {
           .play-btn { width: 46px; height: 46px; }
           .player-view { border-radius: inherit; }
           .player-art-image { height: 100%; object-position: center 30%; }
-          .player-main { min-height: 158px; }
+          .player-main { min-height: 196px; }
           .player-top-bar { top: 9px; left: 10px; right: 10px; }
-          .player-bottom-panel { margin-top: -16px; padding: 9px 10px 10px; border-radius: 16px 16px 0 0; }
+          .player-bottom-panel { margin-top: 0; padding: 12px 10px 11px; border-radius: 0; }
           .art-stack { min-height: inherit; }
           .track-info { align-items: stretch; text-align: left; }
           .player-ha-header { grid-template-columns: 26px minmax(0, 1fr) 34px; gap: 8px; min-height: 42px; }
@@ -4044,6 +4353,20 @@ class AgsMediaCard extends HTMLElement {
           .ha-media-icon-btn { width: 38px; flex-basis: 38px; height: 40px; min-height: 40px; }
           .ha-media-icon-btn ha-icon { --mdc-icon-size: 23px; }
           .ha-media-play-btn ha-icon { --mdc-icon-size: 29px; }
+          .room-row-minimal {
+            grid-template-columns: 1fr;
+            align-items: stretch;
+          }
+          .room-control-area {
+            justify-content: stretch;
+          }
+          .minimal-stepper {
+            flex: 1 1 auto;
+          }
+          .master-chip-wrap {
+            width: 100%;
+            justify-content: space-between;
+          }
           .player-action-row { display: none; }
           .player-action-pill { display: none; }
           .mini-player-main { min-height: 66px; grid-template-columns: minmax(0, 1fr) auto; padding: 8px 9px 12px 10px; }

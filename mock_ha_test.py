@@ -347,8 +347,140 @@ def test_media_player_source_helpers():
         traceback.print_exc()
         return False
 
+
+def test_media_player_display_metadata():
+    try:
+        from ags_service.media_player import AGSPrimarySpeakerMediaPlayer
+        from ags_service.source_art import source_artwork_url
+
+        class State:
+            def __init__(self, state="idle", attributes=None):
+                self.state = state
+                self.attributes = attributes or {}
+
+        class States:
+            def __init__(self, values):
+                self.values = values
+
+            def get(self, entity_id):
+                return self.values.get(entity_id)
+
+        source_value = "spotify:playlist:top"
+        hass = types.SimpleNamespace(
+            data={
+                "ags_service": {
+                    "static_name": "Jason Audio",
+                    "rooms": [
+                        {
+                            "room": "Kitchen",
+                            "devices": [
+                                {
+                                    "device_id": "media_player.kitchen",
+                                    "device_type": "speaker",
+                                    "priority": 1,
+                                },
+                            ],
+                        },
+                        {
+                            "room": "Patio",
+                            "devices": [
+                                {
+                                    "device_id": "media_player.patio",
+                                    "device_type": "speaker",
+                                    "priority": 2,
+                                },
+                            ],
+                        },
+                    ],
+                    "source_favorites": [
+                        {
+                            "id": "music::spotify:playlist:top",
+                            "Source": "Spotify",
+                            "Source_Value": source_value,
+                            "media_content_type": "music",
+                        }
+                    ],
+                    "last_discovered_sources": [],
+                    "hidden_source_ids": [],
+                    "source_display_names": {},
+                    "default_source_id": None,
+                },
+                "active_rooms": ["Kitchen", "Patio"],
+                "active_speakers": ["media_player.kitchen", "media_player.patio"],
+                "ags_status": "ON",
+                "primary_speaker": "media_player.kitchen",
+                "preferred_primary_speaker": "media_player.kitchen",
+                "ags_media_player_source": "Spotify",
+            },
+            states=States({
+                "media_player.kitchen": State("playing", {"app_name": "Spotify"}),
+                "media_player.patio": State("idle", {}),
+                "switch.kitchen_media": State("on", {}),
+                "switch.patio_media": State("on", {}),
+            }),
+        )
+
+        player = AGSPrimarySpeakerMediaPlayer(hass, {})
+        player.hass = hass
+        player.entity_id = "media_player.ags_media_player"
+        player.ags_status = "ON"
+        player.primary_speaker_room = "Kitchen"
+        player.primary_speaker_entity_id = "media_player.kitchen"
+        player.primary_speaker_state = hass.states.get("media_player.kitchen")
+        player.active_rooms = hass.data["active_rooms"]
+        player.active_speakers = hass.data["active_speakers"]
+
+        attrs = player.extra_state_attributes
+        assert player.name == "Jason Audio"
+        assert attrs["dynamic_title"] == "Kitchen + 1 Active"
+        assert attrs["ags_room_count"] == 2
+        assert len(player.group_members) == 2
+        assert "AGS Media System" not in attrs["dynamic_title"]
+        assert player.icon == "mdi:music"
+        assert player.entity_picture == source_artwork_url("Spotify")
+        assert source_artwork_url("Music").endswith("/apple-music.svg")
+        assert player._normalize_native_source("Netflix")["thumbnail"] == source_artwork_url("Netflix")
+        assert attrs["ags_sources"][0]["thumbnail"] == source_artwork_url("Spotify")
+        browse_tree = player._apply_default_browse_art({
+            "title": "Root",
+            "media_content_type": "library",
+            "media_content_id": "root",
+            "children": [
+                {
+                    "title": "Paramount+",
+                    "media_content_type": "app",
+                    "media_content_id": "paramount",
+                }
+            ],
+        })
+        assert browse_tree["children"][0]["thumbnail"] == source_artwork_url("Paramount+")
+
+        player.ags_status = "ON TV"
+        hass.data["ags_status"] = "ON TV"
+        assert player.icon == "mdi:television-play"
+
+        player.ags_status = "OFF"
+        hass.data["ags_status"] = "OFF"
+        player.primary_speaker_room = None
+        attrs = player.extra_state_attributes
+        assert attrs["dynamic_title"] == "Jason Audio"
+        assert player.icon == "mdi:speaker-multiple"
+
+        print("✓ media_player display metadata/artwork successful")
+        return True
+    except Exception as e:
+        print(f"✗ media_player display metadata test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 if __name__ == "__main__":
-    if test_imports() and test_source_utils() and test_media_player_source_helpers():
+    if (
+        test_imports()
+        and test_source_utils()
+        and test_media_player_source_helpers()
+        and test_media_player_display_metadata()
+    ):
         print("\nAll imports and source utility checks successful in mocked environment.")
     else:
         sys.exit(1)

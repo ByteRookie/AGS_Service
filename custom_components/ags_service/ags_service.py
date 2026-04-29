@@ -95,7 +95,7 @@ def get_ranked_speaker_entity_ids(rooms) -> list[str]:
     speakers = []
     for room in rooms or []:
         for device in room.get("devices", []) or []:
-            if device.get("device_type") == "speaker" and device.get("device_id"):
+            if device.get("device_type") == "speaker" and device.get("device_id") and not device.get("disabled"):
                 speakers.append(device)
     speakers.sort(key=lambda item: item.get("priority", 999))
     return [speaker["device_id"] for speaker in speakers]
@@ -553,6 +553,8 @@ def get_active_rooms(rooms, hass):
 
         skip_room = False
         for device in room['devices']:
+            if device.get('disabled'):
+                continue
             if device.get('device_type') != 'tv':
                 continue
             state = hass.states.get(device['device_id'])
@@ -592,13 +594,15 @@ def update_ags_status(ags_config, hass):
             return ags_status
 
     # Prepare a dictionary of device states
-    device_states = {device['device_id']: hass.states.get(device['device_id']) for room in rooms for device in room['devices']}
+    device_states = {device['device_id']: hass.states.get(device['device_id']) for room in rooms for device in room['devices'] if not device.get('disabled')}
 
     # OFF OVERRIDE LOGIC: If off_override is enabled AND any speaker is playing, force system ON
     if ags_config.get('off_override', False):
         any_playing = False
         for room in rooms:
             for device in room['devices']:
+                if device.get('disabled'):
+                    continue
                 if device.get('device_type') == 'speaker':
                     state = device_states.get(device['device_id'])
                     if state and state.state.lower() not in TV_IGNORE_STATES:
@@ -611,7 +615,7 @@ def update_ags_status(ags_config, hass):
             hass.data['switch_media_system_state'] = True
 
     # Check for override on any device
-    all_devices = [device for room in rooms for device in room['devices']]
+    all_devices = [device for room in rooms for device in room['devices'] if not device.get('disabled')]
     sorted_devices = sorted(all_devices, key=lambda x: x.get('priority', 0))
 
     for device in sorted_devices:
@@ -719,6 +723,8 @@ def update_ags_status(ags_config, hass):
         room_tv_on = False
         room_tv_audio = False
         for device in room['devices']:
+            if device.get('disabled'):
+                continue
             device_state = device_states.get(device['device_id'])
             # FIX 6: Ghost TV expansion
             if (
@@ -765,6 +771,8 @@ def check_primary_speaker_logic(ags_config, hass):
         override_devices = []
         for room in rooms:
             for device in room['devices']:
+                if device.get('disabled'):
+                    continue
                 override_val = device.get('override_content')
                 if override_val:
                     state = hass.states.get(device['device_id'])
@@ -887,7 +895,7 @@ def update_speaker_states(rooms, hass):
     inactive_speakers = []
 
     # All speakers list
-    all_speakers = [device['device_id'] for room in rooms for device in room['devices'] if device['device_type'] == 'speaker']
+    all_speakers = [device['device_id'] for room in rooms for device in room['devices'] if device['device_type'] == 'speaker' and not device.get('disabled')]
 
     # If AGS system status is 'OFF' or the media system state is 'off', all speakers are inactive
     if ags_status == 'OFF':
@@ -895,6 +903,8 @@ def update_speaker_states(rooms, hass):
     else:
         for room in rooms:
             for device in room['devices']:
+                if device.get('disabled'):
+                    continue
                 if device['device_type'] == 'speaker':
                     if room['room'] in active_rooms:
                         active_speakers.append(device['device_id'])
@@ -918,7 +928,7 @@ def get_preferred_primary_speaker(rooms, hass):
         preferred_primary_speaker = "none"
     else:
         # Generate a list of all devices in active speakers
-        all_devices = [device for room in rooms for device in room['devices'] if device['device_id'] in active_speakers]
+        all_devices = [device for room in rooms for device in room['devices'] if device['device_id'] in active_speakers and not device.get('disabled')]
 
         # Sort the devices by priority (lowest number first)
         sorted_devices = sorted(all_devices, key=lambda x: x['priority'])
@@ -942,7 +952,7 @@ def get_inactive_tv_speakers(rooms, hass):
         active_rooms = hass.data.get('active_rooms')
         inactive_rooms = [room for room in rooms if active_rooms is not None and room['room'] not in active_rooms]
 
-    inactive_tv_speakers = [device['device_id'] for room in inactive_rooms for device in room['devices'] if device['device_type'] == 'speaker' and any(d['device_type'] == 'tv' for d in room['devices'])]
+    inactive_tv_speakers = [device['device_id'] for room in inactive_rooms for device in room['devices'] if device['device_type'] == 'speaker' and not device.get('disabled') and any(d['device_type'] == 'tv' and not d.get('disabled') for d in room['devices'])]
 
     # Write the inactive TV speakers' state to hass.data
     hass.data['ags_inactive_tv_speakers'] = inactive_tv_speakers
@@ -969,6 +979,8 @@ def get_control_device_id(ags_config, hass):
     primary_room_devices = None
     for room in ags_config.get('rooms', []):
         for device in room['devices']:
+            if device.get('disabled'):
+                continue
             if device['device_id'] == primary_speaker:
                 primary_room = room
                 primary_room_devices = room['devices']
@@ -977,28 +989,40 @@ def get_control_device_id(ags_config, hass):
             break
 
     if ags_status == 'ON TV' and primary_room_devices:
-        sorted_devices = sorted(
-            [d for d in primary_room_devices if d['device_type'] != 'speaker'],
-            key=lambda x: x['priority'],
+        # Filter and sort TV devices by rank
+        tvs = sorted(
+            [d for d in primary_room_devices if d.get('device_type') == 'tv' and not d.get('disabled')],
+            key=lambda x: x.get('priority', 999),
         )
-        if sorted_devices:
-            tv_device = sorted_devices[0]
-            ott_devices = tv_device.get('ott_devices')
+
+        if tvs:
+            tv_device = tvs[0]
+
+            # Find OTT devices linked to this TV
+            ott_devices = sorted(
+                [d for d in primary_room_devices if d.get('device_type') == 'ott' and d.get('parent_tv') == tv_device['device_id'] and not d.get('disabled')],
+                key=lambda x: x.get('priority', 999)
+            )
 
             if ott_devices:
-                # Fetch the TV's current state to see what input is active
+                # 1. Active Promotion: If any OTT device is playing, it takes priority
+                for ott in ott_devices:
+                    ott_state = hass.states.get(ott.get('device_id'))
+                    if ott_state and ott_state.state == "playing":
+                        return ott['device_id']
+
+                # 2. Source Matching: If TV's source matches an OTT's TV Input Name
                 tv_state = hass.states.get(tv_device['device_id'])
                 current_input = tv_state.attributes.get('source') if tv_state else None
+                if current_input:
+                    for ott in ott_devices:
+                        if str(ott.get('tv_input')).strip().lower() == str(current_input).strip().lower():
+                            return ott['device_id']
 
-                # Try to find a matching input
-                for ott in ott_devices:
-                    if ott.get('tv_input') == current_input:
-                        return ott['ott_device']
+                # 3. Ranked Fallback: Pick the highest ranked (lowest priority number) OTT device
+                return ott_devices[0]['device_id']
 
-                # Fallback to the first device in the list if no match
-                return ott_devices[0]['ott_device']
-
-            return tv_device.get('ott_device', tv_device['device_id'])
+            return tv_device['device_id']
 
     primary_state = hass.states.get(primary_speaker) if primary_speaker else None
     if primary_state is not None and primary_state.state.lower() not in TV_IGNORE_STATES:
@@ -1364,6 +1388,8 @@ async def _handle_ags_status_change(hass, ags_config, new_status, old_status):
             for room in rooms:
                 room_tv_no_music = False
                 for device in room['devices']:
+                    if device.get('disabled'):
+                        continue
                     if device.get('device_type') == 'tv' and device.get('tv_mode') == TV_MODE_NO_MUSIC:
                         s = hass.states.get(device['device_id'])
                         # FIX 6: Ghost TV
@@ -1373,6 +1399,8 @@ async def _handle_ags_status_change(hass, ags_config, new_status, old_status):
 
                 if room["room"] not in active_rooms:
                     for d in room["devices"]:
+                        if d.get('disabled'):
+                            continue
                         if d.get("device_type") == "speaker":
                             # If room is inactive but it's a TV room in NO_MUSIC mode, skip shutdown
                             if room_tv_no_music:
@@ -1556,6 +1584,8 @@ def get_browsing_fallback_speaker(rooms, hass):
     all_speakers = []
     for room in rooms:
         for device in room['devices']:
+            if device.get('disabled'):
+                continue
             if device.get('device_type') == 'speaker':
                 all_speakers.append(device)
 

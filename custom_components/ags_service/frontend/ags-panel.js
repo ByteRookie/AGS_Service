@@ -21,6 +21,7 @@ class AGSPanel extends HTMLElement {
     this.loadingBrowseResults = false;
     this.refreshingSources = false;
     this.loadingSourceCatalog = false;
+    this._sourceCatalogLoadScheduled = false;
     this.browserCatalogSources = [];
     this._sourceCatalogLoaded = false;
     this._initRunId = 0;
@@ -28,6 +29,10 @@ class AGSPanel extends HTMLElement {
     this.sourcesFolderView = false;
     this.roomsSubTab = "room";
     this.areaImportOpen = false;
+    this.addRoomModalOpen = false;
+    this.linkingRoomIdx = null;
+    this.syncPromptOpen = false;
+    this.syncPromptData = null;
     this.areaImportLoading = false;
     this.areaImportError = "";
     this.haAreas = [];
@@ -207,6 +212,53 @@ class AGSPanel extends HTMLElement {
     return target.node && target.node.isConnected !== false ? target.node : null;
   }
 
+  captureFocusState() {
+    const active = this.shadowRoot.activeElement;
+    if (!active) return null;
+    
+    return {
+        id: active.getAttribute("data-focus-id") || active.id || active.name || active.tagName,
+        selectionStart: active.selectionStart,
+        selectionEnd: active.selectionEnd,
+        path: active.getAttribute("data-path")
+    };
+  }
+
+  restoreFocusState(state) {
+    if (!state) return;
+    
+    let selector = "";
+    if (state.path) {
+        selector = `[data-path="${state.path}"]`;
+    } else if (state.id) {
+        const byFocusId = this.shadowRoot.querySelector(`[data-focus-id="${state.id}"]`);
+        if (byFocusId) {
+            byFocusId.focus();
+            this._applySelection(byFocusId, state);
+            return;
+        }
+        selector = `#${state.id}, [name="${state.id}"]`;
+    }
+    
+    if (selector) {
+        const el = this.shadowRoot.querySelector(selector);
+        if (el) {
+            el.focus();
+            this._applySelection(el, state);
+        }
+    }
+  }
+
+  _applySelection(el, state) {
+    if (state.selectionStart !== undefined && el.setSelectionRange) {
+        try {
+            el.setSelectionRange(state.selectionStart, state.selectionEnd);
+        } catch (e) {
+            // ignore for non-text inputs
+        }
+    }
+  }
+
   restoreScrollState(state, resetToTop = false) {
     if (!state) return;
 
@@ -305,6 +357,7 @@ class AGSPanel extends HTMLElement {
         schedule_entity: null,
         default_source_schedule: null,
         batch_unjoin: false,
+        native_room_popup: true,
       };
     }
 
@@ -336,6 +389,7 @@ class AGSPanel extends HTMLElement {
       schedule_entity: config.schedule_entity || null,
       default_source_schedule: config.default_source_schedule || null,
       batch_unjoin: Boolean(config.batch_unjoin),
+      native_room_popup: config.native_room_popup !== false,
     };
     normalized.rooms = normalized.rooms.map((room) => {
       const devices = Array.isArray(room?.devices)
@@ -344,7 +398,9 @@ class AGSPanel extends HTMLElement {
               const rawPriority = Number(device?.priority);
               const normalizedDevice = {
                 device_id: normalizeEntityValue(device?.device_id || ""),
-                device_type: device?.device_type === "tv" ? "tv" : "speaker",
+                device_type: ["tv", "speaker", "ott"].includes(device?.device_type) ? device.device_type : "speaker",
+                unique_id: device?.unique_id || Math.random().toString(36).substring(2, 11),
+                disabled: Boolean(device?.disabled),
                 priority:
                   Number.isFinite(rawPriority) && rawPriority > 0
                     ? rawPriority
@@ -367,6 +423,13 @@ class AGSPanel extends HTMLElement {
                       }))
                       .filter((mapping) => mapping.ott_device || mapping.tv_input)
                   : [];
+              } else if (normalizedDevice.device_type === "speaker") {
+                normalizedDevice.volume_offset = Number(device?.volume_offset || 0);
+                normalizedDevice.tv_speaker_mode = device?.tv_speaker_mode || "";
+                normalizedDevice.election_toggle = device?.election_toggle || "primary";
+              } else if (normalizedDevice.device_type === "ott") {
+                normalizedDevice.tv_input = device?.tv_input || "";
+                normalizedDevice.parent_tv = device?.parent_tv || "";
               }
 
               return normalizedDevice;
@@ -452,6 +515,8 @@ class AGSPanel extends HTMLElement {
   }
 
   getBrowserSourceId(item) {
+    const explicitId = String(item?.id || "").trim();
+    if (explicitId.startsWith("browser::")) return explicitId;
     const mediaType = String(item?.media_content_type || "music").trim() || "music";
     const value = String(item?.media_content_id || item?.Source_Value || "").trim();
     const title = String(item?.title || item?.Source || "").trim();
@@ -557,16 +622,29 @@ class AGSPanel extends HTMLElement {
   }
 
   getHiddenSources(config = this.config) {
-    const fromEntity = this.getAgsSourceEntries("ags_hidden_sources");
-    if (fromEntity.length) return fromEntity;
+    const visibleSources = this.getVisibleSources(config);
+    const visibleIds = new Set(visibleSources.map((source) => this.getSourceId(source)));
+    const visibleValues = new Set(visibleSources.map((source) => String(source.Source_Value || "").trim()).filter(Boolean));
+    const hidden = [];
+    const seen = new Set();
+    const addHidden = (source) => {
+      const normalized = this.normalizeSourceEntries([source])[0];
+      if (!normalized) return;
+      const id = this.getSourceId(normalized);
+      const value = String(normalized.Source_Value || "").trim();
+      const nameKey = String(normalized.Source || "").trim().toLowerCase();
+      if (!id || visibleIds.has(id) || (value && visibleValues.has(value))) return;
+      const seenKey = `${id}::${nameKey}`;
+      if (seen.has(seenKey) || seen.has(id) || (value && seen.has(value))) return;
+      seen.add(seenKey);
+      seen.add(id);
+      if (value) seen.add(value);
+      hidden.push(normalized);
+    };
 
-    const visibleIds = new Set(this.getVisibleSources(config).map((source) => this.getSourceId(source)));
-    const visibleValues = new Set(this.getVisibleSources(config).map((source) => String(source.Source_Value || "").trim()).filter(Boolean));
-    return this.getAllKnownSources(config).filter((source) => {
-      const id = this.getSourceId(source);
-      const value = String(source.Source_Value || "").trim();
-      return id && !visibleIds.has(id) && !visibleValues.has(value);
-    });
+    this.getAllKnownSources(config).forEach(addHidden);
+    this.getAgsSourceEntries("ags_hidden_sources").forEach(addHidden);
+    return hidden;
   }
 
   getSourceDisplayName(source, config = this.config) {
@@ -877,7 +955,26 @@ class AGSPanel extends HTMLElement {
     return Boolean(String(node.media_content_type || "").trim() && String(node.media_content_id || "").trim());
   }
 
-  normalizeBrowseItem(item) {
+  getBrowseThumbnail(item, fallback = "") {
+    return String(
+      item?.thumbnail
+        || item?.thumbnail_url
+        || item?.entity_picture
+        || item?.media_image_url
+        || item?.media_image
+        || item?.image
+        || item?.image_url
+        || item?.artwork
+        || item?.artwork_url
+        || item?.album_art
+        || item?.poster
+        || item?.poster_url
+        || fallback
+        || "",
+    ).trim();
+  }
+
+  normalizeBrowseItem(item, inheritedThumbnail = "") {
     if (!item || typeof item !== "object") {
       return null;
     }
@@ -885,8 +982,9 @@ class AGSPanel extends HTMLElement {
       return null;
     }
 
+    const thumbnail = this.getBrowseThumbnail(item, inheritedThumbnail);
     const children = Array.isArray(item.children)
-      ? item.children.map((child) => this.normalizeBrowseItem(child)).filter(Boolean)
+      ? item.children.map((child) => this.normalizeBrowseItem(child, thumbnail)).filter(Boolean)
       : [];
     const rawTitle = String(
       item.title || item.name || item.media_title || item.media_content_id || item.media_class || "",
@@ -902,7 +1000,7 @@ class AGSPanel extends HTMLElement {
       media_class: String(item.media_class || mediaContentType || (canExpand ? "folder" : "media")).trim(),
       media_content_type: mediaContentType,
       media_content_id: mediaContentId,
-      thumbnail: String(item.thumbnail || item.entity_picture || item.media_image_url || item.image || "").trim(),
+      thumbnail,
       can_expand: canExpand,
       can_play: canPlay,
       children,
@@ -1343,6 +1441,7 @@ class AGSPanel extends HTMLElement {
       ott_device: "",
       ott_devices: [],
       override_content: "",
+      unique_id: Math.random().toString(36).substring(2, 11),
     });
     this.config = this.normalizeConfig(this.config);
     this.renumberGlobalDevicePriorities();
@@ -1421,7 +1520,6 @@ class AGSPanel extends HTMLElement {
       [sourceId]: name,
     };
     this.markConfigDirty();
-    this.render();
   }
 
   setDefaultSourceId(sourceId) {
@@ -1494,6 +1592,95 @@ class AGSPanel extends HTMLElement {
     });
   }
 
+  async checkDeviceAreaSync(path, entityId) {
+    if (!entityId || !this.hass) return;
+
+    // Extract room index from path (e.g., "rooms.0.devices.1.device_id")
+    const match = path.match(/^rooms\.(\d+)\.devices/);
+    if (!match) return;
+
+    const roomIndex = parseInt(match[1]);
+    const room = this.config.rooms[roomIndex];
+    if (!room || !room.ha_area_id || !room.ha_area_linked) return;
+
+    // Get entity info from HA
+    // Note: hass.entities is not standard HA, it's usually in hass.states or we need to use registry
+    // But many panels have a mapping. Let's check if hass.entities exists.
+    // In this codebase, it seems they use hass.states mostly.
+
+    // Let's try to get area_id from the entity registry if possible, or assume it's in some other way.
+    // Actually, HA doesn't expose the area_id of an entity directly in the state object.
+    // We might need to call a WS command to get entity details.
+
+    try {
+        const entityReg = await this.hass.callWS({ type: "config/entity_registry/get", entity_id: entityId });
+        if (!entityReg || !entityReg.device_id) return;
+
+        const deviceReg = await this.hass.callWS({ type: "config/device_registry/get", device_id: entityReg.device_id });
+        if (!deviceReg) return;
+
+        const currentAreaId = entityReg.area_id || deviceReg.area_id;
+
+        if (currentAreaId && currentAreaId !== room.ha_area_id) {
+          this.syncPromptOpen = true;
+          this.syncPromptData = {
+            entityId,
+            deviceName: entityReg.name || entityReg.original_name || entityId,
+            deviceId: entityReg.device_id,
+            targetAreaId: room.ha_area_id,
+            targetAreaName: room.ha_area_name,
+            roomName: room.room
+          };
+          this.render();
+        }
+    } catch (e) {
+        console.warn("Failed to check area sync", e);
+    }
+  }
+
+  async performAreaSync() {
+    if (!this.syncPromptData) return;
+    const { deviceId, targetAreaId } = this.syncPromptData;
+    try {
+      await this.hass.callWS({
+        type: "config/device_registry/update",
+        device_id: deviceId,
+        area_id: targetAreaId
+      });
+      await this.loadHaAreas();
+    } catch (err) {
+      console.error("Failed to sync area", err);
+    } finally {
+      this.syncPromptOpen = false;
+      this.syncPromptData = null;
+      this.render();
+    }
+  }
+
+  renderSyncPromptModal() {
+    if (!this.syncPromptOpen || !this.syncPromptData) return "";
+    const { deviceName, roomName, targetAreaName } = this.syncPromptData;
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">Area Sync</div>
+              <h3>Drift Detected</h3>
+            </div>
+          </div>
+          <div style="margin-bottom:24px; line-height:1.6;">
+            Move <strong>${this.escapeHtml(deviceName)}</strong> to the <strong>${this.escapeHtml(targetAreaName || roomName)}</strong> Area in Home Assistant?
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:12px;">
+            <button class="secondary-btn" onclick="this.getRootNode().host.syncPromptOpen=false; this.getRootNode().host.render();">No</button>
+            <button class="primary-btn" onclick="this.getRootNode().host.performAreaSync()">Yes, Move Device</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   moveDeviceRankByKey(deviceKey, targetIndex) {
     const ranked = this.getRankedDevices();
     const fromIndex = ranked.findIndex((row) => `${row.roomIndex}:${row.deviceIndex}` === deviceKey);
@@ -1534,6 +1721,42 @@ class AGSPanel extends HTMLElement {
     this.draggingDeviceKey = null;
     if (sourceKey) {
       this.moveDeviceRankByKey(sourceKey, targetIndex);
+    }
+  }
+
+  handleDeviceRoomDrop(event, roomIndex, targetDeviceIndex) {
+    event.preventDefault();
+    const sourceKey = event.dataTransfer.getData("text/plain") || this.draggingDeviceKey;
+    this.draggingDeviceKey = null;
+    if (!sourceKey) return;
+
+    const parts = sourceKey.split(':');
+    if (parts.length !== 2) return;
+    const srcRoomIdx = parseInt(parts[0]);
+    const srcDevIdx = parseInt(parts[1]);
+
+    if (srcRoomIdx !== roomIndex) return;
+
+    const room = this.config.rooms[roomIndex];
+    const sourceDevice = room.devices[srcDevIdx];
+    const targetDevice = room.devices[targetDeviceIndex];
+
+    if (!sourceDevice || !targetDevice) return;
+
+    if (sourceDevice.device_type === 'ott' && targetDevice.device_type === 'tv') {
+        sourceDevice.parent_tv = targetDevice.device_id;
+        this.editingDeviceKey = sourceKey;
+        this.markConfigDirty();
+        this.render();
+    } else if (srcDevIdx !== targetDeviceIndex) {
+        // Fallback to simple re-order within the room if not nesting
+        const devices = [...room.devices];
+        const [moved] = devices.splice(srcDevIdx, 1);
+        devices.splice(targetDeviceIndex, 0, moved);
+        room.devices = devices;
+        this.renumberGlobalDevicePriorities();
+        this.markConfigDirty();
+        this.render();
     }
   }
 
@@ -1616,9 +1839,68 @@ class AGSPanel extends HTMLElement {
     this.render();
   }
 
+  async openAddRoomModal() {
+    this.addRoomModalOpen = true;
+    this.linkingRoomIdx = null;
+    this.areaSearch = "";
+    this.render();
+    if (!this.haAreas.length) {
+      await this.loadHaAreas();
+    }
+  }
+
+  closeAddRoomModal() {
+    this.addRoomModalOpen = false;
+    this.linkingRoomIdx = null;
+    this.render();
+  }
+
+  updateAreaSearch(value) {
+    this.areaSearch = String(value || "");
+    this.render();
+  }
+
+  getSimilarity(s1, s2) {
+    let longer = s1;
+    let shorter = s2;
+    if (s1.length < s2.length) {
+      longer = s2;
+      shorter = s1;
+    }
+    const longerLength = longer.length;
+    if (longerLength === 0) {
+      return 1.0;
+    }
+    return (longerLength - this.editDistance(longer, shorter)) / parseFloat(longerLength);
+  }
+
+  editDistance(s1, s2) {
+    s1 = s1.toLowerCase();
+    s2 = s2.toLowerCase();
+    const costs = [];
+    for (let i = 0; i <= s1.length; i++) {
+      let lastValue = i;
+      for (let j = 0; j <= s2.length; j++) {
+        if (i === 0) {
+          costs[j] = j;
+        } else if (j > 0) {
+          let newValue = costs[j - 1];
+          if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+          }
+          costs[j - 1] = lastValue;
+          lastValue = newValue;
+        }
+      }
+      if (i > 0) {
+        costs[s2.length] = lastValue;
+      }
+    }
+    return costs[s2.length];
+  }
+
   async loadHaAreas() {
     if (!this.hass) return;
-    this.areaImportOpen = true;
     this.areaImportLoading = true;
     this.areaImportError = "";
     this.render();
@@ -1633,29 +1915,170 @@ class AGSPanel extends HTMLElement {
     }
   }
 
-  closeAreaImport() {
-    this.areaImportOpen = false;
-    this.areaImportError = "";
+  renderAddRoomModal() {
+    if (!this.addRoomModalOpen) return "";
+
+    const query = (this.areaSearch || "").trim().toLowerCase();
+    let exactMatch = null;
+    let likelyMatches = [];
+    let otherAreas = [];
+
+    this.haAreas.forEach((area) => {
+      const name = area.name.toLowerCase();
+      if (name === query) {
+        exactMatch = area;
+      } else {
+        const sim = this.getSimilarity(name, query);
+        if (sim > 0.85) {
+          likelyMatches.push({ ...area, similarity: sim });
+        } else {
+          otherAreas.push(area);
+        }
+      }
+    });
+
+    likelyMatches.sort((a, b) => b.similarity - a.similarity);
+    otherAreas.sort((a, b) => a.name.localeCompare(b.name));
+
+    const showCreation = query && !exactMatch;
+
+    return `
+      <div class="modal-backdrop" onclick="this.getRootNode().host.closeAddRoomModal()">
+        <div class="modal-card" onclick="event.stopPropagation()">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">Setup</div>
+              <h3>Link to Home Assistant Area?</h3>
+            </div>
+            <button class="secondary-btn icon-only-btn" onclick="this.getRootNode().host.closeAddRoomModal()"><ha-icon icon="mdi:close"></ha-icon></button>
+          </div>
+
+          <div style="margin-bottom: 20px;">
+            <input 
+              type="text" 
+              placeholder="Search areas..." 
+              value="${this.escapeHtml(this.areaSearch || "")}"
+              oninput="this.getRootNode().host.updateAreaSearch(this.value)"
+              data-focus-id="area-search-input"
+              autofocus
+            />
+          </div>
+          ${this.areaImportLoading ? '<div class="empty-state">Loading areas...</div>' : ""}
+
+          <div class="stack">
+            ${showCreation ? `
+              <button class="list-select" onclick="this.getRootNode().host.createNewRoom('${this.escapeJsString(this.areaSearch)}')">
+                <ha-icon icon="mdi:plus-box" style="margin-right: 12px; color: var(--ags-primary);"></ha-icon>
+                <span style="flex: 1;">Create Room: <strong>${this.escapeHtml(this.areaSearch)}</strong></span>
+                <span class="status-pill info">Manual</span>
+              </button>
+            ` : ""}
+
+            ${exactMatch ? `
+              <button class="list-select active" onclick="this.getRootNode().host.importHaArea('${this.escapeJsString(exactMatch.area_id)}')">
+                <ha-icon icon="mdi:check-circle" style="margin-right: 12px; color: var(--ags-on-primary);"></ha-icon>
+                <span style="flex: 1;">${this.escapeHtml(exactMatch.name)}</span>
+                <span class="status-pill">${(exactMatch.media_players || []).length} Devices</span>
+              </button>
+            ` : ""}
+
+            ${likelyMatches.map(area => `
+              <button class="list-select" onclick="this.getRootNode().host.importHaArea('${this.escapeJsString(area.area_id)}')">
+                <ha-icon icon="mdi:map-marker-radius" style="margin-right: 12px; color: var(--ags-primary);"></ha-icon>
+                <span style="flex: 1;">${this.escapeHtml(area.name)}</span>
+                <span class="status-pill">${(area.media_players || []).length} Devices</span>
+              </button>
+            `).join("")}
+
+            ${otherAreas.map(area => `
+              <button class="list-select" onclick="this.getRootNode().host.importHaArea('${this.escapeJsString(area.area_id)}')">
+                <span style="flex: 1;">${this.escapeHtml(area.name)}</span>
+                <span class="status-pill">${(area.media_players || []).length}</span>
+              </button>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  createNewRoom(name) {
+    this.config.rooms.push({
+      room: name || `Room ${this.config.rooms.length + 1}`,
+      devices: [],
+    });
+    this.config = this.normalizeConfig(this.config);
+    this.selectedRoomIdx = this.config.rooms.length - 1;
+    this.addRoomModalOpen = false;
+    this.markConfigDirty();
     this.render();
+  }
+
+  hideDevice(roomIndex, deviceIndex) {
+    const room = this.config.rooms[roomIndex];
+    const device = room.devices[deviceIndex];
+    if (room.ha_area_linked) {
+      device.disabled = true;
+    } else {
+      room.devices.splice(deviceIndex, 1);
+    }
+    this.markConfigDirty();
+    this.render();
+  }
+
+  restoreDevice(roomIndex, deviceIndex) {
+    const device = this.config.rooms[roomIndex].devices[deviceIndex];
+    device.disabled = false;
+    this.markConfigDirty();
+    this.render();
+  }
+
+  async openLinkAreaModal(roomIndex) {
+    this.linkingRoomIdx = roomIndex;
+    const room = this.config?.rooms?.[roomIndex];
+    this.areaSearch = room?.ha_area_name || room?.room || "";
+    this.addRoomModalOpen = true;
+    this.render();
+    if (!this.haAreas.length) {
+      await this.loadHaAreas();
+    }
+  }
+
+  unlinkArea(roomIndex) {
+    const room = this.config.rooms[roomIndex];
+    if (room) {
+        room.ha_area_linked = false;
+        room.ha_area_id = "";
+        room.ha_area_name = "";
+        this.markConfigDirty();
+        this.render();
+    }
   }
 
   importHaArea(areaId) {
     const area = this.haAreas.find((entry) => entry.area_id === areaId);
     if (!area) return;
-    const existingIndex = this.config.rooms.findIndex((room) => room.ha_area_id === areaId);
-    const existingRoom = existingIndex >= 0 ? this.config.rooms[existingIndex] : null;
+
+    let roomIndex = this.linkingRoomIdx;
+    if (roomIndex === null) {
+        roomIndex = this.config.rooms.findIndex((room) => room.ha_area_id === areaId);
+    }
+
+    const existingRoom = roomIndex !== null && roomIndex >= 0 ? this.config.rooms[roomIndex] : null;
     const existingById = new Map((existingRoom?.devices || []).map((device) => [device.device_id, device]));
-    const nextDevices = (area.media_players || []).map((entity, index) => {
-      const existing = existingById.get(entity.entity_id);
-      return existing
-        ? { ...existing }
-        : {
+
+    const nextDevices = [...(existingRoom?.devices || [])];
+    (area.media_players || []).forEach((entity) => {
+      if (!existingById.has(entity.entity_id)) {
+        nextDevices.push({
             device_id: entity.entity_id,
             device_type: entity.device_type === "tv" ? "tv" : "speaker",
-            priority: this.getRankedDevices().length + index + 1,
+            priority: this.getRankedDevices().length + nextDevices.length + 1,
             override_content: "",
-          };
+        });
+      }
     });
+
     const room = {
       ...(existingRoom || {}),
       room: existingRoom?.room || area.name || "Imported Room",
@@ -1664,14 +2087,18 @@ class AGSPanel extends HTMLElement {
       ha_area_linked: true,
       devices: nextDevices,
     };
-    if (existingIndex >= 0) {
-      this.config.rooms[existingIndex] = room;
-      this.selectedRoomIdx = existingIndex;
+
+    if (roomIndex !== null && roomIndex >= 0) {
+      this.config.rooms[roomIndex] = room;
+      this.selectedRoomIdx = roomIndex;
     } else {
       this.config.rooms.push(room);
       this.selectedRoomIdx = this.config.rooms.length - 1;
     }
+
     this.areaImportOpen = false;
+    this.addRoomModalOpen = false;
+    this.linkingRoomIdx = null;
     this.config = this.normalizeConfig(this.config);
     this.renumberGlobalDevicePriorities();
     this.markConfigDirty();
@@ -1781,18 +2208,19 @@ class AGSPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((picker) => {
       if (!picker.__agsBound) {
         picker.hass = this.hass;
-        const includeDomains = picker.getAttribute("include-domains");
-
-        try {
-          if (includeDomains) {
-            picker.includeDomains = JSON.parse(includeDomains);
+        const domainAttr = picker.getAttribute("include-domains");
+        if (domainAttr) {
+          try {
+            // try JSON first, fallback to comma string
+            picker.includeDomains = domainAttr.startsWith("[") ? JSON.parse(domainAttr) : domainAttr.split(",");
+          } catch (e) {
+            picker.includeDomains = domainAttr.split(",");
           }
-        } catch (error) {
-          console.error("Failed to parse include-domains", error);
         }
 
         picker.allowCustomEntity = true;
         picker.clearable = true;
+        picker.label = picker.getAttribute("label") || "";
         const value = picker.getAttribute("data-value") || "";
         picker.value = value;
 
@@ -1811,6 +2239,11 @@ class AGSPanel extends HTMLElement {
           }
 
           this.updateConfig(path, sanitized);
+
+          // Check for area sync if this is a room device_id
+          if (path.includes(".devices.") && path.endsWith(".device_id") && sanitized) {
+            this.checkDeviceAreaSync(path, sanitized);
+          }
         };
 
         picker.__agsValueChangeHandler = handleValueChange;
@@ -1850,13 +2283,17 @@ class AGSPanel extends HTMLElement {
    dashboard.hass = this.hass;
   }
   renderEntityField(label, path, value, domains = ["media_player"], options = {}) {
+    const domainStr = Array.isArray(domains) ? domains.join(",") : domains;
     return `
       <div>
         <label>${this.escapeHtml(label)}</label>
         <ha-entity-picker
           data-path="${path}"
-          ${domains.length ? `include-domains='${this.escapeHtml(JSON.stringify(domains))}'` : ""}
+          data-focus-id="picker-${path}"
+          include-domains="${this.escapeHtml(domainStr)}"
           data-value="${this.escapeHtml(value || "")}"
+          label="${this.escapeHtml(label)}"
+          allow-custom-entity
         ></ha-entity-picker>
       </div>
     `;
@@ -1976,7 +2413,9 @@ class AGSPanel extends HTMLElement {
   }
 
   async browseCatalogNode(entityId, node = null, folderPath = [], results = [], seen = new Set(), depth = 0) {
-    if (results.length >= 250 || depth > 2) {
+    const maxItems = 600;
+    const maxDepth = 4;
+    if (results.length >= maxItems || depth > maxDepth) {
       return results;
     }
 
@@ -1996,7 +2435,7 @@ class AGSPanel extends HTMLElement {
     const normalized = this.normalizeBrowseResponse(response);
     const children = Array.isArray(normalized?.children) ? normalized.children : [];
     for (const child of children) {
-      if (results.length >= 250) break;
+      if (results.length >= maxItems) break;
       const childTitle = String(child.title || child.name || "").trim();
       this.appendBrowseCatalogItem(child, folderPath, results, seen);
       const canExpand = Boolean(child.can_expand || (Array.isArray(child.children) && child.children.length));
@@ -2018,6 +2457,7 @@ class AGSPanel extends HTMLElement {
   async ensureSourceCatalogLoaded(force = false) {
     if (!this.hass || this.loadingSourceCatalog) return;
     if (!force && this._sourceCatalogLoaded) return;
+    this._sourceCatalogLoadScheduled = false;
     this.loadingSourceCatalog = true;
     this.render();
     try {
@@ -2574,26 +3014,54 @@ class AGSPanel extends HTMLElement {
     const friendlyName = stateObj?.attributes?.friendly_name || device.device_id || "Select Entity";
     const deviceKey = `${roomIndex}:${deviceIndex}`;
     const isEditing = this.editingDeviceKey === deviceKey;
-    const globalRank = this.getRankedDevices().findIndex((row) => row.roomIndex === roomIndex && row.deviceIndex === deviceIndex) + 1;
-    const icon = device.device_type === "tv" ? "mdi:television" : "mdi:speaker";
-    const typeLabel = device.device_type === "tv" ? "TV" : "Speaker";
+    const rankedDevices = this.getRankedDevices();
+    const globalRank = rankedDevices.findIndex((row) => row.roomIndex === roomIndex && row.deviceIndex === deviceIndex) + 1;
+
+    let icon = "mdi:speaker";
+    let typeLabel = "Speaker";
+    if (device.device_type === "tv") {
+        icon = "mdi:television";
+        typeLabel = "TV";
+    } else if (device.device_type === "ott") {
+        icon = "mdi:cast-connected";
+        typeLabel = "OTT Player";
+    }
+
+    const isOtt = device.device_type === "ott";
+    const isTv = device.device_type === "tv";
+    const isSpeaker = device.device_type === "speaker";
 
     return `
-      <div class="device-card room-device-card">
+      <div
+        class="device-card room-device-card ${isOtt ? 'ott-nested-card' : ''}"
+        draggable="true"
+        ondragstart="this.getRootNode().host.handleDeviceDragStart(event, ${roomIndex}, ${deviceIndex})"
+        ondragover="event.preventDefault()"
+        ondrop="this.getRootNode().host.handleDeviceRoomDrop(event, ${roomIndex}, ${deviceIndex})"
+      >
         <div class="device-summary">
           <div class="device-title-row">
-            <div class="rank-badge">${globalRank || "-"}</div>
-            <div class="device-icon"><ha-icon icon="${icon}"></ha-icon></div>
+            <div class="rank-badge-wrap">
+                <input
+                    type="number"
+                    class="rank-badge-input"
+                    value="${globalRank || device.priority}"
+                    min="1"
+                    max="${rankedDevices.length}"
+                    onchange="this.getRootNode().host.setDevicePriority(${roomIndex}, ${deviceIndex}, this.value)"
+                />
+            </div>
+            <div class="device-icon ${isOtt ? 'ott-icon' : ''}"><ha-icon icon="${icon}"></ha-icon></div>
             <div class="device-copy">
               <div class="section-title">${this.escapeHtml(friendlyName)}</div>
               <div class="section-help">${this.escapeHtml(device.device_id || "Choose a media player")}</div>
             </div>
           </div>
           <div class="header-meta">
-            ${this.renderTonePill(typeLabel, device.device_type === "tv" ? "good" : "neutral")}
+            ${this.renderTonePill(typeLabel, isTv ? "good" : (isOtt ? "info" : "neutral"))}
             ${this.renderTonePill(stateText, stateObj ? "info" : "warn")}
             <button class="secondary-btn icon-only-btn" title="${isEditing ? "Close" : "Edit"}" onclick="this.getRootNode().host.setEditingDevice('${deviceKey}')"><ha-icon icon="${isEditing ? "mdi:close" : "mdi:pencil"}"></ha-icon></button>
-            <button class="danger-btn icon-only-btn" title="Remove" onclick="this.getRootNode().host.removeAt('rooms.${roomIndex}.devices', ${deviceIndex})"><ha-icon icon="mdi:delete"></ha-icon></button>
+            <button class="danger-btn icon-only-btn" title="Remove" onclick="this.getRootNode().host.hideDevice(${roomIndex}, ${deviceIndex})"><ha-icon icon="mdi:delete"></ha-icon></button>
           </div>
         </div>
 
@@ -2601,41 +3069,69 @@ class AGSPanel extends HTMLElement {
           <div class="device-editor">
             <div class="grid cols-2">
               ${this.renderEntityField("Media Player Entity", `rooms.${roomIndex}.devices.${deviceIndex}.device_id`, device.device_id, ["media_player"])}
-              <div class="grid cols-2" style="gap:16px;">
-                  <div>
-                    <label>Device Type</label>
-                    <select onchange="this.getRootNode().host.changeDeviceType(${roomIndex}, ${deviceIndex}, this.value)">
-                    <option value="speaker" ${device.device_type === "speaker" ? "selected" : ""}>Speaker</option>
-                    <option value="tv" ${device.device_type === "tv" ? "selected" : ""}>Television</option>
-                  </select>
-                </div>
-                  <div>
-                    <label>Global Rank</label>
-                  <input type="number" min="1" max="${this.getRankedDevices().length}" value="${globalRank || device.priority}" onchange="this.getRootNode().host.setDevicePriority(${roomIndex}, ${deviceIndex}, this.value)" />
-                  </div>
-                </div>
+              <div>
+                <label>Device Type</label>
+                <select onchange="this.getRootNode().host.changeDeviceType(${roomIndex}, ${deviceIndex}, this.value)">
+                    <option value="speaker" ${isSpeaker ? "selected" : ""}>Speaker</option>
+                    <option value="tv" ${isTv ? "selected" : ""}>Television</option>
+                    <option value="ott" ${isOtt ? "selected" : ""}>OTT Player</option>
+                </select>
               </div>
-
-            ${device.device_type === "tv" ? `
-              <div class="grid cols-2" style="margin-top:20px; gap:20px;">
-                <div>
-                  <label>TV Behavior</label>
-                  <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_mode', this.value)">
-                    <option value="tv_audio" ${device.tv_mode === "tv_audio" ? "selected" : ""}>TV Audio (Include Room)</option>
-                    <option value="no_music" ${device.tv_mode === "no_music" ? "selected" : ""}>No Music (Isolate Room)</option>
-                  </select>
-                </div>
-                ${this.renderEntityField("Target OTT Player", `rooms.${roomIndex}.devices.${deviceIndex}.ott_device`, device.ott_device, ["media_player"], { helper: "Default player for this TV." })}
-              </div>
-              <div style="margin-top:20px;">
-                ${this.renderOttMappings(roomIndex, deviceIndex, device)}
-              </div>
-            ` : ""}
-
-            <div style="margin-top:24px;">
-              <label>Off Overrides (Playback Matcher)</label>
-              <input type="text" placeholder="Title/Source keyword to trigger override" value="${this.escapeHtml(device.override_content || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)" />
             </div>
+
+            <div class="grid cols-2" style="margin-top:20px; gap:20px;">
+                ${isTv ? `
+                    <div>
+                        <label>TV Behavior</label>
+                        <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_mode', this.value)">
+                            <option value="tv_audio" ${device.tv_mode === "tv_audio" ? "selected" : ""}>TV Audio (Include Room)</option>
+                            <option value="no_music" ${device.tv_mode === "no_music" ? "selected" : ""}>No Music (Isolate Room)</option>
+                        </select>
+                    </div>
+                ` : ""}
+
+                ${isSpeaker ? `
+                    <div>
+                        <label>Volume Offset (+/- %)</label>
+                        <input type="number" value="${device.volume_offset || 0}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.volume_offset', parseInt(this.value))" />
+                    </div>
+                    <div>
+                        <label>Election Mode</label>
+                        <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.election_toggle', this.value)">
+                            <option value="primary" ${device.election_toggle === "primary" ? "selected" : ""}>Primary</option>
+                            <option value="follower" ${device.election_toggle === "follower" ? "selected" : ""}>Follower</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>TV Mode Behavior</label>
+                        <input type="text" placeholder="e.g. mute" value="${this.escapeHtml(device.tv_speaker_mode || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_speaker_mode', this.value)" />
+                    </div>
+                ` : ""}
+
+                ${isOtt ? `
+                    <div>
+                        <label>TV Input Name</label>
+                        <input type="text" placeholder="HDMI 1" value="${this.escapeHtml(device.tv_input || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.tv_input', this.value)" />
+                    </div>
+                    <div>
+                        <label>Parent TV</label>
+                        <select onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.parent_tv', this.value)">
+                            <option value="">None</option>
+                            ${this.config.rooms[roomIndex].devices
+                                .filter(d => d.device_type === 'tv')
+                                .map(d => `<option value="${this.escapeHtml(d.device_id)}" ${device.parent_tv === d.device_id ? "selected" : ""}>${this.escapeHtml(this.hass.states[d.device_id]?.attributes?.friendly_name || d.device_id)}</option>`)
+                                .join("")}
+                        </select>
+                    </div>
+                ` : ""}
+            </div>
+
+            ${!isOtt ? `
+                <div style="margin-top:24px;">
+                    <label>Off Overrides (Playback Matcher)</label>
+                    <input type="text" placeholder="Title/Source keyword to trigger override" value="${this.escapeHtml(device.override_content || "")}" onchange="this.getRootNode().host.updateConfig('rooms.${roomIndex}.devices.${deviceIndex}.override_content', this.value)" />
+                </div>
+            ` : ""}
           </div>
         ` : ""}
       </div>
@@ -2681,8 +3177,7 @@ class AGSPanel extends HTMLElement {
               : '<div class="empty-state">No rooms yet.</div>'}
           </div>
           <div class="stack" style="margin-top:20px;">
-            <button class="primary-btn icon-text-btn" onclick="this.getRootNode().host.addRoom()"><ha-icon icon="mdi:plus"></ha-icon><span>Add Room</span></button>
-            <button class="secondary-btn icon-text-btn" onclick="this.getRootNode().host.loadHaAreas()"><ha-icon icon="mdi:home-import-outline"></ha-icon><span>Import HA Area</span></button>
+            <button class="primary-btn icon-text-btn" onclick="this.getRootNode().host.openAddRoomModal()"><ha-icon icon="mdi:plus"></ha-icon><span>Add Room</span></button>
           </div>
         </aside>
 
@@ -2712,6 +3207,17 @@ class AGSPanel extends HTMLElement {
                     />
                   </div>
                   <div>
+                    <label>HA Area Link</label>
+                    ${room.ha_area_linked ? `
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="status-pill active">${this.escapeHtml(room.ha_area_name)}</span>
+                            <button class="secondary-btn" onclick="this.getRootNode().host.unlinkArea(${this.selectedRoomIdx})">Unlink</button>
+                        </div>
+                    ` : `
+                        <button class="secondary-btn" onclick="this.getRootNode().host.openLinkAreaModal(${this.selectedRoomIdx})">Link to HA Area</button>
+                    `}
+                  </div>
+                  <div>
                     <label>Switch Entity</label>
                     <div class="mono" style="background:var(--ags-subtle); padding:12px; border-radius:12px; border:1px solid var(--ags-border);">switch.${this.escapeHtml(this.slugify(room.room))}_media</div>
                   </div>
@@ -2719,14 +3225,50 @@ class AGSPanel extends HTMLElement {
 
                 <div class="eyebrow" style="margin:32px 0 16px;">Devices</div>
                 <div class="stack">
-                  ${room.devices.length
+                  ${room.devices.length && room.devices.some(d => !d.disabled)
                     ? room.devices
-                        .map((device, deviceIndex) =>
-                          this.renderDeviceCard(this.selectedRoomIdx, deviceIndex, device),
-                        )
+                        .map((device, index) => ({ device, index }))
+                        .filter(item => !item.device.disabled && (item.device.device_type !== 'ott' || !item.device.parent_tv || !room.devices.some(d => d.device_id === item.device.parent_tv)))
+                        .map(item => {
+                            const deviceHtml = this.renderDeviceCard(this.selectedRoomIdx, item.index, item.device);
+                            const nestedOtts = room.devices
+                                .map((d, i) => ({ device: d, index: i }))
+                                .filter(ottItem => !ottItem.device.disabled && ottItem.device.device_type === 'ott' && ottItem.device.parent_tv === item.device.device_id);
+
+                            if (nestedOtts.length === 0) return deviceHtml;
+
+                            return `
+                                <div class="device-group">
+                                    ${deviceHtml}
+                                    <div class="nested-devices" style="margin-left: 32px; border-left: 2px solid var(--ags-border); padding-left: 16px; margin-top: -12px; margin-bottom: 16px;">
+                                        ${nestedOtts.map(ottItem => this.renderDeviceCard(this.selectedRoomIdx, ottItem.index, ottItem.device)).join("")}
+                                    </div>
+                                </div>
+                            `;
+                        })
                         .join("")
-                    : '<div class="empty-state">No devices in this room.</div>'}
+                    : '<div class="empty-state">No active devices in this room.</div>'}
                 </div>
+
+                ${room.devices.some(d => d.disabled) ? `
+                  <div class="eyebrow" style="margin:32px 0 16px; color: var(--ags-muted);">Hidden Area Devices</div>
+                  <div class="stack">
+                    ${room.devices.map((device, index) => {
+                      if (!device.disabled) return "";
+                      const stateObj = device.device_id ? this.hass.states[device.device_id] : null;
+                      const friendlyName = stateObj?.attributes?.friendly_name || device.device_id || "Unknown Entity";
+                      return `
+                        <div class="list-select" style="opacity: 0.6; cursor: default;">
+                          <div style="min-width:0; flex:1;">
+                            <div style="font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${this.escapeHtml(friendlyName)}</div>
+                            <div class="section-help">${this.escapeHtml(device.device_id)}</div>
+                          </div>
+                          <button class="secondary-btn" style="padding:4px 12px; font-size:0.8rem;" onclick="this.getRootNode().host.restoreDevice(${this.selectedRoomIdx}, ${index})">Restore</button>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ""}
 
                 <button class="primary-btn" style="margin-top:24px;" onclick="this.getRootNode().host.addDevice(${this.selectedRoomIdx})">+ Add Device</button>
               `
@@ -2738,7 +3280,8 @@ class AGSPanel extends HTMLElement {
           }
         </section>
       </div>
-      ${this.renderAreaImportModal()}
+      ${this.renderAddRoomModal()}
+      ${this.renderSyncPromptModal()}
       `}
     `;
   }
@@ -2789,40 +3332,9 @@ class AGSPanel extends HTMLElement {
     `;
   }
 
-  renderAreaImportModal() {
-    if (!this.areaImportOpen) return "";
-    const rows = this.haAreas.filter((area) => (area.media_players || []).length);
-    return `
-      <div class="modal-backdrop" onclick="this.getRootNode().host.closeAreaImport()">
-        <div class="modal-card" onclick="event.stopPropagation()">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Home Assistant</div>
-              <h3>Import Area</h3>
-            </div>
-            <button class="secondary-btn icon-only-btn" onclick="this.getRootNode().host.closeAreaImport()"><ha-icon icon="mdi:close"></ha-icon></button>
-          </div>
-          ${this.areaImportLoading ? '<div class="empty-state">Loading areas...</div>' : ""}
-          ${this.areaImportError ? `<div class="error" style="padding:12px; border-radius:12px;">${this.escapeHtml(this.areaImportError)}</div>` : ""}
-          <div class="stack">
-            ${!this.areaImportLoading && rows.length ? rows.map((area) => `
-              <button class="list-select area-import-row" onclick="this.getRootNode().host.importHaArea('${this.escapeJsString(area.area_id)}')">
-                <span style="min-width:0;">
-                  <span style="display:block; font-weight:900; overflow:hidden; text-overflow:ellipsis;">${this.escapeHtml(area.name)}</span>
-                  <span class="section-help">${(area.media_players || []).map((entity) => this.escapeHtml(entity.name)).join(", ")}</span>
-                </span>
-                <span class="status-pill">${(area.media_players || []).length}</span>
-              </button>
-            `).join("") : ""}
-            ${!this.areaImportLoading && !rows.length ? '<div class="empty-state">No HA areas with media players were found.</div>' : ""}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
   renderSources() {
-    if (!this._sourceCatalogLoaded && !this.loadingSourceCatalog) {
+    if (!this._sourceCatalogLoaded && !this.loadingSourceCatalog && !this._sourceCatalogLoadScheduled) {
+      this._sourceCatalogLoadScheduled = true;
       setTimeout(() => this.ensureSourceCatalogLoaded(), 0);
     }
     const visibleSources = this.getFilteredSourceRows(this.getVisibleSources());
@@ -2847,7 +3359,22 @@ class AGSPanel extends HTMLElement {
           `}
         >
           ${hidden ? "" : `<div class="drag-handle" title="Drag to rank"><ha-icon icon="mdi:drag"></ha-icon></div>`}
-          <div class="rank-badge">${rankIndex + 1}</div>
+          ${hidden ? `
+            <div class="rank-badge">${rankIndex + 1}</div>
+          ` : `
+            <input
+              class="rank-badge rank-badge-input"
+              type="number"
+              min="1"
+              max="${rankedSourceIds.length}"
+              value="${rankIndex + 1}"
+              title="Rank"
+              onclick="event.stopPropagation()"
+              onkeydown="event.stopPropagation()"
+              oninput="event.stopPropagation()"
+              onchange="this.getRootNode().host.setSourcePriority('${this.escapeJsString(id)}', this.value)"
+            />
+          `}
           <div style="flex:1; min-width:0;">
             ${hidden ? `
               <div style="font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${this.escapeHtml(name)}</div>
@@ -2856,6 +3383,9 @@ class AGSPanel extends HTMLElement {
                 type="text"
                 style="padding:4px 8px; min-height:32px; font-size:0.9rem;"
                 value="${this.escapeHtml(name)}"
+                onclick="event.stopPropagation()"
+                onkeydown="event.stopPropagation()"
+                oninput="this.getRootNode().host.renameSource('${this.escapeJsString(id)}', this.value)"
                 onchange="this.getRootNode().host.renameSource('${this.escapeJsString(id)}', this.value)"
               />
             `}
@@ -2914,13 +3444,15 @@ class AGSPanel extends HTMLElement {
           <ha-icon icon="mdi:magnify" style="color:var(--ags-primary); flex-shrink:0;"></ha-icon>
           <input
             type="search"
+            data-source-search
             placeholder="Search sources"
             value="${searchValue}"
+            data-focus-id="source-search-input"
             onclick="event.stopPropagation()"
             onkeydown="event.stopPropagation()"
             onkeypress="event.stopPropagation()"
             onkeyup="event.stopPropagation()"
-            oninput="this.getRootNode().host.updateSourceSearch(this.value)"
+            oninput="this.getRootNode().host.updateSourceSearch(this.value, this.selectionStart)"
           />
         </div>
         <button class="secondary-btn ${this.sourcesFolderView ? 'active' : ''}" onclick="this.getRootNode().host.toggleSourcesFolderView()" title="Toggle folder grouping">
@@ -3018,6 +3550,14 @@ class AGSPanel extends HTMLElement {
               <label class="list-select" style="margin:0;">
                 <span>Persistent TV source</span>
                 <input type="checkbox" style="width:20px; height:20px;" ${this.config.disable_tv_source ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('disable_tv_source', this.checked)" />
+              </label>
+
+              <label class="list-select" style="margin:0;">
+                <span>
+                  <span style="display:block; font-weight:800;">Default HA media player room popup hotfix</span>
+                  <span class="section-help" style="display:block; margin-top:4px;">When the AGS entity appears in Home Assistant's default media player, replace the native device/group dialog with AGS room volume and on/off controls.</span>
+                </span>
+                <input type="checkbox" style="width:20px; height:20px;" ${this.config.native_room_popup !== false ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('native_room_popup', this.checked)" />
               </label>
             </div>
 
@@ -3130,6 +3670,7 @@ class AGSPanel extends HTMLElement {
 
   render() {
     const scrollState = this.captureScrollState();
+    const focusState = this.captureFocusState();
     const resetToTop = this._resetScrollAfterRender;
     this._resetScrollAfterRender = false;
     const agsState = this.getAgsState();
@@ -3765,11 +4306,56 @@ class AGSPanel extends HTMLElement {
           color: var(--ags-on-primary);
         }
 
-        .rank-badge {
+        .rank-badge, .rank-badge-wrap {
+          width: 38px;
+          height: 38px;
+          border-radius: 10px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
           background: var(--ags-surface-soft);
           border: 1px solid var(--ags-border);
           color: var(--ags-primary);
           font-weight: 900;
+          overflow: hidden;
+        }
+
+        .rank-badge-input {
+          width: 100%;
+          height: 100%;
+          border: none;
+          background: transparent;
+          text-align: center;
+          color: inherit;
+          font: inherit;
+          font-weight: inherit;
+          padding: 0;
+          appearance: textfield;
+          -moz-appearance: textfield;
+        }
+
+        .rank-badge-input::-webkit-outer-spin-button,
+        .rank-badge-input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
+        .source-rank-row .rank-badge-input {
+          width: 38px;
+          height: 38px;
+          border: 1px solid var(--ags-border);
+          background: var(--ags-surface-soft);
+        }
+
+        .ott-nested-card {
+            background: var(--ags-surface-soft);
+            border-style: dashed;
+        }
+
+        .ott-icon {
+            background: var(--ags-primary-soft) !important;
+            color: var(--primary-text-color) !important;
         }
 
         .drag-handle {
@@ -4300,7 +4886,11 @@ class AGSPanel extends HTMLElement {
     this.bindEmbeddedDashboard();
     requestAnimationFrame(() => {
       this.restoreScrollState(scrollState, resetToTop);
-      requestAnimationFrame(() => this.restoreScrollState(scrollState, resetToTop));
+      this.restoreFocusState(focusState);
+      requestAnimationFrame(() => {
+        this.restoreScrollState(scrollState, resetToTop);
+        this.restoreFocusState(focusState);
+      });
     });
   }
 }

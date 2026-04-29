@@ -40,7 +40,7 @@ from .source_utils import (
     normalize_source_list,
     split_source_inventory,
 )
-
+from .source_art import apply_default_source_art, source_artwork_url
 import asyncio
 import copy
 import logging
@@ -283,30 +283,42 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             selected_device_id = None
 
             sorted_devices = sorted(
-                [device for device in found_room_obj.get("devices", []) if device.get("device_type") != "speaker"],
+                [device for device in found_room_obj.get("devices", []) if device.get("device_type") == "tv"],
                 key=lambda x: x.get('priority', 999)
             )
 
             if sorted_devices:
                 tv_device = sorted_devices[0]
-                ott_devices = tv_device.get('ott_devices')
+
+                # Find OTT devices linked to this TV
+                ott_devices = sorted(
+                    [d for d in found_room_obj.get("devices", []) if d.get('device_type') == 'ott' and d.get('parent_tv') == tv_device['device_id']],
+                    key=lambda x: x.get('priority', 999)
+                )
 
                 if ott_devices:
-                    # Fetch the TV's current state to see what input is active
-                    tv_state = self.hass.states.get(tv_device['device_id'])
-                    current_input = tv_state.attributes.get('source') if tv_state else None
-
-                    # Try to find a matching input
+                    # 1. Active Promotion: If any OTT device is playing, it takes priority
                     found_ott = None
                     for ott in ott_devices:
-                        if ott.get('tv_input') == current_input:
-                            found_ott = ott['ott_device']
+                        ott_state = self.hass.states.get(ott.get('device_id'))
+                        if ott_state and ott_state.state == "playing":
+                            found_ott = ott['device_id']
                             break
 
-                    # Fallback to the first device in the list if no match
-                    selected_device_id = found_ott if found_ott else ott_devices[0]['ott_device']
+                    if not found_ott:
+                        # 2. Source Matching: If TV's source matches an OTT's TV Input Name
+                        tv_state = self.hass.states.get(tv_device['device_id'])
+                        current_input = tv_state.attributes.get('source') if tv_state else None
+                        if current_input:
+                            for ott in ott_devices:
+                                if str(ott.get('tv_input')).strip().lower() == str(current_input).strip().lower():
+                                    found_ott = ott['device_id']
+                                    break
+
+                    # 3. Ranked Fallback: Pick the highest ranked (lowest priority number) OTT device
+                    selected_device_id = found_ott if found_ott else ott_devices[0]['device_id']
                 else:
-                    selected_device_id = tv_device.get('ott_device', tv_device["device_id"])
+                    selected_device_id = tv_device["device_id"]
             else:
                 selected_device_id = self.hass.data.get('primary_speaker', None)
 
@@ -492,12 +504,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "can_play": can_play,
             "can_expand": can_expand,
             "media_class": self._browse_attr(node, "media_class", "") or ("folder" if can_expand else "music"),
+            "thumbnail": self._browse_attr(node, "thumbnail", ""),
             "available_on": [entity_id] if entity_id else [],
         })
         if source:
             source["origin"] = SOURCE_ORIGIN_MEDIA_BROWSER
             source["folder_path"] = folder_path or []
-        return source
+        return apply_default_source_art(source)
 
     def _browse_title(self, node):
         """Return a readable title for a media-browser node."""
@@ -508,16 +521,54 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             or ""
         ).strip()
 
+    def _apply_default_browse_art(self, node):
+        """Apply bundled artwork to browse nodes that do not provide images."""
+        if node is None:
+            return None
+
+        children = [
+            self._apply_default_browse_art(child)
+            for child in self._browse_children(node)
+        ]
+        artwork = None
+        if not self._browse_attr(node, "thumbnail", ""):
+            artwork = source_artwork_url(
+                self._browse_title(node),
+                self._browse_attr(node, "media_content_id", ""),
+                self._browse_attr(node, "media_content_type", ""),
+                self._browse_attr(node, "media_class", ""),
+            )
+
+        if isinstance(node, dict):
+            updated = {**node}
+            if children:
+                updated["children"] = children
+            if artwork:
+                updated["thumbnail"] = artwork
+            return updated
+
+        if children:
+            try:
+                node.children = children
+            except Exception:
+                pass
+        if artwork:
+            try:
+                node.thumbnail = artwork
+            except Exception:
+                pass
+        return node
+
     def _normalize_native_source(self, source):
         source_name = str(source or "").strip()
         if source_name in ("", "TV", "Unknown"):
             return None
-        return normalize_source_entry({
+        return apply_default_source_art(normalize_source_entry({
             "Source": source_name,
             "Source_Value": source_name,
             "media_content_type": "source",
             "source_default": False,
-        })
+        }))
 
     def _get_native_source_list_sources(self, entity_id):
         state = self.hass.states.get(entity_id)
@@ -872,6 +923,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             results.append(normalized)
 
     def _source_to_browse_item(self, source):
+        source = apply_default_source_art(source) or source
         name = str(source.get("Source") or "").strip()
         value = str(source.get("Source_Value") or "").strip()
         if not name or not value:
@@ -884,6 +936,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             media_content_type=content_type,
             can_play=True,
             can_expand=False,
+            thumbnail=source.get("thumbnail"),
         )
 
     def _build_configured_sources_browse_root(self):
@@ -947,7 +1000,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                             folder_path=["Favorites"],
                             include_folders=True,
                         )
-                    
+
                     if favorite_results:
                         normalized_favs = normalize_source_list(favorite_results)
                         all_native_favorites.extend(normalized_favs)
@@ -972,13 +1025,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 discovered,
                 native_favorites,
             )
-            
+
             existing_discovered = normalize_source_list(ags_data.get(CONF_LAST_DISCOVERED_SOURCES, []) or [])
             existing_favorites = normalize_source_list(ags_data.get(CONF_SOURCE_FAVORITES, []) or [])
 
-            if (not force and 
-                discovered == existing_discovered and 
-                next_favorites == existing_favorites and 
+            if (not force and
+                discovered == existing_discovered and
+                next_favorites == existing_favorites and
                 next_default_id == ags_data.get(CONF_DEFAULT_SOURCE_ID)):
                 return
 
@@ -991,7 +1044,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 safe_keys = ("rooms", CONF_HIDDEN_SOURCE_IDS, CONF_SOURCE_DISPLAY_NAMES,
                            "off_override", "create_sensors", "default_on", "static_name",
                            "disable_tv_source", "interval_sync", "schedule_entity",
-                           "default_source_schedule", "batch_unjoin")
+                           "default_source_schedule", "batch_unjoin", "native_room_popup")
                 active_config = {k: copy.deepcopy(ags_data[k]) for k in safe_keys if k in ags_data}
 
             active_config.update({
@@ -1022,7 +1075,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             apply_config = ags_data.get("apply_config")
             if apply_config:
                 apply_config(active_config)
-            
+
             ags_data["_stored_config_cache"] = copy.deepcopy(active_config)
             ags_data["source_list_revision"] = int(ags_data.get("source_list_revision", 0)) + 1
 
@@ -1192,8 +1245,12 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "can_expand": source.get("can_expand", False),
                 "folder_path": source.get("folder_path", []),
                 "available_on": source.get("available_on", []),
+                "thumbnail": source.get("thumbnail"),
             }
-            for source in combine_source_inventory(self.hass.data.get(DOMAIN, {}))
+            for source in (
+                apply_default_source_art(source)
+                for source in combine_source_inventory(self.hass.data.get(DOMAIN, {}))
+            )
             if source.get("Source")
         ]
 
@@ -1211,8 +1268,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "can_expand": source.get("can_expand", False),
                 "folder_path": source.get("folder_path", []),
                 "available_on": source.get("available_on", []),
+                "thumbnail": source.get("thumbnail"),
             }
-            for source in hidden
+            for source in (apply_default_source_art(source) for source in hidden)
             if source.get("Source")
         ]
 
@@ -1228,8 +1286,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 "media_content_type": source.get("media_content_type"),
                 "default": source.get("source_default", False),
                 "hidden": source.get("id") in hidden_ids,
+                "thumbnail": source.get("thumbnail"),
             }
-            for source in [*visible, *hidden]
+            for source in (apply_default_source_art(source) for source in [*visible, *hidden])
             if source.get("Source")
         ]
 
@@ -1502,6 +1561,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             devices = []
             tv_active = False
             for device in room.get("devices", []):
+                if device.get("disabled"):
+                    continue
                 state = self.hass.states.get(device["device_id"])
                 device_type = device.get("device_type", "speaker")
                 if (
@@ -1567,12 +1628,13 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         """Return entity specific state attributes."""
 
         room_count = len(self.hass.data.get('active_rooms', []))
+        configured_name = self.name
         if self.primary_speaker_room is None and self.ags_status != "OFF":
             dynamic_title = "All Rooms are Off"
         else:
             rooms_text = self.primary_speaker_room
             if self.ags_status == "OFF":
-                dynamic_title = "AGS Media System"
+                dynamic_title = configured_name
             elif room_count == 1:
                 dynamic_title = f"{rooms_text} is Active"
             elif room_count > 1:
@@ -1586,6 +1648,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         attributes = {
             "dynamic_title": dynamic_title,
+            "ags_room_count": room_count,
             "configured_rooms": self.configured_rooms or [],
             "active_rooms": self.active_rooms or [],
             "active_speakers": self.active_speakers or [],
@@ -1604,6 +1667,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             "control_device_id": self._get_command_target_entity_id(),
             "browse_entity_id": self._get_browse_target_entity_id(),
             "source_mode": self._get_source_mode(),
+            "native_room_popup": self.hass.data.get(DOMAIN, {}).get("native_room_popup", True),
             "source_list_revision": self.hass.data.get(DOMAIN, {}).get("source_list_revision", 0),
             "current_tv_mode": self.hass.data.get("current_tv_mode"),
             "active_tv_entities": active_tv_entities,
@@ -1629,23 +1693,47 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def name(self):
-        ags_config = self.hass.data['ags_service']
+        """Return the name of the device."""
+        ags_config = self.hass.data.get(DOMAIN, {})
         static_name = ags_config.get('static_name')
         if static_name:
             return static_name
         return "Whole Home Audio"
 
     @property
+    def icon(self):
+        """Return the icon of the device."""
+        ags_status = self.hass.data.get('ags_status', 'OFF')
+        if ags_status == 'ON TV':
+            return "mdi:television-play"
+        if ags_status != 'OFF':
+            return "mdi:music"
+        return "mdi:speaker-multiple"
+
+    @property
     def group_members(self):
-        """Return list of members in the same group."""
-        active = self.hass.data.get('active_speakers', [])
-        if not active:
+        """Return one representative media player per active room for HA's group badge."""
+        active_rooms = set(self.hass.data.get("active_rooms", []) or [])
+        active_speakers = set(self.hass.data.get("active_speakers", []) or [])
+        if not active_rooms or not active_speakers:
             return []
 
-        # Home Assistant typically expects the entity itself to be part of the group_members list
-        if self.entity_id and self.entity_id not in active:
-            return [self.entity_id] + active
-        return active
+        representatives = []
+        for room in self.ags_config.get("rooms", []) or []:
+            if room.get("room") not in active_rooms:
+                continue
+            speakers = [
+                device.get("device_id")
+                for device in room.get("devices", []) or []
+                if (
+                    device.get("device_type") == "speaker"
+                    and not device.get("disabled")
+                    and device.get("device_id") in active_speakers
+                )
+            ]
+            if speakers:
+                representatives.append(speakers[0])
+        return representatives
 
     @property
     def state(self):
@@ -1693,7 +1781,24 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
     @property
     def entity_picture(self):
         reference_state = self._get_reference_player_state()
-        return reference_state.attributes.get('entity_picture') if reference_state else None
+        attrs = reference_state.attributes if reference_state else {}
+        native_art = (
+            attrs.get("entity_picture")
+            or attrs.get("entity_picture_local")
+            or attrs.get("media_image_url")
+            or attrs.get("thumbnail")
+        )
+        if native_art:
+            return native_art
+        return source_artwork_url(
+            self.source,
+            self.hass.data.get("ags_media_player_source"),
+            attrs.get("app_name"),
+            attrs.get("source"),
+            attrs.get("media_channel"),
+            attrs.get("app_id"),
+            attrs.get("media_content_type"),
+        )
     @property
     def is_volume_muted(self):
         reference_state = self._get_reference_player_state()
@@ -1912,7 +2017,7 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                             f"{target_entity_id} returned an empty browse placeholder"
                         )
                         continue
-                    return result
+                    return self._apply_default_browse_art(result)
                 last_error = RuntimeError(
                     f"{target_entity_id} returned no browse media"
                 )
@@ -1933,16 +2038,16 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
             raise last_error
 
         try:
-            return await media_source.async_browse_media(
+            return self._apply_default_browse_art(await media_source.async_browse_media(
                 self.hass,
                 media_content_id,
-            )
+            ))
         except TypeError:
-            return await media_source.async_browse_media(
+            return self._apply_default_browse_art(await media_source.async_browse_media(
                 self.hass,
                 media_content_type,
                 media_content_id,
-            )
+            ))
 
     # Implement methods to control the AGS Primary Speaker
 

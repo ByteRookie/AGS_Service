@@ -163,6 +163,9 @@ def normalize_source_entry(source: dict | None) -> dict | None:
     media_class = str(source.get("media_class") or "").strip()
     if media_class:
         normalized["media_class"] = media_class
+    thumbnail = str(source.get("thumbnail") or "").strip()
+    if thumbnail:
+        normalized["thumbnail"] = thumbnail
     available_on = source.get("available_on")
     if isinstance(available_on, (list, tuple, set)):
         normalized["available_on"] = [
@@ -185,7 +188,7 @@ def merge_source_metadata(existing: dict, incoming: dict) -> dict:
                 available.append(entity_id)
     if available:
         merged["available_on"] = available
-    for key in ("can_play", "can_expand", "media_class", "origin", "folder_path"):
+    for key in ("can_play", "can_expand", "media_class", "origin", "folder_path", "thumbnail"):
         if key not in merged and incoming.get(key) is not None:
             merged[key] = deepcopy(incoming[key])
     return merged
