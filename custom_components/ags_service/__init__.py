@@ -34,7 +34,7 @@ DOMAIN = "ags_service"
 STORAGE_VERSION = 1
 STORAGE_KEY = "ags_service.json"
 BACKUP_STORAGE_KEY = "ags_service.backup.json"
-FRONTEND_ASSET_VERSION = "2.3.1"
+FRONTEND_ASSET_VERSION = "2.1.0"
 
 # Signal for dynamic entity updates
 SIGNAL_AGS_RELOAD = "ags_service_reload"
@@ -58,6 +58,7 @@ CONF_OTT_DEVICE = 'ott_device'
 CONF_OTT_DEVICES = 'ott_devices'
 CONF_BATCH_UNJOIN = 'batch_unjoin'
 CONF_NATIVE_ROOM_POPUP = 'native_room_popup'
+CONF_PORTAL_MEDIA_PLAYER = 'portal_media_player'
 CONF_SOURCES = 'Sources'
 CONF_FAVORITE_SOURCES = 'favorite_sources'
 CONF_SOURCE = 'Source'
@@ -152,6 +153,7 @@ CONFIG_SCHEMA = vol.Schema({
         }, extra=vol.ALLOW_EXTRA)),
         vol.Optional(CONF_BATCH_UNJOIN, default=False): cv.boolean,
         vol.Optional(CONF_NATIVE_ROOM_POPUP, default=True): cv.boolean,
+        vol.Optional(CONF_PORTAL_MEDIA_PLAYER, default="ha_default"): vol.In(["ha_default", "custom"]),
     }, extra=vol.ALLOW_EXTRA)
 }, extra=vol.ALLOW_EXTRA)
 
@@ -627,6 +629,7 @@ def apply_config(hass: HomeAssistant, cfg: dict):
         'default_source_schedule': cfg.get("default_source_schedule"),
         'batch_unjoin': cfg.get(CONF_BATCH_UNJOIN, False),
         'native_room_popup': cfg.get(CONF_NATIVE_ROOM_POPUP, True),
+        'portal_media_player': cfg.get(CONF_PORTAL_MEDIA_PLAYER, "ha_default"),
     })
     hass.data['configured_rooms'] = [room.get('room') for room in rooms if room.get('room')]
 
@@ -843,6 +846,7 @@ def ws_get_config(hass, connection, msg):
         "default_source_schedule": live_config.get("default_source_schedule", None),
         "batch_unjoin": live_config.get("batch_unjoin", False),
         "native_room_popup": live_config.get("native_room_popup", True),
+        "portal_media_player": live_config.get("portal_media_player", "ha_default"),
     }
     config = sync_linked_area_rooms(hass, config_source)
     config = sanitize_runtime_config(config)
@@ -863,6 +867,7 @@ def ws_get_config(hass, connection, msg):
         "default_source_schedule": config.get("default_source_schedule", None),
         "batch_unjoin": config.get("batch_unjoin", False),
         "native_room_popup": config.get("native_room_popup", True),
+        "portal_media_player": config.get("portal_media_player", "ha_default"),
     }
     connection.send_result(msg["id"], data)
 

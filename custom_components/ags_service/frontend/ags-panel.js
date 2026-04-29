@@ -358,6 +358,7 @@ class AGSPanel extends HTMLElement {
         default_source_schedule: null,
         batch_unjoin: false,
         native_room_popup: true,
+        portal_media_player: "ha_default",
       };
     }
 
@@ -390,6 +391,9 @@ class AGSPanel extends HTMLElement {
       default_source_schedule: config.default_source_schedule || null,
       batch_unjoin: Boolean(config.batch_unjoin),
       native_room_popup: config.native_room_popup !== false,
+      portal_media_player: ["ha_default", "custom"].includes(config.portal_media_player)
+        ? config.portal_media_player
+        : "ha_default",
     };
     normalized.rooms = normalized.rooms.map((room) => {
       const devices = Array.isArray(room?.devices)
@@ -2270,11 +2274,17 @@ class AGSPanel extends HTMLElement {
      return;
    }
 
-   const config = {
-     entity: ags.entity_id,
-     sections: ["player", "browse", "rooms", "sources"],
-     start_section: "player",
-   };
+   const useCustom = dashboard.localName === "ags-media-card";
+   const config = useCustom
+     ? {
+       entity: ags.entity_id,
+       sections: ["player", "browse", "rooms", "sources"],
+       start_section: "player",
+     }
+     : {
+       type: "media-control",
+       entity: ags.entity_id,
+     };
    const configKey = JSON.stringify(config);
    if (dashboard.__agsConfigKey !== configKey) {
      dashboard.setConfig(config);
@@ -2855,10 +2865,13 @@ class AGSPanel extends HTMLElement {
   }
 
   renderHome(agsState) {
+    const useCustomPlayer = this.config.portal_media_player === "custom";
     return `
       <div class="grid home-grid">
         <section class="home-dashboard-wrap">
-          <ags-media-card class="embedded-dashboard"></ags-media-card>
+          ${useCustomPlayer
+            ? '<ags-media-card class="embedded-dashboard"></ags-media-card>'
+            : '<hui-media-control-card class="embedded-dashboard"></hui-media-control-card>'}
         </section>
         <section class="panel-card home-entities-panel">
           <div class="card-head home-entities-head">
@@ -3558,6 +3571,15 @@ class AGSPanel extends HTMLElement {
                   <span class="section-help" style="display:block; margin-top:4px;">When the AGS entity appears in Home Assistant's default media player, replace the native device/group dialog with AGS room volume and on/off controls.</span>
                 </span>
                 <input type="checkbox" style="width:20px; height:20px;" ${this.config.native_room_popup !== false ? "checked" : ""} onchange="this.getRootNode().host.updateConfig('native_room_popup', this.checked)" />
+              </label>
+
+              <label>
+                <span>AGS portal media player</span>
+                <select onchange="this.getRootNode().host.updateConfig('portal_media_player', this.value)">
+                  <option value="ha_default" ${this.config.portal_media_player !== "custom" ? "selected" : ""}>Home Assistant default</option>
+                  <option value="custom" ${this.config.portal_media_player === "custom" ? "selected" : ""}>AGS custom media player</option>
+                </select>
+                <div class="section-help" style="margin-top:8px;">Controls the media player shown on the AGS Home tab. The custom card is still available anywhere by adding it to a dashboard.</div>
               </label>
             </div>
 

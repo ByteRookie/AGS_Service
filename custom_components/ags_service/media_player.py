@@ -356,16 +356,42 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     def _get_reference_player_state(self):
         """Return the best state object for metadata and command fallbacks."""
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         if self.primary_speaker_state is not None:
             return self.primary_speaker_state
         target_entity_id = self._get_command_target_entity_id()
         return self.hass.states.get(target_entity_id) if target_entity_id else None
 
+    def _has_active_rooms(self):
+        """Return true when AGS has at least one room enabled."""
+        return bool(self.hass.data.get("active_rooms") or self.active_rooms or [])
+
+    def _real_media_value(self, attrs, *keys):
+        """Return metadata only when the player has a non-empty value."""
+        for key in keys:
+            value = attrs.get(key)
+            if value is None:
+                continue
+            if str(value).strip():
+                return value
+        return None
+
+    def _current_app_label(self, attrs):
+        """Return app/source context as secondary metadata, never ahead of real media."""
+        return (
+            self._real_media_value(attrs, "app_name", "media_channel", "source")
+            or self._derive_app_name_from_id(attrs.get("app_id"))
+            or self.hass.data.get("ags_media_player_source")
+        )
+
     def _get_command_target_entity_id(self):
         """Return the entity that should receive direct transport commands."""
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         if self.primary_speaker_entity_id and self.hass.states.get(self.primary_speaker_entity_id):
             return self.primary_speaker_entity_id
-        return self._get_browse_target_entity_id()
+        return self._get_browse_target_entity_id(include_fallback=False)
 
     def _dedupe_entity_ids(self, candidates):
         """Return usable entity ids in order while preserving fallbacks."""
@@ -1741,6 +1767,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if self.ags_status == 'OFF':
             return "off"
 
+        if not self._has_active_rooms():
+            return STATE_IDLE
+
         # Fetch the current state of the AGS Primary Speaker entity
         if self.primary_speaker_entity_id:
             self.primary_speaker_state = self.hass.states.get(self.primary_speaker_entity_id)
@@ -1756,30 +1785,40 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def media_title(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return "No rooms active"
         reference_state = self._get_reference_player_state()
         if not reference_state:
             return None
         attrs = reference_state.attributes
         return (
-            attrs.get('media_title')
-            or attrs.get('app_name')
-            or self._derive_app_name_from_id(attrs.get('app_id'))
+            self._real_media_value(attrs, "media_title", "media_series_title")
+            or self._current_app_label(attrs)
         )
 
     @property
     def media_artist(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return "Turn on a room to start playback"
         reference_state = self._get_reference_player_state()
         if not reference_state:
             return None
         attrs = reference_state.attributes
-        return (
-            attrs.get('media_artist')
-            or attrs.get('media_channel')
-            or attrs.get('friendly_name')
-        )
+        title = self.media_title
+        for value in (
+            self._real_media_value(attrs, "media_artist"),
+            self._real_media_value(attrs, "media_album_name"),
+            self._real_media_value(attrs, "media_channel"),
+            self._current_app_label(attrs),
+        ):
+            if value and str(value).strip() != str(title or "").strip():
+                return value
+        return None
 
     @property
     def entity_picture(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         attrs = reference_state.attributes if reference_state else {}
         native_art = (
@@ -1801,6 +1840,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         )
     @property
     def is_volume_muted(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('is_volume_muted') if reference_state else None
 
@@ -1833,18 +1874,26 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def media_content_type(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('media_content_type') if reference_state else None
     @property
     def media_duration(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('media_duration') if reference_state else None
     @property
     def media_position(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('media_position') if reference_state else None
     @property
     def queue_size(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('queue_size') if reference_state else None
 
@@ -1853,6 +1902,8 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
     @property
     def media_position_updated_at(self):
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return None
         reference_state = self._get_reference_player_state()
         return reference_state.attributes.get('media_position_updated_at') if reference_state else None
     @property
@@ -1898,8 +1949,25 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
 
         if content_type == "source":
             self.hass.data["switch_media_system_state"] = True
+            source_entry = find_source_by_name_or_id(
+                self.hass.data.get(DOMAIN, {}),
+                content_id,
+            )
+            if source_entry:
+                self.hass.data["ags_media_player_source_id"] = source_entry["id"]
+                self.hass.data["ags_media_player_source"] = source_entry["Source"]
+            else:
+                self.hass.data.pop("ags_media_player_source_id", None)
+                self.hass.data["ags_media_player_source"] = content_id
             await update_ags_sensors(self.ags_config, self.hass)
             self._refresh_from_data()
+            if not self._has_active_rooms():
+                _LOGGER.info(
+                    "Stored AGS source %s without selecting it on a speaker because no rooms are active",
+                    content_id,
+                )
+                await self.async_update()
+                return
             target_entity_id = self._get_browse_target_entity_id(
                 include_fallback=False
             ) or self._get_browse_target_entity_id()
@@ -1912,7 +1980,6 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                         "source": content_id,
                     },
                 )
-                self.hass.data["ags_media_player_source"] = content_id
                 await self.async_update()
             return
 
@@ -2168,6 +2235,9 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
         if selected_source:
             return selected_source["Source"]
 
+        if self.ags_status != 'OFF' and not self._has_active_rooms():
+            return self.hass.data.get("ags_media_player_source")
+
         matched_active = find_source_by_name_or_id(ags_data, active_source)
         if matched_active:
             return matched_active["Source"]
@@ -2204,6 +2274,14 @@ class AGSPrimarySpeakerMediaPlayer(MediaPlayerEntity, RestoreEntity):
                 self.hass.data["ags_media_player_source"] = source_entry["Source"]
             else:
                 self.hass.data["ags_media_player_source"] = source
+            self._refresh_from_data()
+            if not self._has_active_rooms():
+                _LOGGER.info(
+                    "Stored AGS source %s without selecting it on a speaker because no rooms are active",
+                    source,
+                )
+                await self.async_update()
+                return
             state_obj = self.hass.states.get("switch.ags_actions")
             actions_enabled = state_obj.state == "on" if state_obj else True
             if actions_enabled:
